@@ -12,6 +12,10 @@ import { randomToken, sha256Hex } from "./auth";
 import { type Env, json, nowISO } from "./env";
 import { readJSON } from "./http";
 import { logEvent } from "./runlog";
+import { Budget, CALLS_PER_INVOCATION } from "./budget";
+import { recordCrash, runUser } from "./run";
+import { alertFor } from "./telegram";
+import { zonedParts } from "./time";
 
 export const OUTLOOK_KIND = "outlook_web";
 export const WRONG_MAILBOX = "This isn't the connected Outlook mailbox";
@@ -125,4 +129,38 @@ export async function ingestOutlook(req: Request, env: Env, afterStore?: (userId
   await env.DB.batch(stmts);
   if (stored && afterStore) afterStore(src.user_id);
   return json({ ok: true, stored, duplicates: good.length - stored, skipped });
+}
+
+/** New rows judged right after they arrive (in the background of the ingest request): at most this many, the rest by the hourly run. */
+export const JUDGE_NOW = 5;
+
+/** Judge up to JUDGE_NOW waiting Outlook rows now. Never throws: a crash is recorded as a run like any other. */
+export async function judgeOutlookNow(env: Env, userId: string, fetchFn?: typeof fetch): Promise<void> {
+  const started = nowISO();
+  // The run plans 2 calls a message and keeps 3 spare (Outlook rows need only the Claude call; the rest may go to alerts).
+  const calls = new Budget(Math.min(CALLS_PER_INVOCATION, 2 * JUDGE_NOW + 4));
+  try {
+    const u = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(userId).first<{ anthropic_key_enc: string | null }>();
+    if (!u?.anthropic_key_enc) return; // nothing can be judged yet; the hourly run says why
+    await runUser(env, userId, { kinds: [OUTLOOK_KIND], budget: JUDGE_NOW, calls, fetchFn, alert: alertFor(env, userId) });
+  } catch (e) {
+    await recordCrash(env, userId, started, e, calls.used);
+  }
+}
+
+const WORKING_DAYS_SILENT = 2;
+export const SILENT_NOTICE = "Outlook hasn't reported for 2 working days: sign in to Outlook in Chrome, or check the FloatBoard extension.";
+
+/**
+ * True when the extension hasn't reported for 2 working days since `since`: the same time of day two working days
+ * (Monday to Friday, as the days fall in `zone`) later has passed. Friday 17:00 -> Tuesday 17:00.
+ */
+export function outlookSilent(since: string, now: Date, zone: string): boolean {
+  const t0 = Date.parse(since);
+  if (!Number.isFinite(t0)) return false;
+  let t = t0;
+  for (let n = 0; n < WORKING_DAYS_SILENT; n++) {
+    do t += 86400e3; while (["Saturday", "Sunday"].includes(zonedParts(new Date(t), zone).weekday));
+  }
+  return now.getTime() > t;
 }

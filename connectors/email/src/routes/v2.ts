@@ -8,7 +8,8 @@ import { recordCrash, runRounds } from "../run";
 import { alertFor } from "../telegram";
 import { LEARNING_PAUSED } from "../learn";
 import { processEvents } from "../events";
-import { DEFAULT_TIME_ZONE, isTimeZone } from "../time";
+import { DEFAULT_TIME_ZONE, isTimeZone, zoneOrDefault } from "../time";
+import { outlookSilent, SILENT_NOTICE } from "../outlook";
 
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -253,6 +254,13 @@ route("GET", "/v2/status", async (_req, env, user) => {
   const { results: bad } = await env.DB.prepare("SELECT kind, address, last_error FROM sources WHERE user_id=? AND enabled=1 AND last_error IS NOT NULL").bind(user.id).all<any>();
   const needs_attention: string[] = bad.map((r) => `${sourceLabel(r)}: ${r.last_error}`);
   if (!u?.anthropic_key_enc) needs_attention.unshift("Add your Claude API key to start reading email.");
+  // The Outlook extension only reports from an open, signed-in Outlook tab: a long silence is worth a line.
+  const { results: outlook } = await env.DB.prepare("SELECT last_run, created FROM sources WHERE user_id=? AND kind='outlook_web' AND enabled=1")
+    .bind(user.id).all<{ last_run: string | null; created: string }>();
+  if (outlook.length) {
+    const zone = zoneOrDefault((await env.DB.prepare("SELECT time_zone FROM settings WHERE user_id=?").bind(user.id).first<{ time_zone: string | null }>())?.time_zone);
+    if (outlook.some((o) => outlookSilent(o.last_run ?? o.created, new Date(), zone))) needs_attention.push(SILENT_NOTICE);
+  }
   // Rejected events and a removed inbox's finished emails are reported for 7 days (then the line clears by itself).
   const REMOVED = "(last_error LIKE 'inbox removed%' OR last_error LIKE 'inbox not connected%')";
   const rejected = await env.DB.prepare(`SELECT COUNT(*) n FROM app_events WHERE user_id=? AND processed=? AND received > ? AND (last_error IS NULL OR NOT ${REMOVED})`)
@@ -302,6 +310,9 @@ route("POST", "/v2/recheck", async (req, env, user) => {
     env.DB.prepare("DELETE FROM judge_attempts WHERE user_id=?").bind(user.id),
     env.DB.prepare("UPDATE sources SET cursor=?, last_error=NULL WHERE user_id=? AND kind='gmail'")
       .bind(JSON.stringify({ after: Math.floor(since / 1000) }), user.id),
+    // Outlook rows are kept 30 days after they were judged: the ones received in the window are judged again.
+    env.DB.prepare("UPDATE outlook_rows SET processed=0, processed_at=NULL WHERE user_id=? AND received > ?").bind(user.id, new Date(since).toISOString()),
+    env.DB.prepare("UPDATE sources SET cursor=NULL WHERE user_id=? AND kind='outlook_web'").bind(user.id),
   ]);
   return json({ ok: true, days });
 });

@@ -13,7 +13,7 @@ import { handleSetup, purgeExpiredSetup } from "./routes/setup";
 import { log, recordCrash, runRounds, type RunOptions } from "./run";
 import { Budget } from "./budget";
 import { alertFor, telegramWebhook } from "./telegram";
-import { ingestOutlook } from "./outlook";
+import { ingestOutlook, judgeOutlookNow } from "./outlook";
 
 async function createUser(req: Request, env: Env): Promise<Response> {
   const rb = await readJSON(req);
@@ -32,7 +32,9 @@ export default {
     }
     if (url.pathname === "/setup" || url.pathname.startsWith("/setup/")) return handleSetup(req, env);
     if (url.pathname === "/telegram/webhook" && req.method === "POST") return telegramWebhook(req, env);
-    if (url.pathname === "/ingest/outlook" && req.method === "POST") return ingestOutlook(req, env);
+    if (url.pathname === "/ingest/outlook" && req.method === "POST") {
+      return ingestOutlook(req, env, (userId) => ctx.waitUntil(judgeOutlookNow(env, userId)));
+    }
     const hook = /^\/hooks\/fathom\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
     if (hook && req.method === "POST") {
       const src = await env.DB.prepare("SELECT id, user_id, hook_secret_enc FROM sources WHERE kind='fathom' AND hook_id=? AND enabled=1")
@@ -109,7 +111,7 @@ export async function runAllUsers(
   }
   let ids: string[];
   try {
-    ids = userIds ?? (await env.DB.prepare("SELECT DISTINCT user_id FROM sources WHERE enabled=1 AND kind='gmail'").all<{ user_id: string }>()).results.map((r) => r.user_id);
+    ids = userIds ?? (await env.DB.prepare("SELECT DISTINCT user_id FROM sources WHERE enabled=1 AND kind IN ('gmail','outlook_web')").all<{ user_id: string }>()).results.map((r) => r.user_id);
   } catch (e) {
     // Without the user list nobody can be read: make that visible (system rows, user_id '') rather than only in the console.
     const msg = `Cron could not list users: ${(e as Error)?.message ?? e}`.slice(0, 500);
