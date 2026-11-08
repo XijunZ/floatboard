@@ -1,0 +1,32 @@
+# Your own deploy config for the engine. Copy to wrangler.local.toml (git ignores it), fill in your values, then use it:
+#   npx wrangler d1 migrations apply floatboard --remote --config wrangler.local.toml
+#   npx wrangler deploy --config wrangler.local.toml
+# It mirrors wrangler.toml; only the values marked below are yours. Placeholders only: never commit the real file.
+# Secrets (ENC_KEY, ADMIN_KEY, TELEGRAM_*) never go here: set them with `npx wrangler secret put NAME`.
+
+name = "floatboard"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# The email-triage skill (src/skills/*.md) is bundled as text.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+# Yours: set to false if you serve the engine only on your own domain (e.g. `--domain engine.example.com`).
+workers_dev = true
+preview_urls = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "floatboard"
+database_id = "00000000-0000-0000-0000-000000000000" # yours: printed by `npx wrangler d1 create floatboard`
+migrations_dir = "migrations"
+
+[triggers]
+crons = ["0 * * * *"]
+
+[observability]
+enabled = true

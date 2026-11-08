@@ -1,0 +1,17 @@
+{
+  "id": "5b0c7d2e-1f43-4a8e-9a51-3c9e2f6d8b10",
+  "kind": "draft",
+  "source_key": { "message_id": "<CAF1x2y3z@mail.gmail.com>", "sent_at": "2026-11-07T10:00:00.000Z" },
+  "title": "",
+  "why": null,
+  "due": null,
+  "has_time": false,
+  "group": null,
+  "importance": 1,
+  "source_label": "me@gmail.com",
+  "link": "https://mail.google.com/mail/u/me@gmail.com/#drafts?compose=r-1234567890123456789",
+  "summary": null,
+  "task_ref": "9f2a6c1e-8d4b-4f0a-b7e3-2c5d9a1f6e48",
+  "learned": null,
+  "provenance": { "model": "claude-sonnet-5-5", "skill_version": "3fa1c09b7d2e", "created": "2026-11-08T09:15:02.481Z" }
+}

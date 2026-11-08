@@ -1,0 +1,22 @@
+name = "floatboard"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# The email-triage skill (src/skills/*.md) is bundled as text.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "floatboard"
+database_id = "00000000-0000-0000-0000-000000000000" # set by `wrangler d1 create floatboard`
+migrations_dir = "migrations"
+
+[triggers]
+crons = ["0 * * * *"]
+
+[observability]
+enabled = true

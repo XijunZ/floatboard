@@ -1,0 +1,21 @@
+{
+  "settings_version": 3,
+  "schema": [
+    { "key": "group_notes", "label": "What each group means", "kind": "groupNotes", "help": "Claude uses these to put new tasks in the right group." },
+    { "key": "my_rules", "label": "Your own rules", "kind": "longtext", "help": "Plain words, one per line. These override the shared email skill." },
+    { "key": "learned", "label": "What FloatBoard has learned about you", "kind": "longtext", "help": "Built from your corrections. You can edit it." },
+    { "key": "ignore_senders", "label": "Always ignore", "kind": "list", "help": "Addresses or @domains, one per line." },
+    { "key": "allow_senders", "label": "Always include", "kind": "list", "help": "Addresses or @domains that are always read, even from tabs that are normally skipped." },
+    { "key": "unread_only", "label": "Only unread emails become tasks", "kind": "bool" },
+    { "key": "mark_read_on_done", "label": "Mark the email read when I finish its task", "kind": "bool" },
+    { "key": "ai_footer", "label": "End reply drafts with \"Assisted by AI\"", "kind": "bool", "help": "Adds an italic Assisted by AI line at the end of every reply draft." },
+    { "key": "alerts_on", "label": "Send critical tasks to Telegram", "kind": "bool" },
+    { "key": "critical_hours", "label": "Critical means due within (hours)", "kind": "int" },
+    { "key": "learn_at", "label": "Learn from my corrections every", "kind": "choice", "options": ["50", "100"], "help": "Number of corrections before your learned preferences are updated." }
+  ],
+  "needs_attention": ["me@example.com isn't connected — 2 finished emails weren't marked read. Reconnect it in the setup page."],
+  "waiting": 0,
+  "last_run_ok": "2026-11-08T10:00:00.000Z",
+  "last_run_error": null,
+  "oldest_unprocessed_event": null
+}

@@ -1,0 +1,6 @@
+# Secrets the engine needs (set with `npx wrangler secret put NAME`; see README.md).
+ENC_KEY=
+ADMIN_KEY=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_BOT_NAME=
+TELEGRAM_WEBHOOK_SECRET=

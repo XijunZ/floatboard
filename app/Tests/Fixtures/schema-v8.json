@@ -1,0 +1,140 @@
+[
+ [
+  "index",
+  "activity_trace",
+  "activity",
+  "CREATE INDEX activity_trace ON activity(trace)"
+ ],
+ [
+  "index",
+  "cards_external_id",
+  "cards",
+  "CREATE INDEX cards_external_id ON cards(external_id)"
+ ],
+ [
+  "index",
+  "cards_source_key",
+  "cards",
+  "CREATE UNIQUE INDEX cards_source_key ON cards(connector, source_mid, source_sent)\n    WHERE source_mid IS NOT NULL"
+ ],
+ [
+  "index",
+  "events_card",
+  "events",
+  "CREATE INDEX events_card ON events(card_id)"
+ ],
+ [
+  "index",
+  "events_uuid",
+  "events",
+  "CREATE UNIQUE INDEX events_uuid ON events(uuid)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_areas_1",
+  "areas",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_connector_archive_1",
+  "connector_archive",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_connectors_1",
+  "connectors",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_corrections_1",
+  "corrections",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_meta_1",
+  "meta",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_module_applied_1",
+  "module_applied",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_outbox_1",
+  "outbox",
+  null
+ ],
+ [
+  "table",
+  "activity",
+  "activity",
+  "CREATE TABLE activity(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    at REAL NOT NULL,\n    component TEXT NOT NULL,\n    level TEXT NOT NULL,\n    message TEXT NOT NULL,\n    detail TEXT,\n    trace TEXT,\n    seen INTEGER NOT NULL DEFAULT 0\n)"
+ ],
+ [
+  "table",
+  "areas",
+  "areas",
+  "CREATE TABLE areas(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    name TEXT NOT NULL UNIQUE COLLATE NOCASE,\n    color TEXT NOT NULL,\n    position REAL NOT NULL\n)"
+ ],
+ [
+  "table",
+  "cards",
+  "cards",
+  "CREATE TABLE cards(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    title TEXT NOT NULL,\n    notes TEXT NOT NULL DEFAULT '',\n    area TEXT NOT NULL,\n    importance INTEGER NOT NULL DEFAULT 1,\n    due REAL,\n    status TEXT NOT NULL,\n    created REAL NOT NULL,\n    started REAL,\n    done REAL,\n    updated REAL,\n    deleted INTEGER NOT NULL DEFAULT 0\n, link TEXT NOT NULL DEFAULT '', gcal_account TEXT NOT NULL DEFAULT '', gcal_event TEXT NOT NULL DEFAULT '', gcal_link TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', external_id TEXT NOT NULL DEFAULT '', source_link TEXT NOT NULL DEFAULT '', source_meta TEXT NOT NULL DEFAULT '{}', imported_at REAL, source_mid TEXT, source_sent TEXT, withdrawn INTEGER NOT NULL DEFAULT 0, ai_summary TEXT NOT NULL DEFAULT '', connector TEXT NOT NULL DEFAULT '', proposal_json TEXT NOT NULL DEFAULT '', reply_draft_state TEXT, reply_draft_link TEXT NOT NULL DEFAULT '', reply_draft_error TEXT NOT NULL DEFAULT '', reply_draft_request TEXT NOT NULL DEFAULT '', reply_draft_sent_at REAL)"
+ ],
+ [
+  "table",
+  "connector_archive",
+  "connector_archive",
+  "CREATE TABLE connector_archive(\n    id TEXT NOT NULL, removed_at REAL NOT NULL, name TEXT, base_url TEXT, settings_json TEXT,\n    settings_version INTEGER, restored_at REAL, PRIMARY KEY(id, removed_at)\n)"
+ ],
+ [
+  "table",
+  "connectors",
+  "connectors",
+  "CREATE TABLE connectors(\n    id TEXT PRIMARY KEY, name TEXT, base_url TEXT, capabilities_json TEXT, cursor TEXT,\n    settings_json TEXT, settings_version INTEGER DEFAULT 0, engine_settings_version INTEGER DEFAULT 0,\n    last_ok REAL, unreachable_since REAL\n, status_json TEXT NOT NULL DEFAULT '{}')"
+ ],
+ [
+  "table",
+  "corrections",
+  "corrections",
+  "CREATE TABLE corrections(\n    uuid TEXT PRIMARY KEY, connector TEXT, source_mid TEXT, source_sent TEXT,\n    proposed_json TEXT, verdict TEXT, detail TEXT, at REAL\n)"
+ ],
+ [
+  "table",
+  "events",
+  "events",
+  "CREATE TABLE events(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    card_id INTEGER NOT NULL REFERENCES cards(id),\n    at REAL NOT NULL,\n    kind TEXT NOT NULL,\n    from_status TEXT,\n    to_status TEXT\n, actor TEXT NOT NULL DEFAULT 'user', uuid TEXT)"
+ ],
+ [
+  "table",
+  "meta",
+  "meta",
+  "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)"
+ ],
+ [
+  "table",
+  "module_applied",
+  "module_applied",
+  "CREATE TABLE module_applied(external_id TEXT PRIMARY KEY, at REAL NOT NULL)"
+ ],
+ [
+  "table",
+  "outbox",
+  "outbox",
+  "CREATE TABLE outbox(\n    uuid TEXT PRIMARY KEY, connector TEXT, kind TEXT, payload_json TEXT, created REAL,\n    attempts INTEGER DEFAULT 0, next_try REAL, last_error TEXT, sent REAL\n, detached INTEGER NOT NULL DEFAULT 0, detach_reason TEXT NOT NULL DEFAULT '')"
+ ],
+ [
+  "table",
+  "sqlite_sequence",
+  "sqlite_sequence",
+  "CREATE TABLE sqlite_sequence(name,seq)"
+ ]
+]
