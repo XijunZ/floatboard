@@ -27,6 +27,7 @@ export const DRAFT_ERRORS = {
   claude: "Claude couldn't write it",
   unreadable: "The request couldn't be read",
   unreachable: "Gmail couldn't be reached",
+  gmailOnly: "Draft reply works for Gmail emails only for now",
 } as const;
 
 export type DraftRequest = { source_mid: string; source_sent: string | null; item_id: string | null; notes: string; request_id: string };
@@ -98,6 +99,8 @@ async function makeDraft(c: Ctx, req: DraftRequest): Promise<Outcome & { sourceI
   const cols = "source_id";
   const item = (req.item_id ? await env.DB.prepare(`SELECT ${cols} FROM items WHERE id=? AND user_id=? AND kind<>'draft'`).bind(req.item_id, userId).first<{ source_id: string | null }>() : null)
     ?? await env.DB.prepare(`SELECT ${cols} FROM items WHERE user_id=? AND message_id=? AND kind='action' LIMIT 1`).bind(userId, req.source_mid).first<{ source_id: string | null }>();
+  // Outlook emails (read by the Chrome extension) can't be replied to from here: nothing is ever written to Outlook.
+  if (req.source_mid.startsWith("owa:")) return { error: DRAFT_ERRORS.gmailOnly, sourceId: item?.source_id ?? undefined };
   if (!item) return { error: DRAFT_ERRORS.gone };
   if (!item.source_id) return { error: DRAFT_ERRORS.noInbox };
   const sourceId = item.source_id;

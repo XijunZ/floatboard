@@ -39,22 +39,25 @@ export function callsNeeded(inboxes: number): number { return Math.min(inboxes, 
 /**
  * A text message from Telegram that might be a "missed" report. A message from a linked chat is stored in
  * telegram_inbox first (once per update_id), then processed; if that fails for a transient reason it stays
- * unprocessed and the hourly run retries it. Never throws.
+ * unprocessed and the hourly run retries it. Never throws. `botUser`: the user whose own bot received it (null: the
+ * shared bot); only that user's chat counts then, and replies come from that bot.
  */
 export async function handleChatMessage(env: Env, chatId: string, text: string, updateId: string,
-    chat: { type?: string; fromId?: unknown } = {}): Promise<void> {
+    chat: { type?: string; fromId?: unknown } = {}, botUser: string | null = null): Promise<void> {
   let knownUser = "";
   try {
     if (parseMissed(text) === null && !/^\s*\d{1,2}\s*$/.test(text)) return; // not for us
     // Only a direct chat with the bot, written by the person whose chat it is: never answer about email anywhere else.
     if (chat.type !== "private" || chat.fromId == null || String(chat.fromId) !== chatId) {
       await trace(env, "", updateId, "missed: ignored (not a direct chat from the linked user)", `chat type ${chat.type ?? "?"}`);
-      await sendReply(env, "", updateId, chatId, PRIVATE_ONLY);
+      await sendReply(env, "", updateId, chatId, PRIVATE_ONLY, undefined, botUser);
       return;
     }
-    const u = await env.DB.prepare("SELECT id FROM users WHERE telegram_chat_id=?").bind(chatId).first<{ id: string }>();
+    const u = await (botUser
+      ? env.DB.prepare("SELECT id FROM users WHERE id=? AND telegram_chat_id=?").bind(botUser, chatId)
+      : env.DB.prepare("SELECT id FROM users WHERE telegram_chat_id=? AND tg_bot_token_enc IS NULL").bind(chatId)).first<{ id: string }>();
     if (!u) {
-      await sendReply(env, "", updateId, chatId, NOT_LINKED);
+      await sendReply(env, "", updateId, chatId, NOT_LINKED, undefined, botUser);
       await trace(env, "", updateId, "missed: chat not linked");
       return;
     }
@@ -126,11 +129,12 @@ export async function trace(env: Env, userId: string, updateId: string, decision
   } catch (e) { console.warn("missed trace failed:", (e as Error).message); }
 }
 
-/** Send a reply; a failure is recorded and returned as an error string (never thrown). */
-async function sendReply(env: Env, userId: string, updateId: string, chatId: string, t: string, calls?: Budget): Promise<string | null> {
+/** Send a reply from `userId`'s bot (or `botUser`'s when the user is unknown); a failure is recorded and returned as an error string (never thrown). */
+async function sendReply(env: Env, userId: string, updateId: string, chatId: string, t: string, calls?: Budget,
+    botUser: string | null = null): Promise<string | null> {
   try {
     calls?.take(1);
-    await tgSend(env, chatId, t);
+    await tgSend(env, chatId, t, userId || botUser);
     return null;
   } catch (e) {
     if (e instanceof BudgetExhausted) throw e;

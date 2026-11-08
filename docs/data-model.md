@@ -90,7 +90,7 @@ All paths come from `LocalData` (`app/Sources/FloatBoardCore/LocalData.swift`). 
 |---|---|---|---|---|---|---|---|
 | D1 database `floatboard` | Your Cloudflare account | Engine working state per user: inboxes, proposals (`items`), events from the app, a versioned **copy** of your settings, corrections for learning, run logs, setup sessions (section 3). | The engine for its working state; **a copy** for settings and corrections (the app holds the truth). | Yes | `npx wrangler d1 create floatboard`, then `migrations apply`. | Proposals down to the app; events and settings up from it. | Cloudflare D1 point-in-time restore. Nothing user-authored lives only here. |
 | Worker secrets | Worker settings in Cloudflare | `ENC_KEY` (encrypts stored tokens and keys), `ADMIN_KEY`, optional `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME`, `TELEGRAM_WEBHOOK_SECRET`. | You | Yes (secrets) | `npx wrangler secret put NAME`. | None | Your password manager (at least `ADMIN_KEY`). Losing `ENC_KEY` makes stored tokens unreadable: reconnect inboxes. |
-| Per-user secrets in D1 | `users`, `sources`, `google_clients` columns ending `_enc` | Claude key, Gmail refresh tokens, Google client secret, Fathom key and webhook secret, all AES-GCM encrypted with `ENC_KEY`. | The engine | Yes (secrets) | The engine's `/setup` page. | Never leave the engine. | With the D1 database. |
+| Per-user secrets in D1 | `users`, `sources`, `google_clients` columns ending `_enc` | Claude key, Gmail refresh tokens, Google client secret, Fathom key and webhook secret, the user's own Telegram bot token, all AES-GCM encrypted with `ENC_KEY` (the own bot's webhook secret is kept only as a SHA-256 hash). | The engine | Yes (secrets) | The engine's `/setup` page. | Never leave the engine. | With the D1 database. |
 | Deploy config | `connectors/email/wrangler.local.toml` on the deployer's machine (from the `.example`) | Your real `database_id`, `workers_dev` choice. | You | Yes (account ids) | You, by copying the template. | Used by `wrangler ... --config wrangler.local.toml`. | Your own |
 
 ---
@@ -206,8 +206,9 @@ can serve several people; each person's data is separate). `meeting_tasks` (0001
 
 | Entity | Table | Meaning | Key fields |
 |---|---|---|---|
-| **User** | `users` | One person using this engine. | `id`, `name`, `key_hash` (sha256 of the user key), `anthropic_key_enc`, `telegram_chat_id`, `link_code` (one-time Telegram link), `created`. |
-| **Source (inbox)** | `sources` | A connected Gmail inbox or Fathom webhook. | `id`, `user_id`, `kind` (gmail / fathom), `address`, `refresh_enc`, `client_id` + `client_secret_enc` (older Desktop client), `fathom_key_enc`, `hook_id`, `hook_secret_enc`, `enabled`, `cursor` (read position), `last_run`, `last_error`. Unique (`user_id`, `kind`, `address`). |
+| **User** | `users` | One person using this engine. | `id`, `name`, `key_hash` (sha256 of the user key), `anthropic_key_enc`, `telegram_chat_id`, `link_code` (one-time Telegram link, for the bot the user links through), own Telegram bot (optional): `tg_bot_token_enc`, `tg_bot_name` (its @username), `tg_hook_id` (its webhook path `/telegram/webhook/u/<tg_hook_id>`), `tg_hook_secret_hash` (SHA-256 of its webhook secret); `created`. |
+| **Source (inbox)** | `sources` | A connected Gmail inbox, Fathom webhook or Outlook on the web (Chrome extension). | `id`, `user_id`, `kind` (gmail / fathom / outlook_web), `address` (for Outlook: the mailbox, empty until the extension's first send), `refresh_enc`, `client_id` + `client_secret_enc` (older Desktop client), `fathom_key_enc`, `hook_id` (Fathom: the webhook path; Outlook: SHA-256 of the ingest token), `hook_secret_enc`, `enabled`, `cursor` (read position), `last_run` (Outlook: when the extension last reported), `last_error`. Unique (`user_id`, `kind`, `address`). |
+| **Outlook row** | `outlook_rows` | An unread email the Outlook Chrome extension read from the user's Outlook tab, stored once until triage judges it; deleted 30 days after it was judged. | (`user_id`, `row_key` = `owa:<rowId>:<receivedISO>`), `source_id`, `from_name`, `from_addr`, `subject`, `preview` (the list preview: the only text Claude sees), `received` (ISO UTC), `processed`, `processed_at`, `created`. |
 | **Item** | `items` | Something to propose to the app. `kind`: `action` (a task; sent as `task`), `summary` (meeting notes), `withdraw` (a re-checked email is no longer an action), `learned` (new learned preferences), `correction` (a missed email reported via Telegram), `draft` (the answer to a reply-draft request). | `id` (= proposal id), `user_id`, `source_id`, `message_id`, `sent_at` (source key), `kind`, `title`, `why`, `sender`, `subject`, `link`, `snippet`, `due`, `has_time`, `importance`, `group_name`, `task_ref`, `summary`, `critical`, `alerted`, `history_id` (Gmail), `created`. Unique (`user_id`, `message_id`, `kind`). |
 | **Seen message** | `seen` | Emails already judged (so they are not judged twice). | (`user_id`, `message_id`), `at`. |
 | **Feedback** | `feedback` | A correction the engine learns from (copy of the app's correction, with an email excerpt). | `user_id`, `item_id`, `verdict`, `detail`, `subject`, `sender`, `excerpt` (up to ~1,500 chars), `event_uuid` (unique), `consolidated`, `created`. |
@@ -233,10 +234,12 @@ Relationships:
 | User | Settings | 1 to 1 | `settings.user_id` |
 | User | Google client | 1 to 0..1 | `google_clients.user_id` |
 | Source | Item | 1 to many | `items.source_id` (none for `learned`) |
+| Source (Outlook) | Outlook row | 1 to many | `outlook_rows.source_id` |
+| Outlook row | Item | 1 to 0..1 | `items.message_id` = `outlook_rows.row_key` |
 | Item | Feedback | 1 to many | `feedback.item_id` |
 | App event | Feedback | 1 to 0..1 | `feedback.event_uuid` |
 | Run | Run event | 1 to many | `run_events.run_id` |
-| User | Item, Seen message, Feedback, Run, App event, Telegram message, Judge attempt, Draft, Setup session, OAuth state | 1 to many | `user_id` |
+| User | Item, Seen message, Feedback, Run, App event, Telegram message, Judge attempt, Draft, Outlook row, Setup session, OAuth state | 1 to many | `user_id` |
 | User | Missed report (pending) | 1 to 0..1 | `missed_pending.user_id` |
 | Draft | Item (kind `draft`) | 1 to 1 per card | `source_mid` = `items.message_id` |
 
@@ -247,6 +250,7 @@ erDiagram
   USERS ||--o| GOOGLE_CLIENTS : "own Google client"
   USERS ||--o{ ITEMS : "proposals"
   SOURCES ||--o{ ITEMS : "found in"
+  SOURCES ||--o{ OUTLOOK_ROWS : "rows the extension read"
   USERS ||--o{ SEEN : "already judged"
   ITEMS ||--o{ FEEDBACK : "corrected"
   APP_EVENTS ||--o| FEEDBACK : "event_uuid"
@@ -266,6 +270,8 @@ erDiagram
     text key_hash UK
     text anthropic_key_enc
     text telegram_chat_id
+    text tg_bot_token_enc
+    text tg_hook_id UK
   }
   SOURCES {
     text id PK

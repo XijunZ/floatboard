@@ -114,6 +114,12 @@ under "Fathom meeting recaps" on the setup page and paste it into Fathom's webho
 3. On the setup page press **Get Telegram link**, then **Open Telegram and press Start**. Critical actions (urgent, or due
    within 24 hours) now arrive on your phone.
 
+**Your own bot (optional, per user).** Anyone can use their own bot instead of the shared one: create a bot with
+@BotFather (`/newbot`), paste its token under **Telegram alerts** on the setup page and press **Save**, then press
+**Get Telegram link** again. The engine checks the token, stores it encrypted, and points that bot's webhook at
+`<your-engine>/telegram/webhook/u/<random id>` with its own secret, so no command line is needed. Alerts and replies for
+that user then come from their bot. **Remove my bot** goes back to the shared bot (link the chat again).
+
 **Reporting a miss.** If an email needed action but the engine did not turn it into a task, send the bot
 `missed: <a few words from the email>`. No task is created. The engine only *learns* from it, so similar emails are
 caught next time.

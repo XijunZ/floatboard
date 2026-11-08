@@ -39,6 +39,7 @@ export const PRE_RULES: string[] = [
   "Only unread emails are read (when \"Only unread emails\" is on).",
   "Only your Primary tab is read (as Gmail shows it). Newsletters with an unsubscribe link and automated senders are skipped, except messages from a person (e.g. \"… via LinkedIn\") and security or fraud alerts. Your include list always gets through.",
   "In a conversation, only the newest message is judged, together with your latest reply.",
+  "Outlook emails (from the Chrome extension) are judged from the preview Outlook shows in the list, not the whole email.",
   "Meeting-note emails (Fathom, Gemini) are summarised onto the matching meeting task instead of becoming tasks.",
   "Critical = urgent, or due within your alert window; anything overdue by more than a day doesn't alert.",
 ];
@@ -49,6 +50,9 @@ const SYSTEM = `${SKILL.trim()}
 If action_required: title and why as above; due as "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm" (24h) or null; has_time true only when a
 time is given; importance 2 = high, 1 = normal, 0 = low; group exactly as one of the person's group names, or null.
 If not an action, set action_required false and leave the other fields empty/neutral.`;
+
+/** Put before the text of an email the source only shows in part (Outlook's list preview). */
+export const PREVIEW_NOTE = "(This is the preview Outlook shows, not the full email.)";
 
 /** `timeZone`: the user's IANA zone; relative dates and times in the email are read in it. */
 export type ClassifyContext = { groupNotes?: Record<string, string>; myRules?: string; inbox?: string; learned?: string; timeZone?: string };
@@ -74,7 +78,7 @@ To: ${m.to.join(", ")}${m.cc.length ? `\nCc: ${m.cc.join(", ")}` : ""}
 Date: ${m.date}
 Subject: ${m.subject}
 
-${m.text}${m.thread?.myReply ? `
+${m.preview ? `${PREVIEW_NOTE}\n` : ""}${m.text}${m.thread?.myReply ? `
 
 --- The user already replied after this email (${m.thread.myReply.date}): ---
 ${m.thread.myReply.text}` : ""}`;
