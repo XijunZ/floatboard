@@ -134,6 +134,22 @@ describe("POST /ingest/outlook", () => {
     expect((await ingest("wrong", { items: [] })).status).toBe(401);
   });
 
+  it("good_read_with_mailbox_clears_page_problem", async () => {
+    // Outlook was still loading: the extension reported "message list not found". A later good read with no new rows
+    // (just the mailbox) shows the page is fine again, so the warning clears.
+    const u = await outlookUser();
+    expect((await ingest(u.token, { problem: "Outlook page not recognised: Message list not found" })).status).toBe(200);
+    expect((await sourceOf(u.id)).last_error).toContain("Message list not found");
+    expect((await ingest(u.token, { mailbox: "me@corp.com", items: [] })).status).toBe(200);
+    const s = await sourceOf(u.id);
+    expect(s.last_error).toBeNull();
+    expect(s.address).toBe("me@corp.com");
+    // A plain connection test (no mailbox) still proves only the token: a problem stays.
+    expect((await ingest(u.token, { problem: "Outlook page not recognised: Message list not found" })).status).toBe(200);
+    expect((await ingest(u.token, { items: [] })).status).toBe(200);
+    expect((await sourceOf(u.id)).last_error).toContain("Message list not found");
+  });
+
   it("rows_pruned_30_days_after_processing", async () => {
     const u = await outlookUser();
     expect((await ingest(u.token, { mailbox: "me@corp.com", items: [row(1), row(2), row(3)] })).status).toBe(200);

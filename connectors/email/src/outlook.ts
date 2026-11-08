@@ -118,9 +118,9 @@ export async function ingestOutlook(req: Request, env: Env, afterStore?: (userId
       (user_id,source_id,row_key,from_name,from_addr,subject,preview,received,created) VALUES(?,?,?,?,?,?,?,?,?)`)
     .bind(src.user_id, src.id, r.key, r.fromName, r.fromAddr, r.subject, r.preview, r.received, now))) : [];
   const stored = results.filter((r) => r.meta.changes > 0).length;
-  // Rows read means the page and the mailbox are fine again: an earlier problem clears. A connection test (no rows)
-  // proves only the token, so it changes nothing but the time the extension last reported.
-  const stmts = [items.length
+  // Rows read, or a mailbox read from the page, mean the page and the mailbox are fine again: an earlier problem
+  // clears. A connection test (no rows, no mailbox) proves only the token, so it changes nothing but last_run.
+  const stmts = [items.length || mailbox
     ? env.DB.prepare("UPDATE sources SET last_run=?, last_error=NULL WHERE id=?").bind(now, src.id)
     : env.DB.prepare("UPDATE sources SET last_run=? WHERE id=?").bind(now, src.id),
   pruneOutlookRows(env, src.user_id)];
