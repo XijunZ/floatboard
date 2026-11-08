@@ -6,3 +6,5 @@ export type PageReadMessage = { type: "pageRead"; read: PageRead };
 export type ReadRequest = { type: "read" };
 export type ScrubRequest = { type: "scrubSample" };
 export type ScrubResponse = { html: string };
+/** Saved in chrome.storage.local (never synced). */
+export type Settings = { engine: string; token: string };
