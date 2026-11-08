@@ -15,6 +15,13 @@ const KEEP_ATTRS = new Set([
   "aria-multiselectable", "aria-live", "aria-haspopup", "aria-orientation", "aria-readonly", "aria-disabled",
   "aria-current", "aria-busy", "aria-atomic",
 ]);
+// Icon geometry: never personal, and Chrome logs an error for each SVG shape attribute set to a placeholder.
+const SVG_GEOMETRY = new Set([
+  "d", "viewBox", "points", "transform", "x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r", "rx", "ry", "fx", "fy",
+  "offset", "width", "height", "fill", "stroke", "stroke-width", "fill-rule", "clip-rule", "opacity", "stop-color",
+  "stop-opacity", "gradientUnits", "gradientTransform", "preserveAspectRatio", "xmlns", "focusable",
+]);
+const SVG_NS = "http://www.w3.org/2000/svg";
 const ID_ATTRS = new Set(["id", "for", "aria-labelledby", "aria-describedby", "aria-controls", "aria-owns"]);
 const URL_ATTRS = new Set(["href", "src", "action", "srcset", "poster", "data-src"]);
 
@@ -78,6 +85,7 @@ export function scrubSample(doc: Document): string {
       const el = node as Element;
       for (const attr of Array.from(el.attributes)) {
         if (KEEP_ATTRS.has(attr.name)) continue;
+        if (el.namespaceURI === SVG_NS && SVG_GEOMETRY.has(attr.name)) continue;
         el.setAttribute(attr.name, scrubAttr(el, attr.name, attr.value, ph));
       }
     } else if (node.nodeType === 3) {

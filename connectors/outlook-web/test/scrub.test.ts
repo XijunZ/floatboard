@@ -54,4 +54,20 @@ describe("scrubSample", () => {
     expect(b.mailbox).toMatch(EMAIL);
     expect(new Set(b.rows.map((r) => r.rowId)).size).toBe(b.rows.length);
   });
+  it("scrub_keeps_svg_geometry", () => {
+    // Icons hold no personal data; replacing their shape attributes made Chrome log "Expected moveto path command".
+    const html = `<html><body><svg viewBox="0 0 20 20" aria-label="Casey Reader"><title>Casey Reader</title>
+      <defs><linearGradient id="g1" x1="0" x2="1" y1="0" y2="1"><stop offset="0.5" stop-color="#fff"/></linearGradient></defs>
+      <path d="M10 2a8 8 0 1 0 0 16" fill="url(#g1)" transform="rotate(45)"/><circle cx="5" cy="5" r="2"/></svg></body></html>`;
+    const doc = docFrom(scrubSample(docFrom(html)));
+    expect(doc.querySelector("svg")!.getAttribute("viewBox")).toBe("0 0 20 20");
+    expect(doc.querySelector("path")!.getAttribute("d")).toBe("M10 2a8 8 0 1 0 0 16");
+    expect(doc.querySelector("path")!.getAttribute("transform")).toBe("rotate(45)");
+    const g = doc.querySelector("linearGradient")!;
+    expect([g.getAttribute("x1"), g.getAttribute("x2"), g.getAttribute("y1"), g.getAttribute("y2")]).toEqual(["0", "1", "0", "1"]);
+    expect(doc.querySelector("stop")!.getAttribute("offset")).toBe("0.5");
+    expect(doc.querySelector("circle")!.getAttribute("r")).toBe("2");
+    // Names on an icon are still scrubbed.
+    expect(doc.documentElement.outerHTML).not.toContain("Casey");
+  });
 });
