@@ -36,6 +36,7 @@ type State = {
   acked: Record<string, string>; // key -> acknowledged at (ISO)
   cutoff?: string; // set on the first run: rows received before it are never taken
   mailbox?: string; // the connected mailbox, set by the first acknowledged send
+  seenMailbox?: string; // a mailbox the page showed before one was connected: told to the engine even without new rows
   refused: string[]; // mailboxes the engine refused
   wrongMailbox?: string;
   failures: number;
@@ -85,6 +86,7 @@ export class Queue {
         s.wrongMailbox = undefined;
         clearReport(s);
       }
+      if (mb && !s.mailbox) s.seenMailbox = mb;
       pruneAcked(s, now);
       if (!s.cutoff) s.cutoff = new Date(now.getTime() - FIRST_RUN_MS).toISOString();
       const cutoff = s.cutoff;
@@ -107,6 +109,14 @@ export class Queue {
     }, false);
   }
 
+  /**
+   * A mailbox the page showed that the engine hasn't been told yet (Outlook can draw the message list before the
+   * account, so the rows may already have gone without it). Sent once, with no rows, when nothing else is waiting.
+   */
+  mailboxToAnnounce(): Promise<string | undefined> {
+    return this.locked((s) => (!s.mailbox && s.items.length === 0 ? s.seenMailbox : undefined), false);
+  }
+
   /** The engine acknowledged these keys (an empty list acknowledges a connection test). */
   ack(keys: string[], now: Date, mailbox?: string): Promise<void> {
     return this.locked((s) => {
@@ -116,6 +126,7 @@ export class Queue {
       pruneAcked(s, now);
       const mb = lower(mailbox);
       if (mb && !s.mailbox) s.mailbox = mb;
+      if (s.mailbox) s.seenMailbox = undefined;
       s.failures = 0;
       s.nextAttempt = undefined;
       s.engineProblem = undefined;
@@ -139,6 +150,7 @@ export class Queue {
       const mb = lower(mailbox) ?? "";
       s.items = s.items.filter((i) => (i.mailbox ?? "") !== mb);
       if (!s.refused.includes(mb)) s.refused.push(mb);
+      if (s.seenMailbox === mb) s.seenMailbox = undefined;
       s.wrongMailbox = mb;
       s.report = undefined;
       s.reported = reportId({ mailbox: mb, problem: WRONG_MAILBOX });
@@ -286,6 +298,13 @@ export function flush(q: Queue, cfg: IngestConfig, fetchFn: FetchFn, now: () => 
       const result = await postIngest(cfg, { ...(mailbox ? { mailbox } : {}), items: batch.map((b) => b.row) }, fetchFn);
       if (result === "ok") await q.ack(batch.map((b) => b.key), now(), mailbox);
       else if (result === "wrongMailbox") await q.refuse(mailbox);
+      else return q.fail(now(), result === "rejected" ? KEY_REJECTED : ENGINE_UNREACHABLE);
+    }
+    const announce = await q.mailboxToAnnounce();
+    if (announce) {
+      const result = await postIngest(cfg, { mailbox: announce, items: [] }, fetchFn);
+      if (result === "ok") await q.ack([], now(), announce);
+      else if (result === "wrongMailbox") await q.refuse(announce);
       else return q.fail(now(), result === "rejected" ? KEY_REJECTED : ENGINE_UNREACHABLE);
     }
     const report = await q.pendingReport();

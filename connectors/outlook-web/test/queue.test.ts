@@ -180,6 +180,36 @@ describe("Queue", () => {
     expect(badgeFor(s2, "inbox").title).toContain(s2.notice);
   });
 
+  it("mailbox_found_after_rows_is_announced_once", async () => {
+    // Outlook draws the message list before the folder list, so the first read can have rows but no mailbox.
+    const q = new Queue(new FakeStorage());
+    const engine = fakeEngine();
+    await q.add([row("a", MIN)], NOW);
+    await flush(q, CFG, engine.fetchFn, () => NOW);
+    expect(engine.posts).toEqual([{ items: [row("a", MIN)] }]);
+
+    // A later read shows the mailbox but no new rows: the engine is told the mailbox once, with no rows.
+    expect(await q.add([row("a", MIN)], at(MIN), "Me@Example.org")).toBe(0);
+    await flush(q, CFG, engine.fetchFn, () => at(MIN));
+    expect(engine.posts.slice(1)).toEqual([{ mailbox: "me@example.org", items: [] }]);
+    await q.add([row("a", MIN)], at(2 * MIN), "me@example.org");
+    await flush(q, CFG, engine.fetchFn, () => at(2 * MIN));
+    expect(engine.posts.length).toBe(2);
+
+    // From then on it is the connected mailbox: another one is not queued.
+    expect(await q.add([row("x", MIN)], at(3 * MIN), "someone.else@example.org")).toBe(0);
+
+    // If the engine refuses the announced mailbox (409), the badge says why and it isn't announced again.
+    const q2 = new Queue(new FakeStorage());
+    const refusing = fakeEngine({ status: 409 });
+    await q2.add([], NOW, "other@example.org");
+    await flush(q2, CFG, refusing.fetchFn, () => NOW);
+    expect(refusing.posts).toEqual([{ mailbox: "other@example.org", items: [] }]);
+    expect((await q2.status()).problem).toBe("This isn't the connected mailbox");
+    await flush(q2, CFG, refusing.fetchFn, () => at(MIN));
+    expect(refusing.posts.filter((p) => p.items).length).toBe(1);
+  });
+
   it("wrong_mailbox_rows_not_sent", async () => {
     const q = new Queue(new FakeStorage());
     const engine = fakeEngine();
