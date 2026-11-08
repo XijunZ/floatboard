@@ -235,6 +235,9 @@ route("PUT", "/v2/settings", async (req, env, user) => {
   return json({ ok: true, settings_version: version });
 });
 
+/** How a source is named in needs attention: its address; Outlook says so (its address is empty until the first send). */
+const sourceLabel = (r: { kind: string; address: string }) => r.kind === "outlook_web" ? (r.address ? `Outlook ${r.address}` : "Outlook") : r.address;
+
 // ---- status, recheck, export --------------------------------------------------------------------
 
 route("GET", "/v2/status", async (_req, env, user) => {
@@ -247,8 +250,8 @@ route("GET", "/v2/status", async (_req, env, user) => {
   const week = new Date(Date.now() - 7 * 86400e3).toISOString();
   const oldest = await env.DB.prepare("SELECT MIN(received) t FROM app_events WHERE user_id=? AND processed=0").bind(user.id).first<{ t: string | null }>();
   const u = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(user.id).first<{ anthropic_key_enc: string | null }>();
-  const { results: bad } = await env.DB.prepare("SELECT address, last_error FROM sources WHERE user_id=? AND enabled=1 AND last_error IS NOT NULL").bind(user.id).all<any>();
-  const needs_attention: string[] = bad.map((r) => `${r.address}: ${r.last_error}`);
+  const { results: bad } = await env.DB.prepare("SELECT kind, address, last_error FROM sources WHERE user_id=? AND enabled=1 AND last_error IS NOT NULL").bind(user.id).all<any>();
+  const needs_attention: string[] = bad.map((r) => `${sourceLabel(r)}: ${r.last_error}`);
   if (!u?.anthropic_key_enc) needs_attention.unshift("Add your Claude API key to start reading email.");
   // Rejected events and a removed inbox's finished emails are reported for 7 days (then the line clears by itself).
   const REMOVED = "(last_error LIKE 'inbox removed%' OR last_error LIKE 'inbox not connected%')";

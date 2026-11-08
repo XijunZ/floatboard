@@ -1,6 +1,6 @@
 /**
  * The engine's setup page (/setup): secrets and connections only — the user's Google Cloud Web client, Gmail accounts
- * (OAuth web flow), Claude key (write-only), Telegram link, Fathom webhook address — and the "Connect to FloatBoard"
+ * (OAuth web flow), Claude key (write-only), Telegram link, Fathom webhook address, Outlook extension token — and the "Connect to FloatBoard"
  * link. /setup/admin creates invites. Rules, groups and lists are authored in the FloatBoard app, not here.
  *
  * Security: sign-in with the user key (or ADMIN_KEY) → random session id in an HttpOnly, Secure, SameSite=Strict cookie
@@ -12,12 +12,13 @@ import { insertUser, randomToken, sameSecret, sha256Hex, userByKey } from "../au
 import { decrypt, encrypt } from "../crypto";
 import { type Env, nowISO } from "../env";
 import {
-  adminPage, dashboardPage, htmlResponse, messagePage, notFoundPage, redirect, signInPage, type Dashboard, type GmailRow,
+  adminPage, dashboardPage, htmlResponse, messagePage, notFoundPage, redirect, signInPage, type Dashboard, type GmailRow, type OutlookStatus,
 } from "../setup/page";
 import { isWebhookSecret } from "../sources/fathom";
 import { fathomKeyWorks } from "../sources/fathomCatchup";
 import { ensureFathomHook, exchangeGoogleCode, fathomHookURL, googleAuthURL, upsertGmail } from "./sources";
 import { newTelegramLink } from "../telegram";
+import { issueOutlookToken } from "../outlook";
 
 const COOKIE = "fb_setup";
 const NONCE_COOKIE = "fb_oauth";
@@ -143,6 +144,8 @@ async function dashboard(req: Request, env: Env, s: Session, extra: Partial<Dash
       .bind(userId).first()),
     fathomKeySaved: !!(await env.DB.prepare("SELECT 1 FROM sources WHERE user_id=? AND kind='fathom' AND fathom_key_enc IS NOT NULL")
       .bind(userId).first()),
+    outlook: await env.DB.prepare("SELECT address, enabled, last_error, last_run FROM sources WHERE user_id=? AND kind='outlook_web'")
+      .bind(userId).first<OutlookStatus>(),
     ...extra,
   }), status);
 }
@@ -363,6 +366,23 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
       }
       await record(env, req, "fathom_secret", true, userId);
       return dashboard(req, env, s, { notice: "Fathom signing secret saved ✓ Only signed deliveries are accepted now." });
+    }
+    case "/setup/outlook":
+    case "/setup/outlook/rotate": {
+      const rotate = path === "/setup/outlook/rotate";
+      const exists = await env.DB.prepare("SELECT 1 FROM sources WHERE user_id=? AND kind='outlook_web'").bind(userId).first();
+      if (!rotate && exists) {
+        await record(env, req, "outlook_create", false, userId, "already exists");
+        return dashboard(req, env, s, { notice: "Outlook is already set up. Use New token if you need the token again." });
+      }
+      if (rotate && !exists) {
+        await record(env, req, "outlook_rotate", false, userId, "no Outlook source");
+        return dashboard(req, env, s, { error: "Set up Outlook first." }, 400);
+      }
+      const { token } = await issueOutlookToken(env, userId);
+      await record(env, req, rotate ? "outlook_rotate" : "outlook_create", true, userId);
+      return dashboard(req, env, s, { outlookToken: token,
+        notice: rotate ? "New Outlook token made. The old one no longer works: paste this one in the extension's options." : "Outlook connection created." });
     }
     case "/setup/fathom": {
       await ensureFathomHook(env, req, userId);

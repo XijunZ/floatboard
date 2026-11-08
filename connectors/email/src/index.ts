@@ -13,6 +13,7 @@ import { handleSetup, purgeExpiredSetup } from "./routes/setup";
 import { log, recordCrash, runRounds, type RunOptions } from "./run";
 import { Budget } from "./budget";
 import { alertFor, telegramWebhook } from "./telegram";
+import { ingestOutlook } from "./outlook";
 
 async function createUser(req: Request, env: Env): Promise<Response> {
   const rb = await readJSON(req);
@@ -31,6 +32,7 @@ export default {
     }
     if (url.pathname === "/setup" || url.pathname.startsWith("/setup/")) return handleSetup(req, env);
     if (url.pathname === "/telegram/webhook" && req.method === "POST") return telegramWebhook(req, env);
+    if (url.pathname === "/ingest/outlook" && req.method === "POST") return ingestOutlook(req, env);
     const hook = /^\/hooks\/fathom\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
     if (hook && req.method === "POST") {
       const src = await env.DB.prepare("SELECT id, user_id, hook_secret_enc FROM sources WHERE kind='fathom' AND hook_id=? AND enabled=1")
