@@ -31,7 +31,7 @@ calling Outlook's internal web services with the user's session; sending email c
 - The only connection to Outlook is this extension, reading the page DOM. No calls to Outlook's internal services.
 - Never change Outlook: no clicks, no opening messages, no scrolling, no read-state change. The extension never opens a
   sign-in page and never sees or stores passwords or MFA codes; it reads only when a signed-in inbox is on screen.
-- Host permissions: `https://outlook.office.com/*`, `https://outlook.office365.com/*`, `https://outlook.live.com/*`.
+- Host permissions: `https://outlook.office.com/*`, `https://outlook.office365.com/*`, `https://outlook.live.com/*`, `https://outlook.cloud.microsoft/*`.
   The engine address is an `optional_host_permissions` runtime grant made from the options page. Nothing user-specific
   (engine address, names, mailbox) in the manifest or repo.
 - Ingest auth: an ingest-only token (not the user key), sent as `Authorization: Bearer <token>`. It can only add Outlook

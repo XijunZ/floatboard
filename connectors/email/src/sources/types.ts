@@ -18,6 +18,10 @@ export type Message = {
   historyId?: string;
   /** Conversation context (Gmail): a newer message in the thread makes this one stale; the user's own later reply is shown to Claude. */
   thread?: { superseded: boolean; myReply?: { date: string; text: string } };
+  /** The sender's display name when the source gives it apart from `from` (Outlook): ignore/allow lists match it too. */
+  fromName?: string;
+  /** `text` is only the preview the mail list shows (Outlook), not the whole email. */
+  preview?: boolean;
 };
 
 /** Something odd the source worked around; the run records it in the run log (trace = messageId). */
@@ -27,6 +31,8 @@ export interface Source {
   /** Read one message again by its provider id (used to retry a message Claude could not judge). */
   fetchFull?(id: string): Promise<Message>;
   fetchBatch(cursor: string | null, limit: number): Promise<{ messages: Message[]; cursor: string | null; done: boolean; notes?: SourceNote[] }>;
+  /** Called once the run has stored its decision for a message (Outlook marks the row processed). */
+  settled?(messageId: string): Promise<void>;
 }
 
 export class SourceAuthError extends Error {}

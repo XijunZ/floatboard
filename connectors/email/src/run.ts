@@ -11,6 +11,8 @@ import { processEvents } from "./events";
 import { pendingCorrections } from "./learn";
 import { processRecap } from "./recap";
 import { GmailSource } from "./sources/gmail";
+import { OutlookSource } from "./sources/outlook";
+import { pruneOutlookRows } from "./outlook";
 import { DEFAULT_TIME_ZONE, zonedParts, zoneOrDefault } from "./time";
 import { type Message, type Source, SourceAuthError, type SourceRow } from "./sources/types";
 
@@ -25,7 +27,13 @@ export type RunOptions = {
   fetchFn?: typeof fetch;                      // tests inject a fake Claude API
   alert?: (item: AlertItem) => Promise<void>;  // Telegram
   lookbackDays?: number;                       // first-run lookback (default 7)
+  /** Only these source kinds, and only the reading part of a run (no app events, no Telegram retries): used to judge
+   *  Outlook rows right after they arrive. Default: every kind the run reads, and everything else a run does. */
+  kinds?: string[];
 };
+
+/** Source kinds the triage run reads. */
+export const TRIAGE_KINDS = ["gmail", "outlook_web"];
 
 export type RunStats = { fetched: number; skippedSeen: number; dropped: number; classified: number; actions: number;
   recaps: number; noAction: number; alerts: number; errors: number };
@@ -62,7 +70,7 @@ export function isCritical(a: Action, now: Date, hours: number, zone: string = D
 }
 
 /**
- * One pass for one user: read new messages across their enabled Gmail sources, filter, classify /
+ * One pass for one user: read new messages across their enabled Gmail and Outlook sources, filter, classify /
  * summarise, store results, alert on critical actions. Never spends more outgoing calls than `opts.calls`
  * allows: a page is only fetched if every message on it can be finished, so nothing is skipped or lost.
  * Every run records statistics and a per-message decision trace (runs / run_events).
@@ -90,12 +98,14 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
       env.DB.prepare("DELETE FROM runs WHERE user_id=? AND started < ?").bind(userId, month),
       // Rejected app events are reported for 7 days and kept for 30 (processed and waiting ones are never pruned here).
       env.DB.prepare("DELETE FROM app_events WHERE user_id=? AND processed=2 AND received < ?").bind(userId, month),
+      pruneOutlookRows(env, userId),
     ]);
     log("run_end", { runId, userId, processed, stopped, error, stats, calls: calls.used - callsAtStart, ms: Date.now() - t0 });
   };
 
   // Telegram "missed:" reports that couldn't be processed when they arrived (needs no Claude key).
-  const retried = await retryTelegramInbox(env, userId, calls);
+  const full = !opts.kinds;
+  const retried = full ? await retryTelegramInbox(env, userId, calls) : 0;
   if (retried) log("telegram_inbox_retried", { runId, userId, retried });
   const user = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(userId).first<{ anthropic_key_enc: string | null }>();
   if (!user?.anthropic_key_enc) {
@@ -113,12 +123,15 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   const alertsOn = !!(s?.alerts_on ?? 1);
   const timeZone = zoneOrDefault(s?.time_zone);
   // Least recently read first, so one inbox's backlog can't starve another.
-  const { results: rows } = await env.DB.prepare(`SELECT * FROM sources WHERE user_id=? AND kind='gmail' AND enabled=1
+  const kinds = (opts.kinds ?? TRIAGE_KINDS).filter((k) => TRIAGE_KINDS.includes(k));
+  const { results: rows } = await env.DB.prepare(`SELECT * FROM sources WHERE user_id=? AND kind IN (SELECT value FROM json_each(?)) AND enabled=1
       ORDER BY COALESCE(last_run, '') ASC, created ASC`)
-    .bind(userId).all<SourceRow>();
-  const me = rows.map((r) => r.address.toLowerCase());
+    .bind(userId, JSON.stringify(kinds)).all<SourceRow>();
+  const me = rows.map((r) => r.address.toLowerCase()).filter(Boolean);
+  /** How a source is named in the run log and to Claude ("Received in:"); an Outlook mailbox is unknown until its first send. */
+  const labelOf = (r: SourceRow) => r.address || (r.kind === "outlook_web" ? "Outlook" : "");
   // App events first (mark read, corrections); learning runs at the end of processEvents, at most once per run.
-  if ((await processEvents(env, userId, calls, opts.fetchFn, runId)).learned) ev({ decision: "learned from your corrections" });
+  if (full && (await processEvents(env, userId, calls, opts.fetchFn, runId)).learned) ev({ decision: "learned from your corrections" });
   const learned: string = (await env.DB.prepare("SELECT learned FROM settings WHERE user_id=?").bind(userId).first<{ learned: string }>())?.learned ?? "";
   const fb: FeedbackExample[] = await pendingCorrections(env, userId);
 
@@ -182,7 +195,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
       stats.dropped++;
       const why = unreadOnly && !m.labels.includes("UNREAD") ? "already read" : m.labels.some((l) => ["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_FORUMS"].includes(l)) ? "bulk category"
         : m.headers["list-unsubscribe"] ? "newsletter (unsubscribe link)" : rules.ignore.length && rules.ignore.some((r: string) =>
-          senderAddress(m.from).endsWith(r.toLowerCase())) ? "on your ignore list" : "automated sender";
+          senderAddress(m.from).endsWith(r.toLowerCase()) || (m.fromName ?? "").trim().toLowerCase() === r.toLowerCase()) ? "on your ignore list" : "automated sender";
       ev({ ...base, decision: `dropped: ${why}` });
     }
     if (route === "recap") {
@@ -253,6 +266,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   const sources = new Map<string, Source>();
   const sourceOf = (row: SourceRow) => {
     if (!sources.has(row.id)) sources.set(row.id, opts.sourceFor ? opts.sourceFor(row)
+      : row.kind === "outlook_web" ? new OutlookSource(env, row)
       : new GmailSource(env, row, calls.wrap(), opts.lookbackDays ?? 7, [...DEFAULT_RECAP_SENDERS, ...rules.allow], unreadOnly));
     return sources.get(row.id)!;
   };
@@ -272,13 +286,13 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
           if (isBudgetStop(e)) throw e;
           if (e instanceof SourceAuthError) break; // reconnect needed: the normal page read reports it
           const n = await bumpAttempt(w.message_id, `couldn't read the message again: ${(e as Error).message}`, w.subject ?? "", w.link ?? "", null, null, w.kind);
-          ev({ source: row.address, subject: w.subject ?? "", decision: n >= MAX_JUDGE_TRIES ? `couldn't judge (${MAX_JUDGE_TRIES} tries)` : `couldn't judge (try ${n} of ${MAX_JUDGE_TRIES}); will retry`,
+          ev({ source: labelOf(row), subject: w.subject ?? "", decision: n >= MAX_JUDGE_TRIES ? `couldn't judge (${MAX_JUDGE_TRIES} tries)` : `couldn't judge (try ${n} of ${MAX_JUDGE_TRIES}); will retry`,
             detail: `couldn't read the message again: ${(e as Error).message}`, trace: w.message_id });
           if (n >= MAX_JUDGE_TRIES) await env.DB.prepare("INSERT OR IGNORE INTO seen(user_id,message_id,at) VALUES(?,?,?)").bind(userId, w.message_id, nowISO()).run();
           continue;
         }
         stats.fetched++;
-        await handle({ ...m, messageId: w.message_id }, row.address, row.id);
+        await handle({ ...m, messageId: w.message_id }, labelOf(row), row.id);
       }
     }
     for (const [index, row] of rows.entries()) {
@@ -292,21 +306,29 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
         const source = sourceOf(row);
         const res = await source.fetchBatch(row.cursor, pageSize);
         stats.fetched += res.messages.length;
-        log("page", { runId, source: row.address, messages: res.messages.length, done: res.done, callsLeft: calls.remaining });
-        for (const n of res.notes ?? []) { stats.errors++; ev({ source: row.address, decision: n.decision, detail: n.detail, trace: n.messageId }); }
-        // A message Claude couldn't judge stays unseen and is retried by id at the start of the next run; the cursor moves on.
-        for (const m of res.messages) { await handle(m, row.address, row.id); processed++; remaining--; }
-        await env.DB.prepare("UPDATE sources SET cursor=?, last_run=?, last_error=NULL WHERE id=?").bind(res.cursor, nowISO(), row.id).run();
+        log("page", { runId, source: labelOf(row), messages: res.messages.length, done: res.done, callsLeft: calls.remaining });
+        for (const n of res.notes ?? []) { stats.errors++; ev({ source: labelOf(row), decision: n.decision, detail: n.detail, trace: n.messageId }); }
+        // A message Claude couldn't judge stays unseen and is retried by id at the start of the next run (Gmail), or read
+        // again on the next sweep (Outlook: its row stays unprocessed); the cursor moves on.
+        for (const m of res.messages) {
+          const settled = await handle(m, labelOf(row), row.id);
+          if (settled && source.settled) await source.settled(m.messageId);
+          processed++; remaining--;
+        }
+        // An Outlook source's last_run and last_error belong to the extension (when it last reported, what it reported).
+        if (row.kind === "outlook_web") await env.DB.prepare("UPDATE sources SET cursor=? WHERE id=?").bind(res.cursor, row.id).run();
+        else await env.DB.prepare("UPDATE sources SET cursor=?, last_run=?, last_error=NULL WHERE id=?").bind(res.cursor, nowISO(), row.id).run();
         if (!res.done) done = false;
       } catch (e) {
         if (isBudgetStop(e)) { done = false; stopped = "call_budget"; break; } // page not saved: redone next run
         if (e instanceof Anthropic.APIError) throw e; // a Claude problem affects every source: stop the run
         if (e instanceof BudgetExhausted) { done = false; stopped = "call_budget"; break; } // page not saved: redone next run
         stats.errors++;
-        const msg = e instanceof SourceAuthError ? e.message : `Couldn't read ${row.address}: ${(e as Error).message}`;
-        ev({ source: row.address, decision: "source error", detail: msg });
-        log("source_error", { runId, source: row.address, error: msg, stack: (e as Error).stack?.slice(0, 500) });
-        await env.DB.prepare("UPDATE sources SET last_error=?, last_run=? WHERE id=?").bind(msg, nowISO(), row.id).run();
+        const msg = e instanceof SourceAuthError ? e.message : `Couldn't read ${labelOf(row)}: ${(e as Error).message}`;
+        ev({ source: labelOf(row), decision: "source error", detail: msg });
+        log("source_error", { runId, source: labelOf(row), error: msg, stack: (e as Error).stack?.slice(0, 500) });
+        if (row.kind === "outlook_web") await env.DB.prepare("UPDATE sources SET last_error=? WHERE id=?").bind(msg, row.id).run();
+        else await env.DB.prepare("UPDATE sources SET last_error=?, last_run=? WHERE id=?").bind(msg, nowISO(), row.id).run();
       }
     }
     if (!done && stopped === "done") stopped = remaining < 1 ? "message_cap" : "more_to_read";

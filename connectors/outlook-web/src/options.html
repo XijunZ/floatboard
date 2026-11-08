@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FloatBoard for Outlook</title>
+<style>
+  body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #1d1d1f; }
+  h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 28px; }
+  label { display: block; margin: 12px 0 4px; font-weight: 600; }
+  input { font: inherit; width: 100%; box-sizing: border-box; padding: 6px 8px; }
+  button { font: inherit; padding: 6px 14px; margin-top: 12px; }
+  .hint { color: #6e6e73; font-size: 13px; }
+  .status { margin-left: 8px; }
+</style>
+</head>
+<body>
+<h1>FloatBoard for Outlook</h1>
+<p class="hint">Reads the unread emails your Outlook inbox shows in Chrome and sends them to your FloatBoard engine.
+It only reads what is on screen without scrolling, usually the newest 20 to 50 emails, and never changes anything in
+Outlook.</p>
+
+<h2>Connection</h2>
+<label for="engine">Engine address</label>
+<input id="engine" type="url" placeholder="https://your-engine.example.workers.dev" autocomplete="off" spellcheck="false">
+<label for="token">Ingest token</label>
+<input id="token" type="password" autocomplete="off" spellcheck="false">
+<p class="hint">From the Outlook section of your engine's setup page. Kept only on this computer.</p>
+<button id="save" type="button">Save</button>
+<button id="test" type="button">Test connection</button><span id="status" class="status"></span>
+
+<h2>Page sample</h2>
+<p class="hint">Saves a copy of the open Outlook page with every name, address, id and message text replaced by
+placeholders, so the page layout can be checked without sharing your email.</p>
+<button id="sample" type="button">Save page sample</button><span id="sampleStatus" class="status"></span>
+
+<script src="options.js"></script>
+</body>
+</html>

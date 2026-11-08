@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "FloatBoard for Outlook",
+  "version": "0.1.0",
+  "description": "Reads unread emails from Outlook on the web so FloatBoard can turn the ones that need action into tasks.",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://outlook.office.com/*",
+    "https://outlook.office365.com/*",
+    "https://outlook.live.com/*",
+    "https://outlook.cloud.microsoft/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://outlook.office.com/*",
+        "https://outlook.office365.com/*",
+        "https://outlook.live.com/*",
+    "https://outlook.cloud.microsoft/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_title": "FloatBoard for Outlook" },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}

@@ -73,6 +73,9 @@ export function messagePage(title: string, message: string, opts: { ok?: boolean
 
 export type GmailRow = { id: string; address: string; enabled: number; last_error: string | null; last_run: string | null };
 
+/** The user's Outlook (Chrome extension) source, if made. */
+export type OutlookStatus = { address: string; enabled: number; last_error: string | null; last_run: string | null };
+
 export type Dashboard = {
   name: string;
   csrf: string;
@@ -84,9 +87,14 @@ export type Dashboard = {
   hasClaudeKey: boolean;
   telegramLinked: boolean;
   telegramURL?: string | null;
+  /** The @username (without @) of the user's own bot, when they saved one. */
+  telegramBot?: string | null;
   fathomURL: string | null;
   fathomSecretSaved?: boolean;
   fathomKeySaved?: boolean;
+  outlook?: OutlookStatus | null;
+  /** The new ingest token, right after it was made (shown this once only). */
+  outlookToken?: string | null;
   notice?: string | null;
   error?: string | null;
 };
@@ -144,6 +152,13 @@ ${d.googleClientId ? `<a class="button" href="${esc(startHref())}">Connect a Gma
 ${d.telegramURL ? `<p><a class="button" href="${esc(d.telegramURL)}">Open Telegram and press Start</a></p><p class="muted">This link works once.</p>` : ""}
 <form method="post" action="/setup/telegram">${csrfField(d.csrf)}<button class="secondary" type="submit">${d.telegramLinked ? "Link a different chat" : "Get Telegram link"}</button></form>
 ${d.telegramLinked ? `<form method="post" action="/setup/telegram/unlink">${csrfField(d.csrf)}<button class="secondary" type="submit">Unlink</button></form>` : ""}
+<p class="muted">Create a bot with @BotFather (/newbot) and paste its token here; alerts then come from your bot instead of the shared one.</p>
+${d.telegramBot ? `<p>Your bot: <strong>@${esc(d.telegramBot)}</strong> <span class="ok">saved ✓</span></p>
+<form method="post" action="/setup/telegram/bot/remove">${csrfField(d.csrf)}<button class="danger" type="submit">Remove my bot</button></form>` : ""}
+<form method="post" action="/setup/telegram/bot">${csrfField(d.csrf)}
+<label for="bot_token">${d.telegramBot ? "Replace with another bot token" : "Your own bot token (optional)"}</label>
+<input type="password" id="bot_token" name="bot_token" autocomplete="off" required>
+<button type="submit">Save</button></form>
 </section>
 
 <section><h2>5. Fathom meeting recaps</h2>
@@ -159,6 +174,10 @@ ${d.fathomURL ? `<p>Paste this private webhook address into Fathom's settings:</
     : `<form method="post" action="/setup/fathom">${csrfField(d.csrf)}<button class="secondary" type="submit">Create webhook address</button></form>`}
 </section>
 
+<section><h2>6. Outlook (Chrome extension)</h2>
+${outlookSection(d)}
+</section>
+
 <section><h2>How emails are judged</h2>
 <p class="muted">Read-only. These are the shared rules Claude follows for everyone, plus the free checks done first. Your own rules in the FloatBoard app take priority.</p>
 <h3>Rules Claude follows</h3>
@@ -172,6 +191,33 @@ ${d.connectLink ? `<p>Opens the FloatBoard app on this Mac and adds this engine 
 <p><a class="button connect" href="${esc(d.connectLink)}">Connect to FloatBoard</a></p>`
     : `<p class="muted">Sign out and sign in again to get the Connect to FloatBoard link.</p>`}
 </section>`);
+}
+
+function outlookSection(d: Dashboard): string {
+  const o = d.outlook;
+  const intro = `<p>For Outlook on the web when your organisation doesn't allow mail access for apps. The FloatBoard Chrome
+extension reads the unread emails your signed-in Outlook tab shows and sends them here; they are judged like Gmail. It never
+changes anything in Outlook.</p>
+<p class="muted">It reads only what Outlook shows without scrolling, usually the newest 20 to 50 emails. On its first run it
+picks up the unread emails from the last 7 days that are on screen; after that, new ones. Keep an Outlook tab open in Chrome:
+if it hasn't reported for 2 working days, FloatBoard tells you.</p>`;
+  if (!o) return `${intro}<form method="post" action="/setup/outlook">${csrfField(d.csrf)}<button class="secondary" type="submit">Set up Outlook</button></form>`;
+  const status = !o.enabled ? `<span class="muted">paused</span>`
+    : o.last_error ? `<span class="bad">needs attention</span> <span class="muted">${esc(o.last_error)}</span>`
+    : o.last_run ? `<span class="ok">connected</span> <span class="muted">last report ${esc(o.last_run.replace("T", " ").slice(0, 16))} UTC</span>`
+    : `<span class="muted">waiting for the extension's first report</span>`;
+  const token = d.outlookToken ? `<p class="notice">Copy this token now. It is shown only once; only a fingerprint of it is kept.</p>
+<label for="outlook_token">Ingest token</label><input type="text" id="outlook_token" readonly value="${esc(d.outlookToken)}" autocomplete="off">` : "";
+  return `${intro}
+<p>Mailbox: ${o.address ? `<strong>${esc(o.address)}</strong>` : `<span class="muted">set by the extension's first send</span>`}</p>
+<p>Status: ${status}</p>
+${token}
+<p>To install it: build the extension (<code>npm install</code> and <code>node build.mjs</code> in
+<code>connectors/outlook-web</code>), then in Chrome open Extensions, turn on Developer mode, choose Load unpacked and pick its
+<code>dist</code> folder. In the extension's options paste this engine address and the token, then press Test connection.</p>
+<p>Engine address: <code>${esc(d.origin)}</code></p>
+<form method="post" action="/setup/outlook/rotate">${csrfField(d.csrf)}<button class="secondary" type="submit">New token</button></form>
+<p class="muted">A new token stops the old one at once. Use it if the token was lost or shared.</p>`;
 }
 
 export function adminPage(d: { csrf: string; invite?: { name: string; link: string } | null; notice?: string | null; error?: string | null }): string {

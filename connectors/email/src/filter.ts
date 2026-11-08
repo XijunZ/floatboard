@@ -25,11 +25,14 @@ const matches = (addr: string, list: string[]) =>
 /** Free, rule-based triage before any AI call. Order matters: allow → recap → ignore → bulk signals. */
 export function prefilter(m: Message, rules: { ignore: string[]; allow: string[]; recapSenders: string[]; unreadOnly?: boolean }): Route {
   const addr = senderAddress(m.from);
-  if (matches(addr, rules.allow)) return "classify";
+  // Outlook may give only a display name, or both: a list entry matches either.
+  const name = m.fromName?.trim().toLowerCase() ?? "";
+  const listed = (list: string[]) => matches(addr, list) || (!!name && matches(name, list));
+  if (listed(rules.allow)) return "classify";
   if (matches(addr, rules.recapSenders)) return "recap";
   if (/^notes:\s/i.test(m.subject) && addr.endsWith("@google.com")) return "recap";
   if (rules.unreadOnly && !m.labels.includes("UNREAD")) return "drop"; // already read: the user has seen it
-  if (matches(addr, rules.ignore)) return "drop";
+  if (listed(rules.ignore)) return "drop";
   if (m.labels.some((l) => BULK_LABELS.includes(l))) return "drop";
   if (RELAYED_PERSON.test(m.from) || SECURITY.test(m.subject)) return "classify";
   if (m.headers["list-unsubscribe"]) return "drop";

@@ -137,7 +137,8 @@ export async function processEvents(env: Env, userId: string, calls: Budget, fet
         if (!(s?.mark_read_on_done ?? 1) || !gid || !src) {
           await finish(e.uuid).run(); processed++;
           await trace(env, userId, runId, e.uuid, "done: nothing to mark read",
-            !gid ? "no Gmail message for this task" : !src ? "inbox not connected" : "mark-read is off", item);
+            !gid ? (item?.link?.startsWith("https://outlook.office.com/") ? "Outlook email: FloatBoard never changes anything in Outlook"
+              : "no Gmail message for this task") : !src ? "inbox not connected" : "mark-read is off", item);
           continue;
         }
         if (await outOfCalls(DONE_CALLS)) break;
