@@ -17,7 +17,7 @@ import {
 import { isWebhookSecret } from "../sources/fathom";
 import { fathomKeyWorks } from "../sources/fathomCatchup";
 import { ensureFathomHook, exchangeGoogleCode, fathomHookURL, googleAuthURL, upsertGmail } from "./sources";
-import { newTelegramLink } from "../telegram";
+import { newTelegramLink, removeUserBot, saveUserBot } from "../telegram";
 import { issueOutlookToken } from "../outlook";
 
 const COOKIE = "fb_setup";
@@ -123,8 +123,8 @@ async function dashboard(req: Request, env: Env, s: Session, extra: Partial<Dash
   const userId = s.user_id!;
   const origin = new URL(req.url).origin;
   const [u, client, gmail] = await Promise.all([
-    env.DB.prepare("SELECT name, anthropic_key_enc, telegram_chat_id FROM users WHERE id=?").bind(userId)
-      .first<{ name: string; anthropic_key_enc: string | null; telegram_chat_id: string | null }>(),
+    env.DB.prepare("SELECT name, anthropic_key_enc, telegram_chat_id, tg_bot_name, tg_bot_token_enc FROM users WHERE id=?").bind(userId)
+      .first<{ name: string; anthropic_key_enc: string | null; telegram_chat_id: string | null; tg_bot_name: string | null; tg_bot_token_enc: string | null }>(),
     env.DB.prepare("SELECT client_id FROM google_clients WHERE user_id=?").bind(userId).first<{ client_id: string }>(),
     env.DB.prepare("SELECT id, address, enabled, last_error, last_run FROM sources WHERE user_id=? AND kind='gmail' ORDER BY created").bind(userId).all<GmailRow>(),
   ]);
@@ -139,7 +139,8 @@ async function dashboard(req: Request, env: Env, s: Session, extra: Partial<Dash
   }
   return htmlResponse(dashboardPage({
     name: u?.name ?? "", csrf: s.csrf, origin, connectLink, googleClientId: client?.client_id ?? null, gmail: gmail.results,
-    hasClaudeKey: !!u?.anthropic_key_enc, telegramLinked: !!u?.telegram_chat_id, fathomURL: await fathomHookURL(env, req, userId),
+    hasClaudeKey: !!u?.anthropic_key_enc, telegramLinked: !!u?.telegram_chat_id,
+    telegramBot: u?.tg_bot_token_enc ? u.tg_bot_name : null, fathomURL: await fathomHookURL(env, req, userId),
     fathomSecretSaved: !!(await env.DB.prepare("SELECT 1 FROM sources WHERE user_id=? AND kind='fathom' AND hook_secret_enc IS NOT NULL")
       .bind(userId).first()),
     fathomKeySaved: !!(await env.DB.prepare("SELECT 1 FROM sources WHERE user_id=? AND kind='fathom' AND fathom_key_enc IS NOT NULL")
@@ -327,6 +328,29 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
       }
       await record(env, req, "telegram_link", true, userId);
       return dashboard(req, env, s, { telegramURL: link });
+    }
+    case "/setup/telegram/bot": {
+      const token = (f.bot_token ?? "").trim();
+      if (!token || token.length > 200) {
+        await record(env, req, "telegram_bot", false, userId, "empty or too long");
+        return dashboard(req, env, s, { error: "Paste the token @BotFather gave you." }, 400);
+      }
+      const r = await saveUserBot(env, userId, token, new URL(req.url).origin);
+      if (!r.ok) {
+        await record(env, req, "telegram_bot", false, userId, r.why);
+        return dashboard(req, env, s, { error: r.error }, r.status);
+      }
+      await record(env, req, "telegram_bot", true, userId, `@${r.username}`);
+      return dashboard(req, env, s, { notice: r.relinked
+        ? `Your bot @${r.username} is saved. Press Get Telegram link and press Start in your bot to link your chat.`
+        : `Your bot @${r.username} is saved again. Your chat stays linked.` });
+    }
+    case "/setup/telegram/bot/remove": {
+      const removed = await removeUserBot(env, userId);
+      await record(env, req, "telegram_bot_remove", removed, userId, removed ? undefined : "no own bot");
+      return dashboard(req, env, s, { notice: removed
+        ? "Your bot is removed. Alerts now come from the shared bot once you link your chat again with Get Telegram link."
+        : "You have no bot of your own saved." });
     }
     case "/setup/fathom/key": {
       const key = (f.fathom_key ?? "").trim();

@@ -87,6 +87,8 @@ export type Dashboard = {
   hasClaudeKey: boolean;
   telegramLinked: boolean;
   telegramURL?: string | null;
+  /** The @username (without @) of the user's own bot, when they saved one. */
+  telegramBot?: string | null;
   fathomURL: string | null;
   fathomSecretSaved?: boolean;
   fathomKeySaved?: boolean;
@@ -150,6 +152,13 @@ ${d.googleClientId ? `<a class="button" href="${esc(startHref())}">Connect a Gma
 ${d.telegramURL ? `<p><a class="button" href="${esc(d.telegramURL)}">Open Telegram and press Start</a></p><p class="muted">This link works once.</p>` : ""}
 <form method="post" action="/setup/telegram">${csrfField(d.csrf)}<button class="secondary" type="submit">${d.telegramLinked ? "Link a different chat" : "Get Telegram link"}</button></form>
 ${d.telegramLinked ? `<form method="post" action="/setup/telegram/unlink">${csrfField(d.csrf)}<button class="secondary" type="submit">Unlink</button></form>` : ""}
+<p class="muted">Create a bot with @BotFather (/newbot) and paste its token here; alerts then come from your bot instead of the shared one.</p>
+${d.telegramBot ? `<p>Your bot: <strong>@${esc(d.telegramBot)}</strong> <span class="ok">saved ✓</span></p>
+<form method="post" action="/setup/telegram/bot/remove">${csrfField(d.csrf)}<button class="danger" type="submit">Remove my bot</button></form>` : ""}
+<form method="post" action="/setup/telegram/bot">${csrfField(d.csrf)}
+<label for="bot_token">${d.telegramBot ? "Replace with another bot token" : "Your own bot token (optional)"}</label>
+<input type="password" id="bot_token" name="bot_token" autocomplete="off" required>
+<button type="submit">Save</button></form>
 </section>
 
 <section><h2>5. Fathom meeting recaps</h2>
