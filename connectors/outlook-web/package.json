@@ -1,0 +1,21 @@
+{
+  "name": "floatboard-outlook-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.7",
+    "@types/jsdom": "30.0.0",
+    "esbuild": "0.28.2",
+    "jsdom": "31.0.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
