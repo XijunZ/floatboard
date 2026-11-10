@@ -37,7 +37,7 @@ struct BannerView: View {
     @EnvironmentObject var ui: UIState
 
     var body: some View {
-        let active = ui.bar.sorted(store.cards.filter { $0.status != .done && !$0.withdrawn }, groupOrder: store.areas.map(\.name))
+        let active = ui.bar.sorted(store.cards.filter { $0.status.onBar && !$0.withdrawn }, groupOrder: store.areas.map(\.name))
         HStack(spacing: 8) {
             Grip()
             let problems = store.healthProblems
@@ -53,7 +53,7 @@ struct BannerView: View {
                 .help("Needs attention — click to open " + (problems.contains(where: \.isAppWide) ? "Activity" : "Connectors") + "\n" + problems.map(\.message).joined(separator: "\n"))
             }
             // Overview of everything open, regardless of the bar's filters.
-            Text(ui.bar.countLabel(store.active))
+            Text(ui.bar.countLabel(store.active.filter { $0.status.onBar }))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .fixedSize()

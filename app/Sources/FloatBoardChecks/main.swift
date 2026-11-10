@@ -63,6 +63,20 @@ MainActor.assumeIsolated {
     }
     store.seedCard(title: "New mail", area: "Personal", importance: .low, source: "email", externalID: "email:newmid")
 
+    // Watch column: tasks waiting on someone else
+    store.add(title: "Waiting on Sam", area: "Personal", importance: .medium, due: nil)
+    if let w = store.cards.first(where: { $0.title == "Waiting on Sam" }) {
+        store.move(w, to: .watch)
+        let moved = store.card(w.id)
+        check(moved?.status == .watch && moved?.done == nil && store.cards(in: .watch).map(\.id) == [w.id]
+              && !store.cards(in: .todo).contains { $0.id == w.id }, "watch_is_its_own_open_column")
+        check(Status.allCases == [.todo, .doing, .watch, .done], "watch_sits_between_doing_and_done")
+        check(!Status.watch.onBar && Status.todo.onBar && Status.doing.onBar && !Status.done.onBar, "watch_stays_off_the_bar")
+        check(Status.watch.next == .done && Status.watch.prev == .doing && Status.doing.next == .done, "watch_arrows")
+        if let m = moved { store.move(m, to: .done) }
+        check(store.card(w.id)?.status == .done && store.card(w.id)?.done != nil, "watch_task_can_be_finished")
+    }
+
     // Outbox and corrections
     @MainActor func outboxRows() -> [(kind: String, payload: [String: String], uuid: String)] {
         let r = (try? store.db.query("SELECT kind, payload_json, uuid FROM outbox ORDER BY created, rowid") { // try?-ok: a failed query makes the check fail

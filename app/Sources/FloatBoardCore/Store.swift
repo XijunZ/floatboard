@@ -83,8 +83,8 @@ public final class Store: ObservableObject {
 
     // MARK: Views of the data
 
-    /// Order: tasks with a due date first (soonest first, To do and Doing alike),
-    /// then Doing, then To do; ties broken by importance, then oldest first.
+    /// Open tasks (To do, Doing, Watch). Order: tasks with a due date first (soonest first),
+    /// then Doing, then the rest; ties broken by importance, then oldest first.
     public var active: [Card] {
         cards.filter { $0.status != .done && !$0.withdrawn }.sorted { a, b in
             switch (a.dueSortKey, b.dueSortKey) {
