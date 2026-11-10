@@ -39,6 +39,14 @@ final class UIState: ObservableObject {
     @Published var searchCommitted = false
     /// Text typed in quick add; kept if the box closes because you clicked elsewhere.
     @Published var quickDraft = ""
+    /// Each board column's sort (column header buttons), by status; a column with none uses the board's order.
+    @Published var columnSorts: [String: ColumnSort] = UIState.loadColumnSorts() {
+        didSet { if let d = try? JSONEncoder().encode(columnSorts) { UserDefaults.standard.set(d, forKey: "columnSorts") } } // try?-ok: a sort that can't be saved just isn't remembered
+    }
+    private static func loadColumnSorts() -> [String: ColumnSort] {
+        guard let d = UserDefaults.standard.data(forKey: "columnSorts") else { return [:] }
+        return (try? JSONDecoder().decode([String: ColumnSort].self, from: d)) ?? [:] // try?-ok: unreadable = default order
+    }
     /// Pinned: the full board stays open when you click into another app.
     @Published var pinned = UserDefaults.standard.bool(forKey: "boardPinned") {
         didSet { UserDefaults.standard.set(pinned, forKey: "boardPinned") }

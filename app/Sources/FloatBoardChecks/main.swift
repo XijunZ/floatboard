@@ -77,6 +77,40 @@ MainActor.assumeIsolated {
         check(store.card(w.id)?.status == .done && store.card(w.id)?.done != nil, "watch_task_can_be_finished")
     }
 
+    // Adding straight into a step
+    store.add(title: "Added doing", area: "Personal", importance: .medium, due: nil, status: .doing)
+    store.add(title: "Added watch", area: "Personal", importance: .medium, due: nil, status: .watch)
+    store.add(title: "Added done", area: "Personal", importance: .medium, due: nil, status: .done)
+    let ad = store.cards.first { $0.title == "Added doing" }, aw = store.cards.first { $0.title == "Added watch" }
+    let ax = store.cards.first { $0.title == "Added done" }
+    check(ad?.status == .doing && ad?.started != nil && aw?.status == .watch && aw?.done == nil
+          && ax?.status == .done && ax?.done != nil, "add_into_any_step")
+    let createdTo = (try? store.db.query("SELECT to_status FROM events WHERE card_id=? AND kind='created'", [ax?.id ?? -1]) { DB.text($0, 0) }) ?? [] // try?-ok: a failed query makes the check fail
+    check(createdTo == ["done"], "add_into_step_logs_that_step")
+
+    // Column sort (same attributes as the bar)
+    do {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        func mk(_ id: Int64, _ imp: Importance, _ due: Date?, _ area: String, _ created: Date) -> Card {
+            Card(id: id, title: "c\(id)", notes: "", area: area, importance: imp, due: due, status: .todo, created: created,
+                 started: nil, done: nil)
+        }
+        let a = mk(1, .low, t0.addingTimeInterval(3600), "B", t0)
+        let b = mk(2, .high, nil, "A", t0.addingTimeInterval(10))
+        let c = mk(3, .medium, t0, "B", t0.addingTimeInterval(20))
+        let base = [a, b, c]
+        let order = ["A", "B"]
+        func ids(_ s: ColumnSort) -> [Int64] { s.apply(base, groupOrder: order).map(\.id) }
+        check(ids(ColumnSort()) == [1, 2, 3], "column_sort_default_keeps_board_order")
+        check(ids(ColumnSort(key: .due, ascending: true)) == [3, 1, 2]
+              && ids(ColumnSort(key: .due, ascending: false)) == [1, 3, 2], "column_sort_due_undated_always_last")
+        check(ids(ColumnSort(key: .importance, ascending: false)) == [2, 3, 1]
+              && ids(ColumnSort(key: .importance, ascending: true)) == [1, 3, 2], "column_sort_importance")
+        check(ids(ColumnSort(key: .added, ascending: false)) == [3, 2, 1], "column_sort_added")
+        check(ids(ColumnSort(key: .group, ascending: true)) == [2, 1, 3], "column_sort_group_ties_keep_board_order")
+        check(SortKey.importance.naturalAscending == false && SortKey.due.naturalAscending, "column_sort_starts_in_bar_direction")
+    }
+
     // Outbox and corrections
     @MainActor func outboxRows() -> [(kind: String, payload: [String: String], uuid: String)] {
         let r = (try? store.db.query("SELECT kind, payload_json, uuid FROM outbox ORDER BY created, rowid") { // try?-ok: a failed query makes the check fail
