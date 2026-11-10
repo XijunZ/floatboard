@@ -39,7 +39,7 @@ struct GuideView: View {
                     icon("calendar.badge.checkmark", "In Google Calendar (shown under the task): click to open the event")
                     icon("video.fill", "Join the Google Meet call")
                     icon("eye", "Move to Watch: waiting on someone else. Watch tasks stay on the board but off the bar; a due date there is when to chase")
-                    icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending; “Default” (due date, then importance) resets it; “Group” keeps each group's tasks together")
+                    icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending. Columns start on Due date (Done on Date finished); ties go by importance, then oldest. Group keeps each group's tasks together, in Groups tab order")
                     icon("plus", "Add row: the first chip picks the step (To do, Doing, Watch or Done) the new task goes into")
                     icon("pin", "Pin the board so it stays open when you click another app")
                     icon("envelope.fill", "✉ chip on a connector's task (where it came from): click to open the source; red if high importance")

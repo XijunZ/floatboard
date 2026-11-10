@@ -250,7 +250,7 @@ extension SortKey {
         switch self {
         case .due: "Due date"
         case .importance: "Importance"
-        case .group: "Group (Groups tab order)"
+        case .group: "Group"
         case .added: "Date added"
         case .status: "Status"
         }
@@ -263,20 +263,19 @@ struct ColumnSortControls: View {
     let status: Status
 
     var body: some View {
-        let sort = ui.columnSorts[status.rawValue] ?? ColumnSort()
+        let sort = ColumnSort.forColumn(status, saved: ui.columnSorts[status.rawValue])
         HStack(spacing: 2) {
             Menu {
                 Picker("Sort by", selection: Binding(
                     get: { sort.key },
-                    set: { k in ui.columnSorts[status.rawValue] = ColumnSort(key: k, ascending: k?.naturalAscending ?? true) })) {
-                    Text(status == .done ? "Default: by day finished" : "Default: due date, then importance").tag(SortKey?.none)
-                    Divider()
+                    set: { k in ui.columnSorts[status.rawValue] = ColumnSort(key: k, ascending: k?.naturalAscending ?? false) })) {
+                    if status == .done { Text("Date finished").tag(SortKey?.none) }
                     // Status is left out: every task in a column has the same one.
                     ForEach(SortKey.allCases.filter { $0 != .status }) { Text($0.columnTitle).tag(Optional($0)) }
                 }
                 .pickerStyle(.inline)
             } label: {
-                Text(sort.key?.title ?? "Sort").font(.system(size: 10.5))
+                Text(sort.key?.title ?? "Date finished").font(.system(size: 10.5))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.visible)
@@ -305,7 +304,7 @@ struct Column: View {
     @State private var beforeSearch: Int64?? = nil
 
     var body: some View {
-        let sort = ui.columnSorts[status.rawValue] ?? ColumnSort()
+        let sort = ColumnSort.forColumn(status, saved: ui.columnSorts[status.rawValue])
         let cards = sort.apply(store.cards(in: status), groupOrder: store.areas.map(\.name))
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -319,9 +318,9 @@ struct Column: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     if status == .done && sort.key == nil {
-                        // Finished tasks grouped by the day they were done, newest day first (oldest first when reversed).
+                        // Sorted by date finished: grouped by the day they were done, newest day first (oldest when ascending).
                         let groups = Dictionary(grouping: cards) { Calendar.current.startOfDay(for: $0.done ?? $0.created) }
-                        ForEach(groups.keys.sorted(by: sort.ascending ? (>) : (<)), id: \.self) { day in
+                        ForEach(groups.keys.sorted(by: sort.ascending ? (<) : (>)), id: \.self) { day in
                             let items = groups[day] ?? []
                             Text("\(Fmt.heading(day)) · \(items.count) done")
                                 .font(.system(size: 11, weight: .semibold))

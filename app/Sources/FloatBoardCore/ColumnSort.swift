@@ -17,15 +17,27 @@ public enum SortKey: String, Codable, CaseIterable, Identifiable {
     public var naturalAscending: Bool { self != .importance }
 }
 
-/// One board column's sort: nil key = the board's own order. Ties keep the board's order.
+/// One board column's sort. Ties keep the board's order (due date, then importance, then oldest).
+/// `key` nil exists only in Done and means "Date finished" (the store gives Done newest first).
 public struct ColumnSort: Codable, Equatable {
     public var key: SortKey?
     public var ascending: Bool
     public init(key: SortKey? = nil, ascending: Bool = true) { self.key = key; self.ascending = ascending }
 
+    /// The sort a column starts with: Due date (soonest first) for open columns, Date finished (newest first) for Done.
+    public static func initial(for status: Status) -> ColumnSort {
+        status == .done ? ColumnSort(key: nil, ascending: false) : ColumnSort(key: .due, ascending: true)
+    }
+
+    /// The column's saved sort, or its initial one (also when an open column has none saved, e.g. from an earlier version).
+    public static func forColumn(_ status: Status, saved: ColumnSort?) -> ColumnSort {
+        guard let saved, saved.key != nil || status == .done else { return initial(for: status) }
+        return saved
+    }
+
     /// `cards` in the board's order; returns them sorted by `key` (tasks without a due date always last).
     public func apply(_ cards: [Card], groupOrder: [String]) -> [Card] {
-        guard let key else { return ascending ? cards : cards.reversed() }
+        guard let key else { return ascending ? cards.reversed() : cards }
         let pos = Dictionary(uniqueKeysWithValues: cards.enumerated().map { ($1.id, $0) })
         return cards.sorted { a, b in
             if let r = Self.compare(a, b, key, ascending, groupOrder) { return r }
