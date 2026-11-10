@@ -99,6 +99,14 @@ export async function processEvents(env: Env, userId: string, calls: Budget, fet
 
       const verdict = e.kind === "changed" ? "changed" : (p.verdict ?? "");
       if (e.kind === "deleted" && !verdict) { await finish(e.uuid).run(); processed++; continue; } // plain delete: nothing to learn
+      if (e.kind === "deleted" && verdict === "duplicate") {
+        // The same task arrived twice: a matching problem, not a sorting one, so it is logged (to find the gap) and never
+        // becomes a learning example (that would teach Claude the email wasn't an action).
+        item = await findItem(env, userId, p);
+        await finish(e.uuid).run(); processed++;
+        await trace(env, userId, runId, e.uuid, "duplicate task reported", `source ${String(p.source_mid ?? p.item_id ?? "unknown").slice(0, 200)}`, item);
+        continue;
+      }
       if (e.kind === "correction" && !verdict) {
         await reject(e.uuid, "correction without a verdict");
         continue;

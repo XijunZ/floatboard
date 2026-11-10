@@ -39,6 +39,7 @@ struct ConnectorDeleteChoices: View {
     var body: some View {
         Button("Not an action (teach)") { store.deleteCard(card, verdict: "not_action") }
         Button("Wrong details (teach)") { store.deleteCard(card, verdict: "wrong_details") }
+        Button("Duplicate (teach)") { store.deleteCard(card, verdict: "duplicate") }
         Divider()
         Button("Just delete") { store.deleteCard(card, verdict: nil) }
     }

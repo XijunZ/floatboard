@@ -180,7 +180,8 @@ public final class Store: ObservableObject {
     public func delete(_ card: Card) { deleteCard(card, verdict: nil) }
 
     /// Soft delete. For a connector card this also queues the deletion (and, with a verdict of
-    /// `not_action` / `wrong_details`, a correction) in the same transaction.
+    /// `not_action` / `wrong_details` / `duplicate`, a correction) in the same transaction. The engine learns from the
+    /// first two; `duplicate` is only logged there.
     public func deleteCard(_ card: Card, verdict: String?, now: Date = Date()) {
         perform {
             guard let cur = try currentCard(card.id), !cur.deleted else { return }

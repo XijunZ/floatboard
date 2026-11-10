@@ -108,6 +108,13 @@ MainActor.assumeIsolated {
               && store.card(c2.id) == nil, "delete_with_verdict_records_correction_and_outbox")
 
         try store.db.run("DELETE FROM outbox"); try store.db.run("DELETE FROM corrections")
+        guard let cd = connectorCard("email:obd", item: "item-d") else { check(false, "outbox setup dup"); return }
+        store.deleteCard(cd, verdict: "duplicate", now: t0)
+        let rowsD = outboxRows()
+        check(rowsD.count == 1 && rowsD[0].kind == "deleted" && rowsD[0].payload["verdict"] == "duplicate"
+              && rowsD[0].payload["source_mid"] == "obd" && store.card(cd.id) == nil, "duplicate_delete_tells_the_connector")
+
+        try store.db.run("DELETE FROM outbox"); try store.db.run("DELETE FROM corrections")
         guard let c3 = connectorCard("email:ob3", item: "item-3") else { check(false, "outbox setup 3"); return }
         store.setArea(c3, "Work", now: t0)
         store.setImportance(store.card(c3.id)!, .high, now: t0.addingTimeInterval(3))

@@ -126,6 +126,21 @@ describe("engine event processing", () => {
     expect((await ev(plain)).processed).toBe(1);
   });
 
+  it("duplicate_delete_is_logged_but_never_a_lesson", async () => {
+    const u = await setup("E2d");
+    const id = await item(u);
+    const uuid = await event(u, "deleted", { item_id: id, verdict: "duplicate" });
+    const f = fake();
+    const r = await processEvents(env as any, u.id, new Budget(), f.fetch);
+    expect(r.processed).toBe(1);
+    expect(f.urls).toHaveLength(0); // no Gmail read, no Claude call
+    expect((await ev(uuid)).processed).toBe(1);
+    expect((await ev(uuid)).last_error).toBeNull();
+    expect((await env.DB.prepare("SELECT COUNT(*) n FROM feedback WHERE user_id=?").bind(u.id).first<any>()).n).toBe(0);
+    const log = await env.DB.prepare("SELECT decision, subject FROM run_events WHERE user_id=? AND trace=?").bind(u.id, uuid).first<any>();
+    expect(log).toMatchObject({ decision: "duplicate task reported", subject: "Survey" });
+  });
+
   it("missing_email_falls_back_to_snippet", async () => {
     const u = await setup("E3");
     const id = await item(u, { snippet: "Snippet words", why: "Reply by Friday" });
