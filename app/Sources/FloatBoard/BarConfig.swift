@@ -4,28 +4,7 @@ import SwiftUI
 /// User-configurable bar: the order tasks appear in, and which details each task shows.
 /// Saved in UserDefaults; edited on the "Bar" tab with drag and drop.
 struct BarConfig: Codable, Equatable {
-    enum SortKey: String, Codable, CaseIterable, Identifiable {
-        case due, status, importance, group, added
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .due: "Due date"
-            case .status: "Status"
-            case .importance: "Importance"
-            case .group: "Group"
-            case .added: "Date added"
-            }
-        }
-        var detail: String {
-            switch self {
-            case .due: "Soonest first; tasks without a date after"
-            case .status: "Doing before To do"
-            case .importance: "High, then Medium, then Low"
-            case .group: "In the order set on the Groups tab"
-            case .added: "Oldest first"
-            }
-        }
-    }
+    typealias SortKey = FloatBoardCore.SortKey
 
     enum Field: String, Codable, CaseIterable, Identifiable {
         case groupDot, title, dueDate, dueTime, importance, groupName
@@ -150,6 +129,19 @@ struct BarConfig: Codable, Equatable {
                 }
             }
             return a.id < b.id
+        }
+    }
+}
+
+extension SortKey {
+    /// How the bar uses this key (shown on the Bar tab).
+    var detail: String {
+        switch self {
+        case .due: "Soonest first; tasks without a date after"
+        case .status: "Doing before To do"
+        case .importance: "High, then Medium, then Low"
+        case .group: "In the order set on the Groups tab"
+        case .added: "Oldest first"
         }
     }
 }

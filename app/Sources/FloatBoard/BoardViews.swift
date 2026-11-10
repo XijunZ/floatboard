@@ -9,11 +9,13 @@ struct ExpandedView: View {
     @State private var newTitle = ""
     @State private var newArea = ""
     @State private var newImportance: Importance = .medium
+    /// Step the new task goes into; back to To do after each add.
+    @State private var newStatus: Status = .todo
     @State private var hasDue = false
     @State private var newDue = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     @State private var hasTime = false
     @State private var newTime = Due.nextHour
-    enum AddField: String, Hashable { case title, importance, group }
+    enum AddField: String, Hashable { case status, title, importance, group }
     /// Which add-row control has keyboard focus (drives ← → across the whole row).
     @State private var nav: String?
     @FocusState private var addField: AddField?
@@ -153,9 +155,13 @@ struct ExpandedView: View {
 
     private var addRow: some View {
         HStack(spacing: 8) {
+            KeyChip(options: Status.allCases, selection: $newStatus, title: \.title, color: { _ in .primary }, dot: false,
+                    focus: $addField, field: .status,
+                    onLeft: {}, onRight: { move("status", 1) }, onSubmit: add)
+                .help("Step: ↑↓ to change, → to the group, Enter to add")
             KeyChip(options: store.areas.map(\.name), selection: $newArea, title: { $0 }, color: store.color,
                     focus: $addField, field: .group,
-                    onLeft: {}, onRight: { move("group", 1) }, onSubmit: add)
+                    onLeft: { move("group", -1) }, onRight: { move("group", 1) }, onSubmit: add)
                 .help("Group: ↑↓ to change, → to the task, Enter to add")
             TextField("Add a task: ↑↓ group, → importance, Enter to add", text: $newTitle)
                 .textFieldStyle(.plain)
@@ -211,7 +217,7 @@ struct ExpandedView: View {
 
     /// Order of the add row's controls for ← →; the date/time parts only exist when ticked.
     private var navOrder: [String] {
-        ["group", "title", "importance", "due"]
+        ["status", "group", "title", "importance", "due"]
             + (hasDue ? ["date", "timeOn"] + (hasTime ? ["time"] : []) : [])
             + ["add"]
     }
@@ -224,8 +230,10 @@ struct ExpandedView: View {
 
     private func add() {
         guard !newTitle.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        store.add(title: newTitle, area: store.resolve(newArea), importance: newImportance, due: hasDue ? Due.combine(day: newDue, time: hasTime ? newTime : nil) : nil)
+        store.add(title: newTitle, area: store.resolve(newArea), importance: newImportance,
+                  due: hasDue ? Due.combine(day: newDue, time: hasTime ? newTime : nil) : nil, status: newStatus)
         newTitle = ""
+        newStatus = .todo
         // Next task starts fresh: no due date or time.
         hasDue = false
         hasTime = false
@@ -233,6 +241,44 @@ struct ExpandedView: View {
         newTime = Due.nextHour
         addField = .title
         nav = "title"
+    }
+}
+
+/// The two buttons at the right of a column header: what to sort by (the bar's attributes) and which way.
+struct ColumnSortControls: View {
+    @EnvironmentObject var ui: UIState
+    let status: Status
+
+    var body: some View {
+        let sort = ui.columnSorts[status.rawValue] ?? ColumnSort()
+        HStack(spacing: 2) {
+            Menu {
+                Picker("Sort by", selection: Binding(
+                    get: { sort.key },
+                    set: { k in ui.columnSorts[status.rawValue] = ColumnSort(key: k, ascending: k?.naturalAscending ?? true) })) {
+                    Text(status == .done ? "Board order (by day done)" : "Board order").tag(SortKey?.none)
+                    Divider()
+                    // Status is left out: every task in a column has the same one.
+                    ForEach(SortKey.allCases.filter { $0 != .status }) { Text($0.title).tag(Optional($0)) }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Text(sort.key?.title ?? "Sort").font(.system(size: 10.5))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.visible)
+            .fixedSize()
+            .help("Sort this column by an attribute")
+            Button {
+                var s = sort; s.ascending.toggle(); ui.columnSorts[status.rawValue] = s
+            } label: {
+                Image(systemName: sort.ascending ? "arrow.up" : "arrow.down").font(.system(size: 10, weight: .semibold))
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.borderless)
+            .help(sort.ascending ? "Ascending (click for descending)" : "Descending (click for ascending)")
+        }
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -246,21 +292,23 @@ struct Column: View {
     @State private var beforeSearch: Int64?? = nil
 
     var body: some View {
-        let cards = store.cards(in: status)
+        let sort = ui.columnSorts[status.rawValue] ?? ColumnSort()
+        let cards = sort.apply(store.cards(in: status), groupOrder: store.areas.map(\.name))
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(status.title).font(.system(size: 12, weight: .semibold))
                 Text("\(cards.count)").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
+                ColumnSortControls(status: status)
             }
             .padding(.horizontal, 4)
             ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    if status == .done {
-                        // Finished tasks grouped by the day they were done, newest day first.
+                    if status == .done && sort.key == nil {
+                        // Finished tasks grouped by the day they were done, newest day first (oldest first when reversed).
                         let groups = Dictionary(grouping: cards) { Calendar.current.startOfDay(for: $0.done ?? $0.created) }
-                        ForEach(groups.keys.sorted(by: >), id: \.self) { day in
+                        ForEach(groups.keys.sorted(by: sort.ascending ? (>) : (<)), id: \.self) { day in
                             let items = groups[day] ?? []
                             Text("\(Fmt.heading(day)) · \(items.count) done")
                                 .font(.system(size: 11, weight: .semibold))

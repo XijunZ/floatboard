@@ -114,15 +114,18 @@ public final class Store: ObservableObject {
 
     // MARK: Changes
 
-    public func add(title: String, area: String, importance: Importance, due: Date?) {
+    /// A new task of the user's, straight into any step (To do by default).
+    public func add(title: String, area: String, importance: Importance, due: Date?, status: Status = .todo) {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         let now = Date()
+        let started: Date? = status == .doing ? now : nil
+        let done: Date? = status == .done ? now : nil
         perform {
             let id = try db.run(
-                "INSERT INTO cards(title,area,importance,due,status,created,updated) VALUES(?,?,?,?,?,?,?)",
-                [t, area, importance.rawValue, due, Status.todo.rawValue, now, now])
-            try log(id, "created", nil, Status.todo, now)
+                "INSERT INTO cards(title,area,importance,due,status,created,started,done,updated) VALUES(?,?,?,?,?,?,?,?,?)",
+                [t, area, importance.rawValue, due, status.rawValue, now, started, done, now])
+            try log(id, "created", nil, status, now)
         }
     }
 

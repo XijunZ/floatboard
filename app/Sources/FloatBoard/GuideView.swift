@@ -39,6 +39,8 @@ struct GuideView: View {
                     icon("calendar.badge.checkmark", "In Google Calendar (shown under the task): click to open the event")
                     icon("video.fill", "Join the Google Meet call")
                     icon("eye", "Move to Watch: waiting on someone else. Watch tasks stay on the board but off the bar; a due date there is when to chase")
+                    icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending; “Board order” resets it")
+                    icon("plus", "Add row: the first chip picks the step (To do, Doing, Watch or Done) the new task goes into")
                     icon("pin", "Pin the board so it stays open when you click another app")
                     icon("envelope.fill", "✉ chip on a connector's task (where it came from): click to open the source; red if high importance")
                     icon("magnifyingglass", "Search: highlights matches; Enter jumps to the next")
