@@ -1,14 +1,14 @@
 import { type Env, nowISO } from "../env";
 import { logEvent } from "../runlog";
 import { decrypt } from "../crypto";
-import { processRecap } from "../recap";
+import { processRecap, recapKnown } from "../recap";
 import { Budget, BudgetExhausted } from "../budget";
-import { fathomToMessage, recapKey } from "./fathom";
+import { fathomToMessage, recapKeys } from "./fathom";
 import { log } from "../run";
 
 /**
  * Second layer behind the Fathom webhook: every hour, ask Fathom's API for meetings created since the last check and
- * record any the webhook didn't deliver. Webhook and catch-up share the meeting key (recapKey), so a meeting that
+ * record any the webhook didn't deliver. Webhook and catch-up share the meeting keys (recapKeys), so a meeting that
  * arrives both ways is stored once. Never throws: problems go to the Fathom source's last_error (shown in the app's
  * needs-attention list) and run_events.
  */
@@ -66,7 +66,7 @@ export async function catchUpFathom(env: Env, userId: string, calls: Budget, fet
         continue;
       }
       const msg = fathomToMessage(m, src.id);
-      const known = await env.DB.prepare("SELECT 1 FROM items WHERE user_id=? AND message_id=? AND kind='summary'").bind(userId, recapKey(msg)).first();
+      const known = await recapKnown(env, userId, recapKeys(msg));
       if (!known) {
         calls.take(1); // the summary call to Claude
         const out = await processRecap(env, userId, msg, undefined, { rawOnUnusable: true });

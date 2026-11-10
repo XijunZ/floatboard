@@ -13,19 +13,44 @@ export function fathomToMessage(p: any, sourceId: string): Message {
     return `- ${a.description ?? a.text ?? ""}${who ? ` (${who})` : ""}`;
   });
   const title: string = p.title ?? p.meeting_title ?? "Meeting";
+  // Every link that names this meeting, so the recap email (which links to /calls/<number>) matches this delivery.
+  // recording_id as a /calls/ number is a guess (Fathom doesn't document it); the action items' links are not.
+  const refs = [p.share_url, p.url, p.recording_url, ...(p.action_items ?? []).map((a: any) => a.recording_playback_url),
+    p.recording_id != null ? `https://fathom.video/calls/${p.recording_id}` : null].filter((x): x is string => typeof x === "string" && !!x);
   return {
     messageId: `fathom:${id}`, sourceId, from: "Fathom <no-reply@fathom.video>", to: [], cc: [],
     subject: title, date: p.scheduled_start_time ?? p.recording_start_time ?? p.created_at ?? new Date().toISOString(),
     labels: [], headers: {},
     text: [summary, items.length ? `Action items:\n${items.join("\n")}` : "", url].filter(Boolean).join("\n\n"),
     link: url,
+    recapRefs: refs,
   };
 }
 
-/** One key per meeting, whether the recap came by Fathom email or webhook. */
+/** The meeting's main key (stored as the summary's message id). Unchanged from earlier versions, so older rows still match. */
 export function recapKey(m: Message): string {
   const id = SHARE.exec(m.link)?.[1] ?? SHARE.exec(m.text)?.[1];
   return id ? `fathom:${id}` : m.messageId;
+}
+
+const SHARE_ALL = /fathom\.video\/share\/([A-Za-z0-9_-]+)/gi;
+const CALL_ALL = /fathom\.video\/calls?\/(\d+)/gi;
+
+/** Fathom meeting links in a text or HTML body (used for recap emails, whose plain part has no links). */
+export function fathomLinks(s: string): string[] {
+  return [...new Set([...s.matchAll(/https?:\/\/(?:www\.)?fathom\.video\/(?:share|calls?)\/[A-Za-z0-9_-]+/gi)].map((x) => x[0]))];
+}
+
+/**
+ * Every key that identifies this meeting: the main key first, then each Fathom share token and call number it carries.
+ * The webhook and the email name the same meeting with different ids, so a recap is a duplicate when any key matches.
+ */
+export function recapKeys(m: Message): string[] {
+  const s = [m.link, m.text, ...(m.recapRefs ?? [])].join("\n");
+  const keys = [recapKey(m),
+    ...[...s.matchAll(SHARE_ALL)].map((x) => `fathom:${x[1]}`),
+    ...[...s.matchAll(CALL_ALL)].map((x) => `fathom:call:${x[1]}`)];
+  return [...new Set(keys)];
 }
 
 /** A Standard Webhooks secret: "whsec_" followed by base64 of at least 16 bytes. */

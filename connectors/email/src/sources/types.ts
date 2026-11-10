@@ -22,6 +22,8 @@ export type Message = {
   fromName?: string;
   /** `text` is only the preview the mail list shows (Outlook), not the whole email. */
   preview?: boolean;
+  /** Meeting links the recap carries outside `text` (Fathom webhook fields, or links in an email's HTML part); used only to spot duplicates. */
+  recapRefs?: string[];
 };
 
 /** Something odd the source worked around; the run records it in the run log (trace = messageId). */
