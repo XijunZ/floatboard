@@ -111,4 +111,13 @@ describe("gmail source", () => {
     const g = fakeGoogle({ tokenFails: true });
     await expect(new GmailSource(env as any, await row(), g.f).fetchBatch(null, 10)).rejects.toBeInstanceOf(SourceAuthError);
   });
+
+  it("collects_links_from_the_html_part", async () => {
+    const html = `<p>Fill in <a href="https://forms.example.com/a?x=1&amp;y=2">the form</a></p><a href="mailto:a@x.com">mail</a>
+      <a href="https://forms.example.com/a?x=1&amp;y=2">again</a>`;
+    const g = fakeGoogle({ messages: { m1: msg("m1", [
+      { mimeType: "text/plain", body: { data: b64url("Fill in the form") } }, { mimeType: "text/html", body: { data: b64url(html) } }]) } });
+    const m = await new GmailSource(env as any, await row(), g.f).fetchFull("m1");
+    expect(m.links).toEqual(["https://forms.example.com/a?x=1&y=2"]);
+  });
 });

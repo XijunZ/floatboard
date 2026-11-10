@@ -8,6 +8,8 @@ import { zonedParts, zoneOrDefault } from "./time";
 export type Action = {
   title: string; why: string; due: string | null; hasTime: boolean;
   importance: 0 | 1 | 2; group: string | null; urgent: boolean;
+  /** Links from the email the task needs (only ones that really appear in it), at most 3. */
+  links?: string[];
 };
 
 /** `action: null` = Claude read the email and it needs no action; `ok: false` = we couldn't read Claude's answer (retry). */
@@ -24,6 +26,7 @@ const Verdict = z.object({
   importance: z.number().int(),
   group: z.string().nullable(),
   urgent: z.boolean(),
+  links: z.array(z.string()).optional(),
 });
 
 import SKILL_TEXT from "./skills/email-triage.md";
@@ -48,7 +51,9 @@ const SYSTEM = `${SKILL.trim()}
 
 ## Output
 If action_required: title and why as above; due as "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm" (24h) or null; has_time true only when a
-time is given; importance 2 = high, 1 = normal, 0 = low; group exactly as one of the person's group names, or null.
+time is given; importance 2 = high, 1 = normal, 0 = low; group exactly as one of the person's group names, or null;
+links: up to 3 web addresses from the email that the person needs to do the task (a form, document, booking, payment or
+sign-up page), copied exactly; [] when none. Never unsubscribe, tracking, logo, social-profile or plain homepage links.
 If not an action, set action_required false and leave the other fields empty/neutral.`;
 
 /** Put before the text of an email the source only shows in part (Outlook's list preview). */
@@ -78,7 +83,7 @@ To: ${m.to.join(", ")}${m.cc.length ? `\nCc: ${m.cc.join(", ")}` : ""}
 Date: ${m.date}
 Subject: ${m.subject}
 
-${m.preview ? `${PREVIEW_NOTE}\n` : ""}${m.text}${m.thread?.myReply ? `
+${m.preview ? `${PREVIEW_NOTE}\n` : ""}${m.text}${linkList(m)}${m.thread?.myReply ? `
 
 --- The user already replied after this email (${m.thread.myReply.date}): ---
 ${m.thread.myReply.text}` : ""}`;
@@ -88,7 +93,28 @@ ${m.thread.myReply.text}` : ""}`;
   if (!v.action_required || !v.title.trim()) return { ok: true, action: null };
   const importance = (Math.min(2, Math.max(0, v.importance)) as 0 | 1 | 2);
   return { ok: true, action: { title: shortTitle(v.title), why: v.why.trim(), due: v.due, hasTime: v.has_time,
-    importance, group: v.group && groups.includes(v.group) ? v.group : null, urgent: v.urgent } };
+    importance, group: v.group && groups.includes(v.group) ? v.group : null, urgent: v.urgent, links: realLinks(v.links ?? [], m) } };
+}
+
+const UNWANTED_LINK = /unsubscribe|optout|opt-out|preferences|list-manage/i;
+
+/** The email's HTML-only links, shown to Claude after the text (unsubscribe and similar left out). */
+function linkList(m: Message): string {
+  const ls = (m.links ?? []).filter((l) => !UNWANTED_LINK.test(l) && !m.text.includes(l)).slice(0, 30);
+  return ls.length ? `\n\nLinks in the email:\n${ls.map((l) => `- ${l}`).join("\n")}` : "";
+}
+
+/** Only links that really appear in the email (text or HTML), never invented ones; at most 3. */
+export function realLinks(picked: string[], m: Message): string[] {
+  const known = new Set(m.links ?? []);
+  const out: string[] = [];
+  for (const raw of picked) {
+    const l = raw.trim().replace(/[).,;:!?>\]]+$/, "");
+    if (!/^https?:\/\//i.test(l) || UNWANTED_LINK.test(l) || out.includes(l)) continue;
+    if (known.has(l) || m.text.includes(l)) out.push(l);
+    if (out.length === 3) break;
+  }
+  return out;
 }
 
 /** Keep titles to ~80 characters, cutting at a word boundary (never mid-word). */

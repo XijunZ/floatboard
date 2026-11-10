@@ -230,8 +230,11 @@ export class GmailSource implements Source {
     const plain = findPart(m.payload, "text/plain");
     const html = plain ? null : findPart(m.payload, "text/html");
     const text = plain ? decodeB64(plain) : html ? htmlToText(decodeB64(html)) : "";
+    const htmlPart = findPart(m.payload, "text/html");
+    const htmlText = htmlPart ? decodeB64(htmlPart) : "";
     // Fathom recap emails link to the meeting only in their HTML part; keep those links so the recap isn't stored twice.
-    const fathomHtml = /fathom\.video/i.test(headers["from"] ?? "") ? findPart(m.payload, "text/html") : null;
+    const fathomHtml = /fathom\.video/i.test(headers["from"] ?? "") && htmlText ? htmlText : null;
+    const links = htmlLinks(htmlText);
     return {
       messageId: headers["message-id"] ?? `gmail:${this.row.address}:${m.id}`,
       sourceId: this.row.id,
@@ -247,7 +250,8 @@ export class GmailSource implements Source {
       link: `https://mail.google.com/mail/u/${this.row.address}/#all/${m.id}`,
       gmailId: m.id != null ? String(m.id) : undefined,
       historyId: m.historyId != null ? String(m.historyId) : undefined,
-      ...(fathomHtml ? { recapRefs: fathomLinks(decodeB64(fathomHtml)) } : {}),
+      ...(fathomHtml ? { recapRefs: fathomLinks(fathomHtml) } : {}),
+      ...(links.length ? { links } : {}),
     };
   }
 }
@@ -315,6 +319,16 @@ function findPart(p: any, mime: string): string | null {
 function decodeB64(data: string): string {
   const bin = atob(data.replace(/-/g, "+").replace(/_/g, "/"));
   return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+}
+
+/** The http(s) links an HTML body points to, in order, without duplicates (at most 40). */
+export function htmlLinks(html: string): string[] {
+  const out = new Set<string>();
+  for (const x of html.matchAll(/href\s*=\s*["'](https?:\/\/[^"'\s]+)["']/gi)) {
+    out.add(x[1].replace(/&amp;/g, "&"));
+    if (out.size >= 40) break;
+  }
+  return [...out];
 }
 
 export function htmlToText(html: string): string {

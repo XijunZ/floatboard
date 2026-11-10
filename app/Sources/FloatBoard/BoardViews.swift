@@ -533,6 +533,19 @@ struct CardView: View {
     }
 }
 
+/// Text with its web addresses turned into clickable links.
+enum LinkedText {
+    static func make(_ s: String) -> AttributedString {
+        var out = AttributedString(s)
+        guard let det = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return out } // try?-ok: no detector = plain text
+        for m in det.matches(in: s, range: NSRange(s.startIndex..., in: s)) {
+            guard let url = m.url, let r = Range(m.range, in: s), let ar = Range(r, in: out) else { continue }
+            out[ar].link = url
+        }
+        return out
+    }
+}
+
 struct EditCardView: View {
     @EnvironmentObject var store: Store
     @State var draft: Card
@@ -545,6 +558,10 @@ struct EditCardView: View {
     /// Set when the pop-up closed via Save, Cancel or Delete (so closing it doesn't save again).
     @State private var finished = false
     @State private var replyDraftRefusal: String?
+    /// Size of the pop-up, set by dragging its corner (remembered).
+    @AppStorage("editorWidth") private var width: Double = 420
+    @AppStorage("editorExtraHeight") private var extraHeight: Double = 0
+    @State private var dragStart: (w: Double, h: Double)?
 
     private func save() {
         finished = true
@@ -616,11 +633,41 @@ struct EditCardView: View {
         .font(.system(size: 12))
     }
 
+    /// Drag the bottom-right corner to make the pop-up wider or taller (Notes and the AI section grow).
+    private var resizeGrip: some View {
+        Image(systemName: "arrow.up.left.and.arrow.down.right")
+            .font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+            .frame(width: 18, height: 18).contentShape(Rectangle())
+            .padding(3)
+            .gesture(DragGesture(minimumDistance: 1)
+                .onChanged { g in
+                    let start = dragStart ?? (width, extraHeight)
+                    dragStart = start
+                    width = min(1000, max(360, start.w + g.translation.width))
+                    extraHeight = min(700, max(0, start.h + g.translation.height))
+                }
+                .onEnded { _ in dragStart = nil })
+            .onHover { inside in if inside { NSCursor.crosshair.push() } else { NSCursor.pop() } }
+            .help("Drag to resize")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("Title", text: $draft.title).textFieldStyle(.roundedBorder)
             TextField("Notes", text: $draft.notes, axis: .vertical)
-                .lineLimit(3...8).textFieldStyle(.roundedBorder)
+                .lineLimit(3...(8 + Int(extraHeight / 16))).textFieldStyle(.roundedBorder)
+            if !draft.aiSummary.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("From the email or meeting (AI)").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                    // Grows with the pop-up: drag the corner down to read more.
+                    Text(LinkedText.make(draft.aiSummary)).font(.system(size: 12)).textSelection(.enabled)
+                        .lineLimit(6 + Int(extraHeight / 15))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+            }
             TextField("Link: Google Meet call or calendar event (optional)", text: $draft.link)
                 .textFieldStyle(.roundedBorder)
             HStack(spacing: 8) {
@@ -673,7 +720,8 @@ struct EditCardView: View {
             }
         }
         .padding(14)
-        .frame(width: 420)
+        .frame(width: width)
+        .overlay(alignment: .bottomTrailing) { resizeGrip }
         // Clicking away (or the board collapsing) closes the pop-up: keep the edits.
         .onDisappear { if !finished { save() } }
         .onAppear {

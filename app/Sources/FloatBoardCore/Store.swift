@@ -289,13 +289,13 @@ public final class Store: ObservableObject {
     @discardableResult
     func insertConnectorCard(connector: String, title: String, area: String, importance: Int, due: Date?, externalID: String,
                              sourceKey: (mid: String, sent: String?)?, sourceLink: String, metaJSON: String,
-                             proposalJSON: String, now: Date) throws -> Int64 {
+                             proposalJSON: String, aiSummary: String = "", now: Date) throws -> Int64 {
         let id = try db.run("""
             INSERT INTO cards(title,area,importance,due,status,created,updated,source,external_id,source_link,source_meta,imported_at,
-                              connector,source_mid,source_sent,proposal_json)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                              connector,source_mid,source_sent,proposal_json,ai_summary)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, [title, area, importance, due, Status.todo.rawValue, now, now, connector, externalID, sourceLink, metaJSON, now,
-                  connector, sourceKey?.mid, sourceKey?.sent, proposalJSON])
+                  connector, sourceKey?.mid, sourceKey?.sent, proposalJSON, aiSummary])
         try insertEvent(id, "created (from \(connector))", to: .todo, actor: .connector(connector), at: now)
         return id
     }

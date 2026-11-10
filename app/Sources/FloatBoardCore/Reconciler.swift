@@ -119,12 +119,18 @@ public enum Reconciler {
                 let newID = try store.insertConnectorCard(
                     connector: connector, title: title, area: area(p, store, defaultGroup), importance: min(max(p.importance, 0), 2),
                     due: dueValue(p, info).date, externalID: "\(connector):\(key.messageID)", sourceKey: (key.messageID, key.sentAt),
-                    sourceLink: p.link, metaJSON: try meta(p, merging: [:]), proposalJSON: try json(p), now: now)
+                    sourceLink: p.link, metaJSON: try meta(p, merging: [:]), proposalJSON: try json(p),
+                    aiSummary: (p.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines), now: now)
                 sum.added += 1
                 info("Added card #\(newID)")
                 return
             }
             if row.deleted { sum.skippedExisting += 1; return }
+            // Notes the connector sends with a task (its links, a meeting's notes) fill an empty AI section once; never overwritten.
+            let note = (p.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if row.aiSummary.isEmpty && !note.isEmpty {
+                try store.appendAISummary(cardID: row.id, text: note, actor: actor, kind: "notes added by connector")
+            }
             let parsedDue = dueValue(p, info)
             let newDue = parsedDue.invalid ? row.due : parsedDue.date   // unreadable due: keep what the card has
             let newArea = area(p, store, defaultGroup), imp = min(max(p.importance, 0), 2)
