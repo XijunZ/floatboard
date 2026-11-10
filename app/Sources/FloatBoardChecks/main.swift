@@ -101,7 +101,13 @@ MainActor.assumeIsolated {
         let base = [a, b, c]
         let order = ["A", "B"]
         func ids(_ s: ColumnSort) -> [Int64] { s.apply(base, groupOrder: order).map(\.id) }
-        check(ids(ColumnSort()) == [1, 2, 3], "column_sort_default_keeps_board_order")
+        check(ColumnSort.forColumn(.todo, saved: nil) == ColumnSort(key: .due, ascending: true)
+              && ColumnSort.forColumn(.watch, saved: ColumnSort(key: nil, ascending: true)) == ColumnSort(key: .due, ascending: true)
+              && ColumnSort.forColumn(.done, saved: nil) == ColumnSort(key: nil, ascending: false)
+              && ColumnSort.forColumn(.doing, saved: ColumnSort(key: .group, ascending: false)) == ColumnSort(key: .group, ascending: false),
+              "column_sort_always_one_of_the_attributes")
+        check(ids(ColumnSort(key: nil, ascending: false)) == [1, 2, 3] && ids(ColumnSort(key: nil, ascending: true)) == [3, 2, 1],
+              "done_date_finished_newest_first_then_flips")
         check(ids(ColumnSort(key: .due, ascending: true)) == [3, 1, 2]
               && ids(ColumnSort(key: .due, ascending: false)) == [1, 3, 2], "column_sort_due_undated_always_last")
         check(ids(ColumnSort(key: .importance, ascending: false)) == [2, 3, 1]
