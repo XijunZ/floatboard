@@ -38,6 +38,7 @@ struct GuideView: View {
                     icon("calendar.badge.plus", "Add to Google Calendar (choose account, with or without Meet)")
                     icon("calendar.badge.checkmark", "In Google Calendar (shown under the task): click to open the event")
                     icon("video.fill", "Join the Google Meet call")
+                    icon("eye", "Move to Watch: waiting on someone else. Watch tasks stay on the board but off the bar; a due date there is when to chase")
                     icon("pin", "Pin the board so it stays open when you click another app")
                     icon("envelope.fill", "✉ chip on a connector's task (where it came from): click to open the source; red if high importance")
                     icon("magnifyingglass", "Search: highlights matches; Enter jumps to the next")

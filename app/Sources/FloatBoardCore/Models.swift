@@ -1,13 +1,16 @@
 import Foundation
 
 public enum Status: String, CaseIterable, Identifiable {
-    case todo, doing, done
+    /// `watch` = waiting on someone else: still open, but not on you, so it stays off the bar.
+    case todo, doing, watch, done
     public var id: String { rawValue }
     public var title: String {
-        switch self { case .todo: "To do"; case .doing: "Doing"; case .done: "Done" }
+        switch self { case .todo: "To do"; case .doing: "Doing"; case .watch: "Watch"; case .done: "Done" }
     }
-    public var next: Status? { switch self { case .todo: .doing; case .doing: .done; case .done: nil } }
-    public var prev: Status? { switch self { case .todo: nil; case .doing: .todo; case .done: .doing } }
+    /// Only what's on you shows on the bar.
+    public var onBar: Bool { self == .todo || self == .doing }
+    public var next: Status? { switch self { case .todo: .doing; case .doing, .watch: .done; case .done: nil } }
+    public var prev: Status? { switch self { case .todo: nil; case .doing: .todo; case .watch, .done: .doing } }
 }
 
 public enum Importance: Int, CaseIterable, Identifiable {

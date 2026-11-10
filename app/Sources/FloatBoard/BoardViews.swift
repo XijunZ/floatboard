@@ -423,6 +423,9 @@ struct CardView: View {
                     if let n = card.status.next {
                         BarButton(n == .done ? "checkmark" : "arrow.right", "Move to \(n.title)") { store.move(card, to: n) }
                     }
+                    if card.status == .todo || card.status == .doing {
+                        BarButton("eye", "Move to Watch (waiting on someone else)") { store.move(card, to: .watch) }
+                    }
                     Spacer()
                     if card.due != nil { CalendarMenu(card: card) }
                     BarButton("pencil", "Edit") { editing = true }

@@ -64,7 +64,7 @@ struct BarConfig: Codable, Equatable {
     // Optional so settings saved by earlier versions still load.
     var statusFilter: StatusFilter? = .both
     var dueFilter: DueFilter? = .any
-    /// Counter at the left of the bar: "7 tasks" or "4 doing · 3 to do". Always counts every open task.
+    /// Counter at the left of the bar: "7 tasks" or "4 doing · 3 to do". Counts every open task that is on you (not Watch).
     var splitCount: Bool? = false
 
     func countLabel(_ shown: [Card]) -> String {
@@ -81,7 +81,7 @@ struct BarConfig: Codable, Equatable {
         let endToday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: Date()))!
         let endWeek = cal.date(byAdding: .day, value: 7, to: endToday)!
         return cards.filter { c in
-            guard c.status != .done else { return false }
+            guard c.status.onBar else { return false }
             switch statusFilter ?? .both {
             case .both: break
             case .doing: if c.status != .doing { return false }
@@ -229,7 +229,7 @@ struct BarSettingsView: View {
     }
 
     private var barCards: [Card] {
-        ui.bar.sorted(store.cards.filter { $0.status != .done && !$0.withdrawn }, groupOrder: store.areas.map(\.name))
+        ui.bar.sorted(store.cards.filter { $0.status.onBar && !$0.withdrawn }, groupOrder: store.areas.map(\.name))
     }
 
     private func section<C: View>(_ title: String, _ hint: String, @ViewBuilder _ content: () -> C) -> some View {
