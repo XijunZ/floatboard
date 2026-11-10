@@ -5,7 +5,7 @@ import { nowISO } from "./env";
 import { logEvent } from "./runlog";
 import { decrypt } from "./crypto";
 import { askStructured, makeClient } from "./llm";
-import { recapKey } from "./sources/fathom";
+import { recapKeys } from "./sources/fathom";
 import type { Message } from "./sources/types";
 
 export type FollowUp = { title: string; due: string | null; has_time: boolean; importance: 0 | 1 | 2 };
@@ -40,7 +40,7 @@ export async function summariseRecap(m: Message, client: Anthropic): Promise<{ o
 }
 
 /** Save the summary and one action item per follow-up. */
-export async function storeRecap(env: Env, userId: string, m: Message, r: Recap): Promise<void> {
+export async function storeRecap(env: Env, userId: string, m: Message, r: Recap, keys: string[] = [m.messageId]): Promise<void> {
   const now = nowISO();
   const stmts = [env.DB.prepare(`INSERT OR IGNORE INTO items(id,user_id,source_id,message_id,kind,title,sender,subject,link,summary,created)
       VALUES(?,?,?,?, 'summary', ?,?,?,?,?,?)`)
@@ -52,7 +52,17 @@ export async function storeRecap(env: Env, userId: string, m: Message, r: Recap)
       VALUES(?,?,?,?, 'action', ?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(), userId, m.sourceId, `${m.messageId}#${i + 1}`, a.title, `Follow-up from "${m.subject}"`,
       m.from, m.subject, m.link, a.due, a.has_time ? 1 : 0, a.importance, now, m.historyId ?? null, sentAt)));
+  for (const k of keys) stmts.push(env.DB.prepare("INSERT OR IGNORE INTO recap_keys(user_id,key,created) VALUES(?,?,?)").bind(userId, k, now));
   await env.DB.batch(stmts);
+}
+
+/** True when any of these meeting keys was already stored (by this or an earlier version, which kept only the summary row). */
+export async function recapKnown(env: Env, userId: string, keys: string[]): Promise<boolean> {
+  const q = keys.map(() => "?").join(",");
+  const hit = await env.DB.prepare(`SELECT 1 FROM recap_keys WHERE user_id=? AND key IN (${q})
+      UNION ALL SELECT 1 FROM items WHERE user_id=? AND kind='summary' AND message_id IN (${q}) LIMIT 1`)
+    .bind(userId, ...keys, userId, ...keys).first();
+  return !!hit;
 }
 
 export type RecapOutcome = { status: "stored" | "duplicate" } | { status: "unusable"; reason: string };
@@ -65,9 +75,9 @@ export type RecapOutcome = { status: "stored" | "duplicate" } | { status: "unusa
  */
 export async function processRecap(env: Env, userId: string, raw: Message, fetchFn?: typeof fetch,
     opts: { useClaude?: boolean; rawOnUnusable?: boolean } = {}): Promise<RecapOutcome> {
-  const m = { ...raw, messageId: recapKey(raw) };
-  const dup = await env.DB.prepare("SELECT 1 FROM items WHERE user_id=? AND message_id=? AND kind='summary'").bind(userId, m.messageId).first();
-  if (dup) return { status: "duplicate" };
+  const keys = recapKeys(raw);
+  const m = { ...raw, messageId: keys[0] };
+  if (await recapKnown(env, userId, keys)) return { status: "duplicate" };
   const u = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(userId).first<{ anthropic_key_enc: string | null }>();
   let r: Recap | null = null;
   if (u?.anthropic_key_enc && opts.useClaude !== false) {
@@ -83,6 +93,6 @@ export async function processRecap(env: Env, userId: string, raw: Message, fetch
     const text = m.text.length > 600 ? m.text.slice(0, 597) + "…" : m.text;
     r = { summary: m.link && !text.includes(m.link) ? `${text}\nFull notes: ${m.link}` : text, actions: [] };
   }
-  await storeRecap(env, userId, m, r);
+  await storeRecap(env, userId, m, r, keys);
   return { status: "stored" };
 }

@@ -1,3 +1,4 @@
+import { fathomLinks } from "./fathom";
 import { decrypt } from "../crypto";
 import type { Env } from "../env";
 import { type Message, type Source, type SourceNote, SourceAuthError, type SourceRow } from "./types";
@@ -229,6 +230,8 @@ export class GmailSource implements Source {
     const plain = findPart(m.payload, "text/plain");
     const html = plain ? null : findPart(m.payload, "text/html");
     const text = plain ? decodeB64(plain) : html ? htmlToText(decodeB64(html)) : "";
+    // Fathom recap emails link to the meeting only in their HTML part; keep those links so the recap isn't stored twice.
+    const fathomHtml = /fathom\.video/i.test(headers["from"] ?? "") ? findPart(m.payload, "text/html") : null;
     return {
       messageId: headers["message-id"] ?? `gmail:${this.row.address}:${m.id}`,
       sourceId: this.row.id,
@@ -244,6 +247,7 @@ export class GmailSource implements Source {
       link: `https://mail.google.com/mail/u/${this.row.address}/#all/${m.id}`,
       gmailId: m.id != null ? String(m.id) : undefined,
       historyId: m.historyId != null ? String(m.historyId) : undefined,
+      ...(fathomHtml ? { recapRefs: fathomLinks(decodeB64(fathomHtml)) } : {}),
     };
   }
 }
