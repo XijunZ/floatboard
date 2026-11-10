@@ -48,10 +48,11 @@ export async function storeRecap(env: Env, userId: string, m: Message, r: Recap,
   // Follow-ups are tasks, so they need a source key: their own message id (<mid>#n) and when the recap was sent.
   const header = Date.parse(m.date);
   const sentAt = m.sentAt ?? (isNaN(header) ? now : new Date(header).toISOString());
-  r.actions.forEach((a, i) => stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO items(id,user_id,source_id,message_id,kind,title,why,sender,subject,link,due,has_time,importance,created,history_id,sent_at)
-      VALUES(?,?,?,?, 'action', ?,?,?,?,?,?,?,?,?,?,?)`)
+  // Each follow-up carries the meeting's notes (decisions, next steps, link to the full notes).
+  r.actions.forEach((a, i) => stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO items(id,user_id,source_id,message_id,kind,title,why,sender,subject,link,due,has_time,importance,created,history_id,sent_at,summary)
+      VALUES(?,?,?,?, 'action', ?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(), userId, m.sourceId, `${m.messageId}#${i + 1}`, a.title, `Follow-up from "${m.subject}"`,
-      m.from, m.subject, m.link, a.due, a.has_time ? 1 : 0, a.importance, now, m.historyId ?? null, sentAt)));
+      m.from, m.subject, m.link, a.due, a.has_time ? 1 : 0, a.importance, now, m.historyId ?? null, sentAt, r.summary)));
   for (const k of keys) stmts.push(env.DB.prepare("INSERT OR IGNORE INTO recap_keys(user_id,key,created) VALUES(?,?,?)").bind(userId, k, now));
   await env.DB.batch(stmts);
 }

@@ -239,10 +239,11 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
       else {
         const critical = isCritical(a, new Date(), criticalHours, timeZone);
         const id = crypto.randomUUID();
-        const ins = await env.DB.prepare(`INSERT OR IGNORE INTO items(id,user_id,source_id,message_id,kind,title,why,sender,subject,link,snippet,due,has_time,importance,group_name,critical,created,sent_at,history_id)
-            VALUES(?,?,?,?, 'action', ?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        const ins = await env.DB.prepare(`INSERT OR IGNORE INTO items(id,user_id,source_id,message_id,kind,title,why,sender,subject,link,snippet,due,has_time,importance,group_name,critical,created,sent_at,history_id,summary)
+            VALUES(?,?,?,?, 'action', ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
           .bind(id, userId, m.sourceId, m.messageId, a.title, a.why, senderAddress(m.from), m.subject, m.link, m.text.slice(0, 300),
-            a.due, a.hasTime ? 1 : 0, a.importance, a.group, critical ? 1 : 0, nowISO(), m.sentAt ?? null, m.historyId ?? null).run();
+            a.due, a.hasTime ? 1 : 0, a.importance, a.group, critical ? 1 : 0, nowISO(), m.sentAt ?? null, m.historyId ?? null,
+            linksNote(a.links)).run();
         if (ins.meta.changes) {
           stats.actions++;
           ev({ ...base, trace: id, decision: "action created", detail: `${a.title}${critical ? " (critical)" : ""}` });
@@ -388,4 +389,9 @@ export async function runRounds(env: Env, userId: string, opts: RunOptions = {})
     done = r.done || r.processed === 0;
   }
   return { processed: total, done };
+}
+
+/** The task's links as the text the app shows under the task (null when there are none). */
+export function linksNote(links: string[] | undefined): string | null {
+  return links?.length ? `Links from the email:\n${links.join("\n")}` : null;
 }

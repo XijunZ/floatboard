@@ -32,4 +32,15 @@ describe("meeting recaps", () => {
     expect(rows.results[0].title).toBe("Draft the project one-pager for Sam");
     expect(rows.results[1].task_ref).toBeNull();
   });
+
+  it("follow_ups_carry_the_meeting_notes", async () => {
+    const u = await newUser("X");
+    const client = fakeClaude({ decisions: ["Start in spring"], next_steps: [],
+      my_actions: [{ title: "Draft the one-pager", due: null, has_time: false, importance: 1 }] });
+    const res = await summariseRecap(recap(), client);
+    await storeRecap(env as any, u.id, recap(), res.ok ? res.recap : null!);
+    const a = await env.DB.prepare("SELECT summary FROM items WHERE user_id=? AND kind='action'").bind(u.id).first<any>();
+    expect(a.summary).toContain("Decisions: Start in spring");
+    expect(a.summary).toContain("Full notes: https://fathom.video/r/1");
+  });
 });

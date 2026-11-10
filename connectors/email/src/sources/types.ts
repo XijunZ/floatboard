@@ -24,6 +24,8 @@ export type Message = {
   preview?: boolean;
   /** Meeting links the recap carries outside `text` (Fathom webhook fields, or links in an email's HTML part); used only to spot duplicates. */
   recapRefs?: string[];
+  /** Web links in the email's HTML part (its plain text often has none); Claude may pick ones the task needs. */
+  links?: string[];
 };
 
 /** Something odd the source worked around; the run records it in the run log (trace = messageId). */

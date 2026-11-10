@@ -116,7 +116,7 @@ enum Snapshot {
         save(cols, "cards.png", CGSize(width: 1200, height: 560))
         // Only on a scratch database: rendering editors can save cards.
         if ProcessInfo.processInfo.environment["FLOATBOARD_EDITSHOTS"] != nil, LocalData.isScratchDatabase {
-            for c in store.cards { save(EditCardView(draft: c) {}, "edit-\(c.id).png", CGSize(width: 420, height: 330)) }
+            for c in store.cards { save(EditCardView(draft: c) {}, "edit-\(c.id).png", CGSize(width: 420, height: 400)) }
         }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so the connector cards and their settings forms are drawn directly.

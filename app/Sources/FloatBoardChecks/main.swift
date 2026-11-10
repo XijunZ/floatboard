@@ -392,6 +392,20 @@ MainActor.assumeIsolated {
         ((try? store.db.query("SELECT count(*) FROM outbox") { DB.int($0, 0) })?.first).map { Int($0) } ?? -1 // try?-ok: a failed query makes the check fail
     }
     do {
+        // A task's notes from the connector (links, meeting notes) land in its AI section, never in the user's Notes.
+        _ = try Reconciler.apply([prop("pn1", "mn1", title: "Fill in the form", summary: "Links from the email:\nhttps://forms.example.com/a")],
+                                 connector: "rn", store: store, defaultGroup: "Personal", autoAdd: true)
+        let n1 = rcard("rn", "mn1")
+        check(n1?.aiSummary == "Links from the email:\nhttps://forms.example.com/a" && n1?.notes == "", "task_notes_from_connector_shown_with_task")
+        _ = try Reconciler.apply([prop("pn2", "mn2", title: "Older task")], connector: "rn", store: store, defaultGroup: "Personal", autoAdd: true)
+        _ = try Reconciler.apply([prop("pn2", "mn2", title: "Older task", summary: "Decisions: go")], connector: "rn", store: store,
+                                 defaultGroup: "Personal", autoAdd: true)
+        check(rcard("rn", "mn2")?.aiSummary == "Decisions: go", "task_notes_filled_in_later_when_empty")
+        _ = try Reconciler.apply([prop("pn2", "mn2", title: "Older task", summary: "Something else")], connector: "rn", store: store,
+                                 defaultGroup: "Personal", autoAdd: true)
+        check(rcard("rn", "mn2")?.aiSummary == "Decisions: go", "task_notes_never_overwritten")
+    } catch { check(false, "task notes checks: \(error)") }
+    do {
         let r1 = try Reconciler.apply([prop("p1", "m1", title: "Reply to Bob", due: "2026-11-12", importance: 2)],
                                       connector: "rc", store: store, defaultGroup: "Personal", autoAdd: true)
         let c1 = rcard("rc", "m1")

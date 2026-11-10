@@ -39,7 +39,18 @@ describe("classify", () => {
     const { client } = fakeClaude(yes);
     const a = await classify(email(), ["me@gmail.com"], [], client);
     expect(a).toEqual({ ok: true, action: { title: "Send Anna the quarterly report", why: "Anna asked for the report by Tuesday", due: "2026-11-10T17:00",
-      hasTime: true, importance: 2, group: null, urgent: false } });
+      hasTime: true, importance: 2, group: null, urgent: false, links: [] } });
+  });
+
+  it("keeps_only_links_that_are_in_the_email", async () => {
+    const form = "https://forms.example.com/intake?id=42";
+    const reply = JSON.stringify({ ...JSON.parse(yes), links: [form, "https://made-up.example.org/x", "https://docs.example.com/guide"] });
+    const { client, bodies } = fakeClaude(reply);
+    const a = await classify(email({ text: `Please complete the intake form: ${form}.`, links: ["https://docs.example.com/guide", "https://track.example.com/unsubscribe"] }),
+      ["me@gmail.com"], [], client);
+    expect(a.ok && a.action?.links).toEqual([form, "https://docs.example.com/guide"]);
+    expect(JSON.stringify(bodies[0].messages)).toContain("https://docs.example.com/guide"); // HTML-only links are shown to Claude
+    expect(JSON.stringify(bodies[0].messages)).not.toContain("unsubscribe");
   });
 
   it("returns_null_for_fyi", async () => {
