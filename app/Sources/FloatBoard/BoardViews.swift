@@ -244,6 +244,19 @@ struct ExpandedView: View {
     }
 }
 
+extension SortKey {
+    /// Menu wording in a column header (says what the order is, not just the attribute).
+    var columnTitle: String {
+        switch self {
+        case .due: "Due date"
+        case .importance: "Importance"
+        case .group: "Group (Groups tab order)"
+        case .added: "Date added"
+        case .status: "Status"
+        }
+    }
+}
+
 /// The two buttons at the right of a column header: what to sort by (the bar's attributes) and which way.
 struct ColumnSortControls: View {
     @EnvironmentObject var ui: UIState
@@ -256,10 +269,10 @@ struct ColumnSortControls: View {
                 Picker("Sort by", selection: Binding(
                     get: { sort.key },
                     set: { k in ui.columnSorts[status.rawValue] = ColumnSort(key: k, ascending: k?.naturalAscending ?? true) })) {
-                    Text(status == .done ? "Board order (by day done)" : "Board order").tag(SortKey?.none)
+                    Text(status == .done ? "Default: by day finished" : "Default: due date, then importance").tag(SortKey?.none)
                     Divider()
                     // Status is left out: every task in a column has the same one.
-                    ForEach(SortKey.allCases.filter { $0 != .status }) { Text($0.title).tag(Optional($0)) }
+                    ForEach(SortKey.allCases.filter { $0 != .status }) { Text($0.columnTitle).tag(Optional($0)) }
                 }
                 .pickerStyle(.inline)
             } label: {
