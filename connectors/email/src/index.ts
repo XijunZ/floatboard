@@ -16,6 +16,7 @@ import { alertFor } from "./alerts";
 import { telegramWebhook, userBotWebhook } from "./telegram";
 import { ingestOutlook, judgeOutlookNow } from "./outlook";
 import { appJSON, handleAppAuth, purgeExpiredApp } from "./app/auth";
+import { handleBoard, purgePhoneActions } from "./app/board";
 
 async function createUser(req: Request, env: Env): Promise<Response> {
   const rb = await readJSON(req);
@@ -75,7 +76,7 @@ export default {
     }
     if (url.pathname.startsWith("/app/api/")) {
       // Phone app: signed in by the fb_session cookie only (never the user key).
-      return (await handleAppAuth(req, env)) ?? appJSON({ error: "not found" }, 404);
+      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? appJSON({ error: "not found" }, 404);
     }
     if (url.pathname.startsWith("/v2/")) {
       const user = await authUser(req, env);
@@ -111,6 +112,7 @@ export async function runAllUsers(
   try {
     await purgeExpiredSetup(env);
     await purgeExpiredApp(env);
+    await purgePhoneActions(env);
   } catch (e) {
     const msg = `Could not purge expired setup sessions: ${(e as Error)?.message ?? e}`.slice(0, 500);
     log("setup_purge_failed", { error: msg });
