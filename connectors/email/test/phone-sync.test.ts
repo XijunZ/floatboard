@@ -141,4 +141,54 @@ describe("phone sync logic", () => {
     expect(L.replacedText(2, 1)).toBe("2 changes were replaced by newer changes on your Mac. 1 change was for a task no longer on your board");
     expect(L.replacedText(0, 0)).toBe("");
   });
+
+  it("undo_after_a_move_queues_a_reverse_move_with_a_new_id_and_a_later_time", () => {
+    const card = { id: 1, status: "doing", done_at: null };
+    const move = { id: "orig-1", made_at: at, card_id: 1, action: "done" };
+    const u = L.undoFor(card, move, 1000);
+    expect(u).toEqual({ card_id: 1, from: "doing", to: "done", made_at: at, at: 1000 });
+    expect(L.undoText(u)).toBe("Moved to Done");
+    expect(L.undoText({ ...u, to: "watch" })).toBe("Moved to Watch");
+    // Shown for 8 seconds.
+    expect(L.undoLive(u, 1000 + 7999)).toBe(true);
+    expect(L.undoLive(u, 1000 + 8000)).toBe(false);
+    expect(L.undoLive(null, 1000)).toBe(false);
+    // Undo is a new queued move back to the previous step: its own id, made after the move it undoes.
+    const back = L.undoAction(u, "undo-2", "2026-11-12T10:00:05.000Z");
+    expect(back).toEqual({ id: "undo-2", made_at: "2026-11-12T10:00:05.000Z", card_id: 1, action: "doing" });
+    expect(back.id).not.toBe(move.id);
+    // A phone clock that went back still orders the undo after the move.
+    const early = L.undoAction(u, "undo-3", "2026-11-12T09:59:00.000Z");
+    expect(Date.parse(early.made_at)).toBeGreaterThan(Date.parse(move.made_at));
+    // Queued after the move, the view shows the card back on its old step.
+    const v = L.viewBoard({ cards: [card] }, [move, back]);
+    expect(v.cards[0]).toMatchObject({ status: "doing", done_at: null });
+  });
+
+  it("adds_and_no_change_moves_cannot_be_undone", () => {
+    expect(L.undoFor({ id: -5, status: "todo", pending: true }, { id: "x", made_at: at, card_id: -5, action: "doing" }, 0)).toBeNull();
+    expect(L.undoFor({ id: 1, status: "done" }, { id: "x", made_at: at, card_id: 1, action: "done" }, 0)).toBeNull();
+    expect(L.undoFor(null, { id: "x", made_at: at, action: "add", title: "New" }, 0)).toBeNull();
+  });
+
+  it("every_link_is_a_button_with_its_own_label_and_only_web_links", () => {
+    const shown = L.cardLinks({ link: "https://mail.google.com/x", links: [
+      { kind: "email", url: "https://mail.google.com/x" },
+      { kind: "meeting", url: "https://acme.zoom.us/j/1" },
+      { kind: "link", url: "https://calendar.google.com/e", label: "calendar" },
+      { kind: "link", url: "https://docs.example.com/plan" },
+      { kind: "link", url: "javascript:alert(1)" },
+      { kind: "link", url: 5 },
+    ] });
+    expect(shown.map((l: any) => [L.linkLabel(l), l.url])).toEqual([
+      ["Open email", "https://mail.google.com/x"],
+      ["Join meeting", "https://acme.zoom.us/j/1"],
+      ["Open calendar", "https://calendar.google.com/e"],
+      ["Open link", "https://docs.example.com/plan"],
+    ]);
+    // A board from an older Mac has only link.
+    expect(L.cardLinks({ link: "https://example.com/a" })).toEqual([{ kind: "link", url: "https://example.com/a" }]);
+    expect(L.cardLinks({ link: "javascript:alert(1)" })).toEqual([]);
+    expect(L.cardLinks({ link: null, links: [] })).toEqual([]);
+  });
 });

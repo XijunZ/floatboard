@@ -17,6 +17,9 @@
  *   top says "Synced", "Last synced 14:02", "3 changes waiting" or "Offline, 3 changes waiting".
  * - After pairing or signing in, the browser is reset: cached board dropped and any old push subscription unsubscribed,
  *   so a browser that changes hands never shows or receives the previous account's data.
+ * - After a move, a bar says "Moved to Done · Undo" for 8 seconds; Undo queues a new move back (its own id and time).
+ * - The task sheet has a button per link the Mac sent ("Join meeting", "Open email", "Open calendar", "Open link"),
+ *   each opening in a new tab or app.
  * - The queue logic is in src/app/sync-logic.ts (pure functions, tested on their own).
  *
  * Kept as a string: no backticks or dollar-brace inside (apart from the SYNC_JS insert).
@@ -75,6 +78,7 @@ ${SYNC_JS}
 
   var toastTimer = 0;
   function toast(text) {
+    hideUndo();
     var t = $("toast");
     t.textContent = text;
     t.hidden = false;
@@ -560,20 +564,47 @@ ${SYNC_JS}
     return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
   }
 
-  // A tap: queued with its own id and the time it was made, shown at once, sent as soon as possible.
-  function act(a, done) {
+  // A tap: queued with its own id and the time it was made, shown at once, sent as soon as possible. A move then shows
+  // "Moved to Done · Undo"; anything else shows the done text.
+  function act(a, done, card) {
     var account = me ? me.account : shownAccount;
     if (!account || !board) return;
-    a.id = newId();
-    a.made_at = new Date().toISOString();
+    if (!a.id) a.id = newId();
+    if (!a.made_at) a.made_at = new Date().toISOString();
     queue.account = account;
     queue.actions.push(a);
     saveQueue();
     closeSheet();
     render();
-    toast(done);
+    var u = card ? undoFor(card, a, Date.now()) : null;
+    if (u) showUndo(u); else toast(done);
     failures = 0;
     sync();
+  }
+
+  var undo = null;
+  var undoTimer = 0;
+  function showUndo(u) {
+    $("toast").hidden = true;
+    undo = u;
+    $("undo-text").textContent = undoText(u);
+    $("undo").hidden = false;
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(hideUndo, Math.max(0, u.at + UNDO_MS - Date.now()));
+  }
+
+  function hideUndo() {
+    clearTimeout(undoTimer);
+    undo = null;
+    $("undo").hidden = true;
+  }
+
+  // Undo: a new move back to the step the card was on (never a change to the queued move, which may be sent already).
+  function undoLast() {
+    var u = undo;
+    hideUndo();
+    if (!undoLive(u, Date.now())) return;
+    act(undoAction(u, newId(), new Date().toISOString()), "Moved back to " + STEP_NAMES[u.from]);
   }
 
   // ------------------------------------------------------------ sheets
@@ -623,21 +654,22 @@ ${SYNC_JS}
           var b = el("button", "btn act");
           b.appendChild(icon(s));
           b.appendChild(document.createTextNode(MOVE[s]));
-          b.addEventListener("click", function () { act({ card_id: c.id, action: s }, MOVED[s]); });
+          b.addEventListener("click", function () { act({ card_id: c.id, action: s }, MOVED[s], c); });
           sheet.appendChild(b);
         });
       }
-      var href = c.link ? safeLink(c.link) : null;
-      if (href) {
+      cardLinks(c).forEach(function (l) {
+        var href = safeLink(l.url);
+        if (!href) return;
         var a = el("a", "btn act");
         a.href = href;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
         a.style.textDecoration = "none";
-        a.appendChild(icon("link"));
-        a.appendChild(document.createTextNode("Open link"));
+        a.appendChild(icon(l.kind === "meeting" ? "video" : l.kind === "email" ? "mail" : l.label === "calendar" ? "calendar" : "link"));
+        a.appendChild(document.createTextNode(linkLabel(l)));
         sheet.appendChild(a);
-      }
+      });
       sheet.appendChild(el("p", "sub hint", "Edit details on your Mac."));
     });
   }
@@ -902,6 +934,7 @@ ${SYNC_JS}
   $("signin-go").addEventListener("click", signIn);
   $("retry").addEventListener("click", start);
   $("refresh").addEventListener("click", function () { failures = 0; sync(); });
+  $("undo-btn").addEventListener("click", undoLast);
   $("open-settings").addEventListener("click", openSettings);
   $("close-settings").addEventListener("click", function () { show("board"); render(); });
   $("add").addEventListener("click", addSheet);

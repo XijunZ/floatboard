@@ -113,8 +113,20 @@ describe("phone app routes", () => {
 describe("phone app sync v2 (client text checks; logic is tested in phone-sync.test.ts)", () => {
   it("queue_is_stored_with_its_account_and_each_action_carries_an_id_and_made_at", () => {
     expect(APP_JS).toContain('var QUEUE_KEY = "floatboard.queue"');
-    expect(APP_JS).toMatch(/function act\(a, done\) \{[\s\S]*a\.id = newId\(\);\s*a\.made_at = new Date\(\)\.toISOString\(\);[\s\S]*saveQueue\(\);[\s\S]*render\(\);/);
+    expect(APP_JS).toMatch(/function act\(a, done, card\) \{[\s\S]*if \(!a\.id\) a\.id = newId\(\);\s*if \(!a\.made_at\) a\.made_at = new Date\(\)\.toISOString\(\);[\s\S]*saveQueue\(\);[\s\S]*render\(\);/);
     expect(APP_JS).toContain("crypto.randomUUID()");
+  });
+
+  it("a_move_offers_undo_and_undo_is_a_new_queued_move", () => {
+    expect(APP_JS).toContain('act({ card_id: c.id, action: s }, MOVED[s], c)');
+    expect(APP_JS).toMatch(/var u = card \? undoFor\(card, a, Date\.now\(\)\) : null;\s*if \(u\) showUndo\(u\); else toast\(done\);/);
+    expect(APP_JS).toMatch(/function undoLast\(\) \{[\s\S]*if \(!undoLive\(u, Date\.now\(\)\)\) return;\s*act\(undoAction\(u, newId\(\), new Date\(\)\.toISOString\(\)\)/);
+    expect(PAGE_HTML).toContain('<button id="undo-btn" class="undo-btn" type="button">Undo</button>');
+  });
+
+  it("task_sheet_has_a_button_per_link_opening_in_a_new_tab", () => {
+    expect(APP_JS).toMatch(/cardLinks\(c\)\.forEach\(function \(l\) \{[\s\S]*a\.target = "_blank";\s*a\.rel = "noopener noreferrer";[\s\S]*createTextNode\(linkLabel\(l\)\)/);
+    for (const i of ["video", "mail", "calendar", "link"]) expect(PAGE_HTML).toContain(`<symbol id="i-${i}"`);
   });
 
   it("batches_carry_sent_at_and_go_to_the_action_endpoint", () => {
