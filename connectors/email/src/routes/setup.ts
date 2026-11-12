@@ -8,6 +8,7 @@
  * browser says it came from another site. Sign-in is rate-limited per IP. Every outcome is written to setup_log; secrets
  * are never logged or shown again.
  */
+import { dbSizeBytes } from "../archive";
 import { insertUser, randomToken, sameSecret, sha256Hex, userByKey } from "../auth";
 import { decrypt, encrypt } from "../crypto";
 import { type Env, nowISO } from "../env";
@@ -151,6 +152,7 @@ async function dashboard(req: Request, env: Env, s: Session, extra: Partial<Dash
     outlook: await env.DB.prepare("SELECT address, enabled, last_error, last_run FROM sources WHERE user_id=? AND kind='outlook_web'")
       .bind(userId).first<OutlookStatus>(),
     phones: await listDevices(env, userId),
+    dbSizeBytes: await dbSizeBytes(env),
     ...extra,
   }), status);
 }

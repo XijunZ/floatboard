@@ -10,6 +10,7 @@ import { LEARNING_PAUSED } from "../learn";
 import { processEvents } from "../events";
 import { DEFAULT_TIME_ZONE, isTimeZone, zoneOrDefault } from "../time";
 import { outlookSilent, SILENT_NOTICE } from "../outlook";
+import { dbSizeBytes } from "../archive";
 
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -295,6 +296,8 @@ route("GET", "/v2/status", async (_req, env, user) => {
     settings_version: s?.settings_version ?? 0, schema: SCHEMA, needs_attention,
     waiting: await count("SELECT COUNT(*) n FROM app_events WHERE user_id=? AND processed=0"),
     last_run_ok: good?.finished ?? null, last_run_error: run?.error ?? null, oldest_unprocessed_event: oldest?.t ?? null,
+    // The whole engine database (all users), so the Mac can offer to archive old data before D1's limit.
+    db_size_bytes: await dbSizeBytes(env),
   });
 });
 

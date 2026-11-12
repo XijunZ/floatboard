@@ -57,12 +57,13 @@ export async function storeRecap(env: Env, userId: string, m: Message, r: Recap,
   await env.DB.batch(stmts);
 }
 
-/** True when any of these meeting keys was already stored (by this or an earlier version, which kept only the summary row). */
+/** True when any of these meeting keys was already stored (by this or an earlier version, which kept only the summary row), or archived. */
 export async function recapKnown(env: Env, userId: string, keys: string[]): Promise<boolean> {
   const q = keys.map(() => "?").join(",");
   const hit = await env.DB.prepare(`SELECT 1 FROM recap_keys WHERE user_id=? AND key IN (${q})
-      UNION ALL SELECT 1 FROM items WHERE user_id=? AND kind='summary' AND message_id IN (${q}) LIMIT 1`)
-    .bind(userId, ...keys, userId, ...keys).first();
+      UNION ALL SELECT 1 FROM items WHERE user_id=? AND kind='summary' AND message_id IN (${q})
+      UNION ALL SELECT 1 FROM archived_items WHERE user_id=? AND message_id IN (${q}) LIMIT 1`)
+    .bind(userId, ...keys, userId, ...keys, userId, ...keys).first();
   return !!hit;
 }
 

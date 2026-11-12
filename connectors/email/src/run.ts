@@ -180,7 +180,9 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   /** Returns true when the message is settled (marked seen), false when it must be read again next run. */
   const handle = async (m: Message, source: string, sourceId: string | null = null): Promise<boolean> => {
     const base = { source, sender: senderAddress(m.from), subject: m.subject, trace: m.messageId };
-    if (await env.DB.prepare("SELECT 1 FROM seen WHERE user_id=? AND message_id=?").bind(userId, m.messageId).first()) {
+    // Seen before, or its task was archived to the Mac (deleted here, tombstone kept): never a task twice.
+    if (await env.DB.prepare("SELECT 1 FROM seen WHERE user_id=?1 AND message_id=?2 UNION ALL SELECT 1 FROM archived_items WHERE user_id=?1 AND message_id=?2 LIMIT 1")
+      .bind(userId, m.messageId).first()) {
       stats.skippedSeen++;
       return true;
     }
