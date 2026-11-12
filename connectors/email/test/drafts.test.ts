@@ -500,7 +500,8 @@ describe("drafts stay contained", () => {
   it("draft_results_never_reach_v1_style_readers", () => {
     let checked = 0;
     for (const [file, src] of Object.entries(sources)) {
-      if (file.endsWith("/routes/v2.ts") || file.endsWith("/drafts.ts")) continue; // proposals deliver every kind; drafts.ts writes them
+      // proposals deliver every kind; drafts.ts writes them; the archive moves every kind of row to the Mac and deletes it
+      if (file.endsWith("/routes/v2.ts") || file.endsWith("/drafts.ts") || file.endsWith("/archive.ts")) continue;
       for (const m of src.matchAll(/(FROM|JOIN) items\b/g)) {
         const end = src.indexOf(".bind(", m.index);
         const stmt = src.slice(m.index, end < 0 ? undefined : end);

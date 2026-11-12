@@ -3,6 +3,7 @@
  * event handlers, no external resources. Every dynamic value goes through `esc`.
  */
 
+import { DB_LIMIT_BYTES, DB_WARN_BYTES } from "../archive";
 import { RULES, PRE_RULES } from "../classify";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -97,6 +98,8 @@ export type Dashboard = {
   outlook?: OutlookStatus | null;
   /** Paired devices (the phone app; one per browser install), oldest first. */
   phones?: { id: string; name: string; created: string; last_seen: string | null; shares_passkey?: number }[];
+  /** The engine database's size in bytes (all users), or null when D1 doesn't say. */
+  dbSizeBytes?: number | null;
   /** The new ingest token, right after it was made (shown this once only). */
   outlookToken?: string | null;
   notice?: string | null;
@@ -121,6 +124,19 @@ function phonesSection(d: Dashboard): string {
   return `${list}
 <p class="muted">To add a phone, open the FloatBoard app on your Mac, go to the Connectors tab and choose Pair a phone. A passkey synced to another device (iCloud Keychain, Google Password Manager) can sign that device in too; it then shows here as its own device.</p>
 <p class="muted">Remove signs that device out and stops its notifications. A passkey is deleted once every device using it is removed, so to lock out a lost phone, remove it and every device that shares its passkey.</p>`;
+}
+
+const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
+
+/** The database's size against D1's limit, with a warning (and where to archive) above half. */
+function databaseSection(d: Dashboard): string {
+  if (d.dbSizeBytes === undefined) return "";
+  if (d.dbSizeBytes === null) return `<p class="muted">Database: size not available.</p>`;
+  const warn = d.dbSizeBytes > DB_WARN_BYTES
+    ? `<p class="bad">The database is over half full. To make room, open FloatBoard on your Mac, go to Connectors and choose Archive old data to this Mac. Old task records and the change log are saved on the Mac, then removed here.</p>`
+    : "";
+  return `<p>Database: ${mb(d.dbSizeBytes)} of ${mb(DB_LIMIT_BYTES).replace(".0 MB", " MB")}</p>
+${warn}<p class="muted">The whole engine database (everyone who uses this engine). Cloudflare's free plan allows ${mb(DB_LIMIT_BYTES).replace(".0 MB", " MB")} per database.</p>`;
 }
 
 export function dashboardPage(d: Dashboard): string {
@@ -218,6 +234,10 @@ ${outlookSection(d)}
 <ul>${RULES.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
 <h3>Free checks before Claude sees an email</h3>
 <ul>${PRE_RULES.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+</section>
+
+<section><h2>Database</h2>
+${databaseSection(d)}
 </section>
 
 <section><h2>Connect to FloatBoard</h2>
