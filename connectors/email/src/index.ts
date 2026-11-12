@@ -97,15 +97,25 @@ export default {
     return json({ error: "not found" }, 404);
   },
 
-  /** Every 15 minutes: due reminders. Hourly: every user with an enabled source gets a few passes; backlogs continue next hour. */
+  /** Every 15 minutes: due reminders. On the hour: every user with an enabled source gets a few passes; backlogs continue next hour. */
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (event.cron === DUE_CRON) ctx.waitUntil(runDueAlerts(env));
-    else ctx.waitUntil(runAllUsers(env));
+    const jobs = cronJobs(event.cron, event.scheduledTime);
+    if (jobs.due) ctx.waitUntil(runDueAlerts(env));
+    if (jobs.hourly) ctx.waitUntil(runAllUsers(env));
   },
 } satisfies ExportedHandler<Env>;
 
-/** The 15-minute schedule (wrangler.toml); every other schedule is the hourly work. */
+/** The one schedule (wrangler.toml): every 15 minutes. One trigger only, because free accounts allow 5 for all Workers. */
 export const DUE_CRON = "*/15 * * * *";
+
+/**
+ * What a cron run does. The 15-minute schedule always sends due reminders and also does the hourly work on the run
+ * whose time is on the hour (UTC). Any other schedule (an older config with an hourly cron) is the hourly work only.
+ */
+export function cronJobs(cron: string, scheduledTime: number): { due: boolean; hourly: boolean } {
+  if (cron !== DUE_CRON) return { due: false, hourly: true };
+  return { due: true, hourly: new Date(scheduledTime).getUTCMinutes() < 15 };
+}
 
 const cronProblem = (env: Env, decision: string, detail: string) =>
   logEvent(env, { run_id: "cron", user_id: "", decision, detail, trace: "cron" });
