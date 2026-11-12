@@ -193,3 +193,14 @@ Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (
 - `GET /v2/phone-actions`: `{ server_time, actions: [{ id, client_id, card_id, action, title, group, created, made_at }] }`.
   `POST /v2/phone-actions/ack` `{ ids?, skipped?: [{ id, reason? }] }`: skipped ones are logged and reported to the phone.
 - Hourly: `board_log` rows older than 365 days are deleted.
+
+## Database size: warning and archive to the Mac (next, after sync v2)
+
+- **Size on the setup page** (from D1's `meta.size_after` on a cheap query): shown always; a warning above 250 MB
+  (D1 free limit is 500 MB per database).
+- **Archive old data to this Mac** (Mac app, Connectors tab, per user): choose a cut-off (default 6 months, minimum
+  3 months). `GET /v2/archive?before=<ISO>` returns that user's `board_log` rows and finished/old `items` older than the
+  cut-off (paged). The Mac writes them to `archives/engine-<date>.json` beside the board (verified by re-reading), then
+  `POST /v2/archive/confirm {before, count, sha256}`; the engine deletes exactly those rows only when count and hash
+  match. Items newer than 3 months are never archived (they stop the same email making a task twice). Checks: other
+  user's rows never returned or deleted; mismatch deletes nothing; interrupted archive deletes nothing.
