@@ -1,6 +1,15 @@
 import CryptoKit
 import Foundation
 
+/// One link on a task for the phone: what it opens (`email`, `meeting` or `link`) and where. `label` is "calendar"
+/// for the task's Google Calendar event (the phone says "Open calendar").
+public struct BoardLink: Codable, Equatable {
+    public var kind: String
+    public var url: String
+    public var label: String?
+    public init(kind: String, url: String, label: String? = nil) { self.kind = kind; self.url = url; self.label = label }
+}
+
 /// One task in the copy of the board the engine keeps for the phone app (`PUT /v2/board`).
 public struct BoardCard: Codable, Equatable {
     public var id: Int64
@@ -12,13 +21,16 @@ public struct BoardCard: Codable, Equatable {
     public var due: String?
     public var hasTime: Bool
     public var status: String
+    /// The first of `links` (kept for phones and engines from before `links`).
     public var link: String?
+    /// Every web link on the task, in order: source, Link field, calendar event, links in the AI summary.
+    public var links: [BoardLink] = []
     public var doneAt: String?
     /// When this card's step last changed on this Mac (Mac clock, ISO 8601 UTC with milliseconds).
     public var statusAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, group, color, importance, due, hasTime = "has_time", status, link, doneAt = "done_at", statusAt = "status_at"
+        case id, title, group, color, importance, due, hasTime = "has_time", status, link, links, doneAt = "done_at", statusAt = "status_at"
     }
 
     /// Every field is written, nil ones as null (the engine requires them all).
@@ -27,6 +39,7 @@ public struct BoardCard: Codable, Equatable {
         try c.encode(id, forKey: .id); try c.encode(title, forKey: .title); try c.encode(group, forKey: .group)
         try c.encode(color, forKey: .color); try c.encode(importance, forKey: .importance); try c.encode(due, forKey: .due)
         try c.encode(hasTime, forKey: .hasTime); try c.encode(status, forKey: .status); try c.encode(link, forKey: .link)
+        try c.encode(links, forKey: .links)
         try c.encode(doneAt, forKey: .doneAt); try c.encode(statusAt, forKey: .statusAt)
     }
 }
@@ -96,6 +109,8 @@ public enum PhoneBoard {
     public static let maxCards = 500
     static let maxText = 200
     static let maxLink = 2000
+    static let maxLinks = 6
+    static let maxSummaryLinks = 3
     static let fallbackColor = "#8E8E93"
     /// How long applied phone action ids are remembered (the engine keeps acked rows about as long).
     public static let rememberApplied: TimeInterval = 7 * 86400
@@ -119,10 +134,31 @@ public enum PhoneBoard {
     static func card(for c: Card, color: String?, calendar: Calendar) -> BoardCard {
         let hex = color.flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
         let hasTime = c.due.map { Due.hasTime($0) } ?? false
+        let all = links(for: c)
         return BoardCard(id: c.id, title: clip(c.title), group: clip(c.area), color: hex, importance: c.importance.rawValue,
                          due: c.due.map { hasTime ? iso($0, calendar) : day($0, calendar) }, hasTime: hasTime,
-                         status: c.status.rawValue, link: webLink(c.sourceLink) ?? webLink(c.link),
+                         status: c.status.rawValue, link: all.first?.url, links: all,
                          doneAt: c.status == .done ? c.done.map { iso($0, calendar) } : nil, statusAt: nil)
+    }
+
+    /// Every web link on the task for the phone, in order: the source (an email, else a link such as meeting notes),
+    /// the Link field (a meeting when its host is a call), the Google Calendar event, then up to 3 links written in the
+    /// AI summary. http(s) only, each at most 2,000 characters, no repeats, at most 6.
+    public static func links(for c: Card) -> [BoardLink] {
+        var out: [BoardLink] = []
+        func add(_ raw: String, _ kind: (URL) -> LinkKind, label: String? = nil) -> Bool {
+            guard out.count < maxLinks, let s = webLink(raw), let u = URL(string: s), !out.contains(where: { $0.url == s }) else { return false }
+            out.append(BoardLink(kind: kind(u).rawValue, url: s, label: label))
+            return true
+        }
+        _ = add(c.sourceLink) { CardLinks.kind($0) == .email ? .email : .link }
+        _ = add(c.link) { CardLinks.kind($0) == .meeting ? .meeting : .link }
+        _ = add(c.gcalLink, { _ in .link }, label: "calendar")
+        var fromSummary = 0
+        for s in CardLinks.found(in: c.aiSummary) where fromSummary < maxSummaryLinks {
+            if add(s, { _ in .link }) { fromSummary += 1 }
+        }
+        return out
     }
 
     /// At most 200 UTF-16 units (what the engine counts), never splitting a character.

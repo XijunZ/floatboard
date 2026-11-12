@@ -717,6 +717,8 @@ await recheckChecks()
 await connectorEdgeCaseChecks()
 await phoneChecks()
 oneTaskChecks()
+phoneLinksChecks()
+oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
