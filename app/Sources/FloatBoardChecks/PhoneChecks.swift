@@ -107,7 +107,7 @@ private final class PhoneEngine {
     do {
         let obj = try JSONSerialization.jsonObject(with: try PhoneBoard.body(payload)) as? [String: Any]
         let first = (obj?["cards"] as? [[String: Any]])?.first { ($0["id"] as? Int).map(Int64.init) == watch.id }
-        check(first.map { Set($0.keys) == ["id", "title", "group", "color", "importance", "due", "has_time", "status", "link", "done_at", "status_at"]
+        check(first.map { Set($0.keys) == ["id", "title", "group", "color", "importance", "due", "has_time", "status", "link", "links", "done_at", "status_at"]
                           && $0["due"] is NSNull && $0["link"] is NSNull } ?? false, "phone_board_body_has_every_field")
     } catch { check(false, "phone_board_body_has_every_field: \(error)") }
     check(PhoneBoard.clip(String(repeating: "é", count: 150) + String(repeating: "😀", count: 100)).utf16.count <= 200,
