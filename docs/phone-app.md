@@ -24,7 +24,7 @@ second channel, so alerts no longer depend on Telegram.
   replaced on each push; phone actions are queued on the engine and applied by the Mac.
 - No new secrets to set by hand: the engine creates its VAPID key pair on first use and stores the private key encrypted.
 - No personal details in code or docs. RP ID and origins come from the request host.
-- Alerts carry only the task title, due and a link; never email text.
+- Alerts carry only the task title, due and a link; never email text. ntfy alerts carry title and due only.
 - Tests first (vitest for the engine, FloatBoardChecks for the app). No AI attribution in commits.
 
 ## Decisions
@@ -34,8 +34,14 @@ second channel, so alerts no longer depend on Telegram.
    taps "Set up this phone", and a passkey is created (WebAuthn, resident key, user verification required, attestation
    "none"). The engine then sets a session cookie `fb_session` (random 32 bytes, stored hashed; HttpOnly, Secure,
    SameSite=Strict, Path=/app, Max-Age 90 days, renewed on use when more than a day old). A phone whose session ended
-   signs in again with its passkey (no code). The setup page lists phones with Remove (ends sessions, deletes passkey and
-   push subscription).
+   signs in again with its passkey (no code). A **device is one browser install**: the app keeps a random install id in
+   localStorage and sends it (with a device name) on pair/finish and login/finish. A passkey synced to another browser
+   (iCloud Keychain, Google Password Manager) signs that browser in as a new device with its own session and push
+   subscription; signing in again on a known install reuses its device; a sign-in for another account on the same
+   browser ends the old account's device there. Passkeys belong to the user. The setup page lists every device with
+   Remove (ends that device's sessions and push subscription only); a passkey is deleted when the last device using it is
+   removed (chosen over a separate per-passkey Remove: one button, and a removed single phone still can't sign back in),
+   and the page says which devices share a passkey. Logout ends only the session (the device stays listed).
 2. **WebAuthn on the server:** `@simplewebauthn/server` (runs on Workers with WebCrypto). Challenges are stored with a
    5-minute expiry and used once. The browser side is plain `navigator.credentials` calls (no library).
 3. **Board mirror:** the Mac `PUT /v2/board` with its open tasks plus tasks done today (id, title, group, group colour,
@@ -45,10 +51,16 @@ second channel, so alerts no longer depend on Telegram.
    `GET /v2/phone-actions` every 2 minutes (and on each sync), applies them (as the user, so connector "done" events
    still go to the engine) and acks with `POST /v2/phone-actions/ack`. Unknown or deleted card ids are acked and logged.
 5. **Web Push:** RFC 8291 (aes128gcm) + RFC 8292 (VAPID, ES256) written with WebCrypto, tested against RFC 8291's
-   example vector. Subscriptions per device. 404/410 from the push service deletes the subscription. Payload:
-   `{title, body, url}`; the service worker shows it and opens the app (or the link) on tap. TTL 1 day, Urgency high.
+   example vector. Subscriptions per device; one endpoint belongs to one device (saving it deletes other rows with that
+   endpoint). Endpoints only at known push services (`fcm.googleapis.com`, `*.push.apple.com`,
+   `*.push.services.mozilla.com`, `*.notify.windows.com`), https on the default port; no redirects followed. 404/410
+   from the push service deletes the subscription. Payload: `{title, body, url}`, trimmed to fit one 4096-byte record;
+   the service worker shows it and opens the app (or the link) on tap. TTL 1 day, Urgency high. Alerts go to devices
+   that are still paired; an expired session keeps getting alerts (signing in again is only needed to open the board).
 6. **ntfy (optional):** the setup page turns on "Phone alerts with the ntfy app": creates a random 24-character topic,
-   shows the subscribe address. Alerts POST to `https://ntfy.sh/<topic>` with Title, Priority 5 for urgent, Click link.
+   shows the subscribe address. Alerts POST to `https://ntfy.sh/<topic>` with Title, Priority 5 for urgent, body = due
+   date and "Open FloatBoard for details", Click = `<engine>/app/` (never the email link, sender or reason: ntfy.sh is
+   public and anyone with the topic name can read the alerts; the setup page says so).
 7. **Alert fan-out:** an urgent item goes to every channel the user has: Web Push devices, ntfy, Telegram (if linked).
    One failing channel never stops the others; failures go to the run log.
 
@@ -119,3 +131,13 @@ and iPhone, pairing, alerts). Smoke test the live `/app` and manifest.
    importance / group, delete with Undo and teach choices, search, urgent alerts. Mac only (stated in the app's Settings
    and on the task sheet): editing title and notes, reply drafts, Google Calendar and Meet, groups, column sort, bar
    settings, engine settings.
+
+## Security review fixes (Nov 2026)
+
+The review of the engine side (I1-I3, M1-M7) changed: device = browser install (above); one push endpoint per device
+and push hosts on an allow list; the phone's cached board is tied to the account marker from `/app/api/me` and shown only
+after `/me` confirms it (no cached board at an offline launch); pairing or signing in resets the browser (cache dropped,
+old push subscription unsubscribed); at most 20 live sign-in challenges per client address; request bodies capped
+before reading; phone moves applied to the latest board copy with a conditional write (a Mac push in the tiny window
+between re-read and write wins, and the overlay still shows the move); a pairing code is used up only by a pairing whose
+device, passkey and session were all created; push payloads trimmed to fit 4096 bytes; ntfy alerts minimal.

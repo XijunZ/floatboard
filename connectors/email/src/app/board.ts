@@ -7,10 +7,14 @@
  *   `phone_actions` and, for a status change, also applied to the stored copy so the phone shows it at once. A new task
  *   is not stored in the copy: it comes back as a pending card (negative id) until the Mac applies and acks it.
  * - The Mac polls `GET /v2/phone-actions`, applies them, and acks with `POST /v2/phone-actions/ack`.
+ * - A status change re-reads the stored copy right before writing and applies the move to that latest copy; the write is
+ *   conditional on the copy's `updated` not having changed since. If the Mac pushed in that tiny window, the phone's
+ *   write is skipped (the Mac's newer copy wins) and the untaken action still shows through `overlay()` until the Mac
+ *   applies and acks it, so nothing is lost either way.
  */
 import { type Env, json, nowISO } from "../env";
 import { decrypt, encrypt } from "../crypto";
-import { readJSON } from "../http";
+import { readCappedJSON } from "../http";
 import { route } from "../router";
 import { appJSON, requireAppSession, sameOrigin } from "./auth";
 
@@ -110,10 +114,8 @@ async function boardResponse(env: Env, userId: string, setCookie?: string): Prom
 // ---------------------------------------------------------------- Mac side (user key)
 
 route("PUT", "/v2/board", async (req, env, user) => {
-  const text = await req.text();
-  if (text.length > MAX_BOARD_BYTES) return json({ error: "too large" }, 413);
-  const rb = await readJSON(new Request(req.url, { method: "POST", body: text }));
-  if (!rb.ok) return rb.res;
+  const rb = await readCappedJSON(req, MAX_BOARD_BYTES);
+  if (!rb.ok) return rb.tooLarge ? json({ error: "too large" }, 413) : json({ error: "Invalid JSON" }, 400);
   let cards: Card[];
   try { cards = parseCards(rb.body); } catch (e) { return json({ error: (e as Error).message }, 400); }
   await env.DB.prepare("INSERT INTO board_snapshots(user_id,data_enc,updated) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET data_enc=excluded.data_enc, updated=excluded.updated")
@@ -128,8 +130,8 @@ route("GET", "/v2/phone-actions", async (_req, env, user) => {
 });
 
 route("POST", "/v2/phone-actions/ack", async (req, env, user) => {
-  const rb = await readJSON(req);
-  if (!rb.ok) return rb.res;
+  const rb = await readCappedJSON(req, 50_000);
+  if (!rb.ok) return rb.tooLarge ? json({ error: "too large" }, 413) : json({ error: "Invalid JSON" }, 400);
   const ids = rb.body.ids;
   if (!Array.isArray(ids) || ids.length > MAX_UNTAKEN_ACTIONS || ids.some((i: unknown) => typeof i !== "string" || i.length === 0 || i.length > 100)) {
     return json({ error: `ids must be a list of up to ${MAX_UNTAKEN_ACTIONS} ids` }, 400);
@@ -158,10 +160,8 @@ export async function handleBoard(req: Request, env: Env): Promise<Response | nu
     if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);
     const s = await requireAppSession(req, env);
     if (!s) return appJSON({ error: "not signed in" }, 401);
-    const text = await req.text();
-    if (text.length > 5_000) return appJSON({ error: "too large" }, 413, s.setCookie);
-    const rb = await readJSON(new Request(req.url, { method: "POST", body: text }));
-    if (!rb.ok) return appJSON({ error: "Invalid JSON" }, 400, s.setCookie);
+    const rb = await readCappedJSON(req, 5_000);
+    if (!rb.ok) return appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie);
     return doAction(env, s.userId, rb.body, s.setCookie);
   }
   return null;
@@ -193,10 +193,15 @@ async function doAction(env: Env, userId: string, body: any, setCookie?: string)
   const now = nowISO();
   const stmts = [env.DB.prepare("INSERT INTO phone_actions(id,user_id,card_id,action,title,group_name,created,taken) VALUES(?,?,?,?,?,?,?,0)")
     .bind(crypto.randomUUID(), userId, cardId, action, title, group, now)];
-  if (cardId !== null && snap) {
-    const c = snap.cards.find((x) => x.id === cardId)!;
-    applyMove(c, action, now);
-    stmts.push(env.DB.prepare("UPDATE board_snapshots SET data_enc=? WHERE user_id=?").bind(await encrypt(env, JSON.stringify({ cards: snap.cards })), userId));
+  if (cardId !== null) {
+    // Apply the move to the latest stored copy, and write only if it is still the latest (see the top of this file).
+    const latest = await loadSnapshot(env, userId);
+    const c = latest?.cards.find((x) => x.id === cardId);
+    if (latest && c) {
+      applyMove(c, action, now);
+      stmts.push(env.DB.prepare("UPDATE board_snapshots SET data_enc=? WHERE user_id=? AND updated=?")
+        .bind(await encrypt(env, JSON.stringify({ cards: latest.cards })), userId, latest.updated));
+    }
   }
   await env.DB.batch(stmts);
   return boardResponse(env, userId, setCookie);

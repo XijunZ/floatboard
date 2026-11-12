@@ -27,15 +27,16 @@ describe("alerts", () => {
   it("ntfy_alert_sends_title_priority_click", async () => {
     const u = await newUser("N1");
     await setTopic(u.id, "topic-abc");
+    await env.DB.prepare("UPDATE users SET app_origin='https://engine.test' WHERE id=?").bind(u.id).run();
     await alertFor(env as any, u.id)(item);
     expect(ntfy).toHaveLength(1);
     expect(ntfy[0].url).toBe("https://ntfy.sh/topic-abc");
     expect(ntfy[0].headers.Title).toBe("Pay invoice");
     expect(ntfy[0].headers.Priority).toBe("5");
-    expect(ntfy[0].headers.Click).toBe("https://mail/1");
+    expect(ntfy[0].headers.Click).toBe("https://engine.test/app/"); // the phone app, never the email link
     expect(ntfy[0].headers.Tags).toBe("warning");
     expect(ntfy[0].body).toContain("Due: 2026-11-08");
-    expect(ntfy[0].body).toContain("From: Acme <ap@acme.com>");
+    expect(ntfy[0].body).not.toContain("Acme");
   });
 
   it("ntfy_title_is_capped_and_click_omitted_without_link", async () => {

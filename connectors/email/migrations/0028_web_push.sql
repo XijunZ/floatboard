@@ -1,14 +1,15 @@
--- Web Push: one subscription per paired phone, and the engine's own keys (the VAPID key pair, made on first use).
+-- Web Push: one subscription per paired device (an endpoint belongs to one device only), and the engine's own keys (the VAPID key pair, made on first use).
 CREATE TABLE app_push (
   device_id TEXT PRIMARY KEY,       -- app_devices.id
   user_id TEXT NOT NULL,
-  endpoint TEXT NOT NULL,           -- the push service address (https)
+  endpoint TEXT NOT NULL,           -- the push service address (https, known push services only)
   p256dh TEXT NOT NULL,             -- the phone's public key (base64url, 65 bytes)
   auth TEXT NOT NULL,               -- the phone's auth secret (base64url, 16 bytes)
   origin TEXT NOT NULL,             -- engine address the phone subscribed on (VAPID subject <origin>/app)
   created TEXT NOT NULL
 );
 CREATE INDEX app_push_user ON app_push(user_id);
+CREATE UNIQUE INDEX app_push_endpoint ON app_push(endpoint);
 
 CREATE TABLE app_keys (
   name TEXT PRIMARY KEY,            -- "vapid"

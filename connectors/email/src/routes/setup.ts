@@ -359,7 +359,7 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
     case "/setup/ntfy/on":
     case "/setup/ntfy/new": {
       const topic = randomToken(24).slice(0, 24); // 24 url-safe characters
-      await env.DB.prepare("UPDATE users SET ntfy_topic=? WHERE id=?").bind(topic, userId).run();
+      await env.DB.prepare("UPDATE users SET ntfy_topic=?, app_origin=? WHERE id=?").bind(topic, new URL(req.url).origin, userId).run();
       await record(env, req, path === "/setup/ntfy/on" ? "ntfy_on" : "ntfy_new_topic", true, userId);
       return dashboard(req, env, s, { notice: path === "/setup/ntfy/on"
         ? "Phone alerts are on. Subscribe to the topic in the ntfy app, then send a test alert."
@@ -371,10 +371,10 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
       return dashboard(req, env, s, { notice: "Phone alerts with the ntfy app are off." });
     }
     case "/setup/ntfy/test": {
-      const row = await env.DB.prepare("SELECT ntfy_topic FROM users WHERE id=?").bind(userId).first<{ ntfy_topic: string | null }>();
+      const row = await env.DB.prepare("SELECT ntfy_topic, app_origin FROM users WHERE id=?").bind(userId).first<{ ntfy_topic: string | null; app_origin: string | null }>();
       if (!row?.ntfy_topic) return dashboard(req, env, s, { error: "Turn on phone alerts first." }, 400);
       try {
-        await sendNtfy(row.ntfy_topic, { id: "test", title: "FloatBoard test alert", why: "If you see this, phone alerts work.", sender: "", due: null, link: "" });
+        await sendNtfy(row.ntfy_topic, { id: "test", title: "FloatBoard test alert", why: "", sender: "", due: null, link: "" }, row.app_origin);
       } catch (e) {
         await record(env, req, "ntfy_test", false, userId, (e as Error).message);
         return dashboard(req, env, s, { error: "Couldn't reach ntfy. Try again in a minute." }, 502);
@@ -389,7 +389,7 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
         return dashboard(req, env, s, { error: "That phone isn't paired." }, 404);
       }
       await record(env, req, "phone_remove", true, userId);
-      return dashboard(req, env, s, { notice: `${name} removed. It is signed out and its passkey no longer works here.` });
+      return dashboard(req, env, s, { notice: `${name} removed. It is signed out and gets no more notifications.` });
     }
     case "/setup/fathom/key": {
       const key = (f.fathom_key ?? "").trim();

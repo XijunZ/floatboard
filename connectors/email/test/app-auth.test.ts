@@ -49,7 +49,7 @@ describe("phone pairing", () => {
     expect(await count("SELECT COUNT(*) n FROM app_sessions WHERE token_hash=?", token)).toBe(0); // only the hash is stored
     const m = await me(cookie);
     expect(m.status).toBe(200);
-    expect(await m.json()).toEqual({ user: "Finisher", device: "Pixel" });
+    expect(await m.json()).toMatchObject({ user: "Finisher", device: "Pixel" });
   });
 
   it("pairing_code_is_single_use", async () => {
@@ -124,7 +124,8 @@ describe("phone sign-in and sessions", () => {
     const r = await api("/app/api/login/finish", { challengeId, response });
     expect(r.status).toBe(200);
     expect(r.headers.get("Set-Cookie")).toMatch(/^fb_session=[A-Za-z0-9_-]{43}; HttpOnly; Secure; SameSite=Strict; Path=\/app; Max-Age=7776000$/);
-    expect(await (await me(cookieOf(r)!)).json()).toEqual({ user: "Login User", device: "Phone A" });
+    // A sign-in without an install id is a new browser: a new device, named by the client (default "Phone").
+    expect(await (await me(cookieOf(r)!)).json()).toMatchObject({ user: "Login User", device: "Phone" });
     expect(await count("SELECT counter n FROM app_credentials WHERE user_id=?", u.id)).toBe(1);
     expect(await count("SELECT COUNT(*) n FROM app_sessions WHERE user_id=?", u.id)).toBe(2);
     // The challenge is single use.
@@ -160,6 +161,7 @@ describe("phone sign-in and sessions", () => {
     expect(r.status).toBe(200);
     const html = await r.text();
     expect(html).toContain("Old phone removed");
+    // It was the only device using its passkey, so the passkey is deleted too.
     expect(await count("SELECT revoked n FROM app_devices WHERE id=?", dev!.id)).toBe(1);
     expect(await count("SELECT COUNT(*) n FROM app_sessions WHERE device_id=?", dev!.id)).toBe(0);
     expect(await count("SELECT COUNT(*) n FROM app_credentials WHERE device_id=?", dev!.id)).toBe(0);
@@ -240,8 +242,8 @@ describe("phone sign-in and sessions", () => {
     const two = await newUser("Second Person");
     const p1 = await pairPhone(one.key, "Phone 1");
     const p2 = await pairPhone(two.key, "Phone 2");
-    expect(await (await me(p1.cookie)).json()).toEqual({ user: "First Person", device: "Phone 1" });
-    expect(await (await me(p2.cookie)).json()).toEqual({ user: "Second Person", device: "Phone 2" });
+    expect(await (await me(p1.cookie)).json()).toMatchObject({ user: "First Person", device: "Phone 1" });
+    expect(await (await me(p2.cookie)).json()).toMatchObject({ user: "Second Person", device: "Phone 2" });
     // The second user's code can't be used to register against the first user's pairing either.
     const code1 = await pairCode(one.key);
     const code2 = await pairCode(two.key);

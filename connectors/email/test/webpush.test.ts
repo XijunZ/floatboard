@@ -138,16 +138,16 @@ describe("push routes", () => {
     expect(unb64url((await kr.json<{ key: string }>()).key)).toHaveLength(65);
 
     const k = await phoneKeys();
-    const body = { endpoint: "https://push.example.net/s/1", keys: { p256dh: k.p256dh, auth: k.auth } };
+    const body = { endpoint: "https://fcm.googleapis.com/fcm/send/s/1", keys: { p256dh: k.p256dh, auth: k.auth } };
     expect((await api("/app/api/push/subscribe", body)).status).toBe(401);
     expect((await api("/app/api/push/subscribe", body, { cookie, origin: "https://evil.test" })).status).toBe(403);
     expect((await api("/app/api/push/subscribe", body, { cookie, origin: null })).status).toBe(403);
     expect(await count("SELECT COUNT(*) n FROM app_push WHERE user_id=?", u.id)).toBe(0);
 
     expect((await api("/app/api/push/subscribe", body, { cookie })).status).toBe(200);
-    expect((await api("/app/api/push/subscribe", { ...body, endpoint: "https://push.example.net/s/2" }, { cookie })).status).toBe(200);
+    expect((await api("/app/api/push/subscribe", { ...body, endpoint: "https://fcm.googleapis.com/fcm/send/s/2" }, { cookie })).status).toBe(200);
     const rows = (await env.DB.prepare("SELECT endpoint, origin FROM app_push WHERE user_id=?").bind(u.id).all<any>()).results;
-    expect(rows).toEqual([{ endpoint: "https://push.example.net/s/2", origin: BASE }]); // one row per phone, replaced
+    expect(rows).toEqual([{ endpoint: "https://fcm.googleapis.com/fcm/send/s/2", origin: BASE }]); // one row per phone, replaced
 
     expect((await del("/app/api/push/subscribe", { cookie, origin: "https://evil.test" })).status).toBe(403);
     expect((await del("/app/api/push/subscribe")).status).toBe(401);
@@ -160,7 +160,7 @@ describe("push routes", () => {
     const u = await newUser("P2");
     const { cookie } = await pairPhone(u.key);
     const k = await phoneKeys();
-    const ok = { endpoint: "https://push.example.net/s/1", keys: { p256dh: k.p256dh, auth: k.auth } };
+    const ok = { endpoint: "https://fcm.googleapis.com/fcm/send/s/1", keys: { p256dh: k.p256dh, auth: k.auth } };
     for (const bad of [
       { ...ok, endpoint: "http://push.example.net/s/1" },
       { ...ok, endpoint: "not a url" },
@@ -179,12 +179,12 @@ describe("push routes", () => {
     const u = await newUser("P3");
     const one = await pairPhone(u.key, "Phone one");
     const two = await pairPhone(u.key, "Phone two");
-    const k1 = await subscribe(one.cookie, "https://push.example.net/s/one");
-    await subscribe(two.cookie, "https://push.example.net/s/two");
+    const k1 = await subscribe(one.cookie, "https://fcm.googleapis.com/fcm/send/s/one");
+    await subscribe(two.cookie, "https://fcm.googleapis.com/fcm/send/s/two");
     const r = await api("/app/api/push/test", {}, { cookie: one.cookie });
     expect(r.status).toBe(200);
     expect(sent).toHaveLength(1);
-    expect(sent[0].url).toBe("https://push.example.net/s/one");
+    expect(sent[0].url).toBe("https://fcm.googleapis.com/fcm/send/s/one");
     expect(sent[0].headers).toMatchObject({ TTL: "86400", Urgency: "high", "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream" });
     expect(sent[0].headers.Authorization).toMatch(/^vapid t=[\w-]+\.[\w-]+\.[\w-]+, k=[\w-]+$/);
     const msg = JSON.parse(await decryptAsPhone(sent[0].body, k1.p256dh, k1.privateKey, k1.auth));
@@ -195,7 +195,7 @@ describe("push routes", () => {
   it("a 410 from the push service deletes the subscription", async () => {
     const u = await newUser("P4");
     const { cookie } = await pairPhone(u.key);
-    await subscribe(cookie, "https://push.example.net/s/gone");
+    await subscribe(cookie, "https://fcm.googleapis.com/fcm/send/s/gone");
     pushStatus = 410;
     expect((await api("/app/api/push/test", {}, { cookie })).status).toBe(410);
     expect(await count("SELECT COUNT(*) n FROM app_push WHERE user_id=?", u.id)).toBe(0);
@@ -212,15 +212,15 @@ describe("alert fan-out to phones", () => {
     const a1 = await pairPhone(a.key, "A one");
     const a2 = await pairPhone(a.key, "A two");
     const b1 = await pairPhone(b.key, "B one");
-    const k1 = await subscribe(a1.cookie, "https://push.example.net/a1");
-    await subscribe(a2.cookie, "https://push.example.net/a2");
-    await subscribe(b1.cookie, "https://push.example.net/b1");
+    const k1 = await subscribe(a1.cookie, "https://fcm.googleapis.com/fcm/send/a1");
+    await subscribe(a2.cookie, "https://fcm.googleapis.com/fcm/send/a2");
+    await subscribe(b1.cookie, "https://fcm.googleapis.com/fcm/send/b1");
     await alertFor(env as any, a.id)(item);
-    expect(sent.map((s) => s.url).sort()).toEqual(["https://push.example.net/a1", "https://push.example.net/a2"]);
+    expect(sent.map((s) => s.url).sort()).toEqual(["https://fcm.googleapis.com/fcm/send/a1", "https://fcm.googleapis.com/fcm/send/a2"]);
     const msg = JSON.parse(await decryptAsPhone(sent.find((s) => s.url.endsWith("/a1"))!.body, k1.p256dh, k1.privateKey, k1.auth));
     expect(msg.title).toBe("Pay invoice");
     expect(msg.body).toContain("Due: 2026-11-08");
-    expect(msg.body).toContain("From: Acme <ap@acme.com>");
+    expect(msg.body).toContain("From: Acme <ap@acme.com>"); // Web Push is end-to-end encrypted: sender is fine here
     expect(msg.url).toBe("https://mail/1");
 
     sent = [];
@@ -232,12 +232,12 @@ describe("alert fan-out to phones", () => {
     const u = await newUser("PC");
     const p1 = await pairPhone(u.key, "One");
     const p2 = await pairPhone(u.key, "Two");
-    await subscribe(p1.cookie, "https://push.example.net/c1");
-    await subscribe(p2.cookie, "https://push.example.net/c2");
+    await subscribe(p1.cookie, "https://fcm.googleapis.com/fcm/send/c1");
+    await subscribe(p2.cookie, "https://fcm.googleapis.com/fcm/send/c2");
     setPushFetch((async (url: RequestInfo | URL) => new Response("", { status: String(url).endsWith("c1") ? 410 : 201 })) as typeof fetch);
     await alertFor(env as any, u.id)(item); // c2 got it: no throw
     expect((await env.DB.prepare("SELECT endpoint FROM app_push WHERE user_id=?").bind(u.id).all<any>()).results)
-      .toEqual([{ endpoint: "https://push.example.net/c2" }]);
+      .toEqual([{ endpoint: "https://fcm.googleapis.com/fcm/send/c2" }]);
     setPushFetch((async () => new Response("", { status: 500 })) as typeof fetch);
     await expect(alertFor(env as any, u.id)(item)).rejects.toThrow(/webpush: push failed \(500\)/);
   });
@@ -251,7 +251,7 @@ describe("alert fan-out to phones", () => {
   it("removing a phone deletes its subscription", async () => {
     const u = await newUser("PE");
     const p = await pairPhone(u.key);
-    await subscribe(p.cookie, "https://push.example.net/e1");
+    await subscribe(p.cookie, "https://fcm.googleapis.com/fcm/send/e1");
     const dev = (await env.DB.prepare("SELECT id FROM app_devices WHERE user_id=?").bind(u.id).first<{ id: string }>())!.id;
     expect(await removeDevice(env as any, u.id, dev)).toBe("Test phone");
     expect(await count("SELECT COUNT(*) n FROM app_push WHERE device_id=?", dev)).toBe(0);

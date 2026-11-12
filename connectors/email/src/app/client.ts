@@ -5,6 +5,13 @@
  * as HTML. Screens: pair (from `#pair=<code>`), sign in (passkey), board, settings. WebAuthn uses `navigator.credentials`
  * directly with base64url <-> bytes done here.
  *
+ * - Each browser install keeps a random install id in localStorage and sends it, with a device name, when pairing and
+ *   signing in, so the engine knows it as one device (see app/auth.ts).
+ * - The cached board is stored with the account marker from `/app/api/me` and only shown after `/me` confirms the same
+ *   account (so with no connection at launch, the app asks to retry instead of showing a board it can't vouch for).
+ * - After pairing or signing in, the browser is reset: cached board dropped and any old push subscription unsubscribed,
+ *   so a browser that changes hands never shows or receives the previous account's data.
+ *
  * Kept as a string: no backticks or dollar-brace inside.
  */
 export const APP_JS = String.raw`"use strict";
@@ -16,6 +23,7 @@ export const APP_JS = String.raw`"use strict";
   var MOVED = { todo: "Moved to To do", doing: "Moved to Doing", watch: "Moved to Watch", done: "Done" };
   var BOARD_KEY = "floatboard.board";
   var PAIR_KEY = "floatboard.pair";
+  var INSTALL_KEY = "floatboard.install";
   var ua = navigator.userAgent;
   var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   var standalone = function () {
@@ -183,6 +191,26 @@ export const APP_JS = String.raw`"use strict";
 
   // ------------------------------------------------------------ pairing and sign in
 
+  var memoryInstall = null;
+  function installId() {
+    var id = load(INSTALL_KEY);
+    if (typeof id === "string" && /^[A-Za-z0-9_-]{16,100}$/.test(id)) return id;
+    if (!memoryInstall) memoryInstall = toB64url(crypto.getRandomValues(new Uint8Array(24)));
+    store(INSTALL_KEY, memoryInstall);
+    return memoryInstall;
+  }
+
+  // A new sign-in on this browser: forget the previous account's board and stop its notifications on this browser.
+  async function resetBrowser() {
+    board = null;
+    me = null;
+    store(BOARD_KEY, null);
+    try {
+      var sub = await currentSubscription();
+      if (sub) await sub.unsubscribe();
+    } catch (e) { /* best effort */ }
+  }
+
   function defaultDeviceName() {
     if (/iPhone/.test(ua)) return "iPhone";
     if (/iPad/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) return "iPad";
@@ -207,8 +235,9 @@ export const APP_JS = String.raw`"use strict";
     try {
       var options = await api("/app/api/pair/options", { method: "POST", body: { code: code } });
       var response = await createPasskey(options);
-      await api("/app/api/pair/finish", { method: "POST", body: { code: code, response: response, deviceName: $("device-name").value.trim() } });
+      await api("/app/api/pair/finish", { method: "POST", body: { code: code, response: response, deviceName: $("device-name").value.trim(), installId: installId() } });
       sessionSet(PAIR_KEY, null);
+      await resetBrowser();
       busy = false;
       await openBoard();
       toast("This phone is set up.");
@@ -239,7 +268,8 @@ export const APP_JS = String.raw`"use strict";
     try {
       var r = await api("/app/api/login/options", { method: "POST", body: {} });
       var response = await getPasskey(r.options);
-      await api("/app/api/login/finish", { method: "POST", body: { challengeId: r.challengeId, response: response } });
+      await api("/app/api/login/finish", { method: "POST", body: { challengeId: r.challengeId, response: response, deviceName: defaultDeviceName(), installId: installId() } });
+      await resetBrowser();
       busy = false;
       await openBoard();
     } catch (e) {
@@ -368,7 +398,7 @@ export const APP_JS = String.raw`"use strict";
 
   function setBoard(b, fromNetwork) {
     board = b;
-    if (fromNetwork) store(BOARD_KEY, b);
+    if (fromNetwork && me && me.account) store(BOARD_KEY, { account: me.account, board: b });
     $("offline").hidden = !!fromNetwork;
     render();
   }
@@ -392,11 +422,17 @@ export const APP_JS = String.raw`"use strict";
 
   async function openBoard() {
     show("board");
+    if (!me) {
+      try { me = await api("/app/api/me"); } catch (e) {
+        if (e instanceof SignedOut) { showSignIn(); return; }
+      }
+    }
+    // Only a board cached for this same account is shown, and only once /me has confirmed the account.
     var cached = load(BOARD_KEY);
-    if (!board && cached) setBoard(cached, false);
+    if (cached && me && !(cached.account === me.account)) { store(BOARD_KEY, null); cached = null; }
+    if (!board && cached && me && cached.account === me.account && cached.board) setBoard(cached.board, false);
     if (!board) setBoard({ updated: null, cards: [], pending: 0 }, false);
     await loadBoard(true);
-    if (current === "board" && !me) api("/app/api/me").then(function (m) { me = m; }).catch(function () { /* shown later */ });
   }
 
   async function act(body, done) {
@@ -693,7 +729,6 @@ export const APP_JS = String.raw`"use strict";
       await openBoard();
     } catch (e) {
       if (e instanceof SignedOut) { showSignIn(); return; }
-      if (load(BOARD_KEY)) { await openBoard(); return; }
       $("loading-text").textContent = offline(e) ? "Can't reach FloatBoard. Check your internet connection." : message(e);
       $("retry").hidden = false;
     }
