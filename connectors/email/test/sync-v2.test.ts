@@ -98,6 +98,28 @@ describe("sync v2: phone actions", () => {
     expect(await count("SELECT COUNT(*) AS n FROM phone_actions WHERE user_id=?", u.id)).toBe(2);
   });
 
+  it("a_resend_after_the_phone_action_was_purged_is_still_ignored_through_the_board_log", async () => {
+    const u = await setup();
+    await put(u.key, { cards: [card(1), card(2)] });
+    const move = { id: crypto.randomUUID(), made_at: iso(Date.now()), card_id: 1, action: "done" };
+    const add = { id: crypto.randomUUID(), made_at: iso(Date.now()), action: "add", title: "Buy milk" };
+    expect((await send(u.cookie, { sent_at: iso(Date.now()), actions: [move, add] })).status).toBe(200);
+    expect(await count("SELECT COUNT(*) AS n FROM board_log WHERE user_id=? AND client_id IN (?,?)", u.id, move.id, add.id)).toBe(2);
+    // The Mac acked them and the hourly purge removed the rows (acked rows go after 7 days).
+    await env.DB.prepare("DELETE FROM phone_actions WHERE user_id=?").bind(u.id).run();
+    const r = await (await send(u.cookie, { sent_at: iso(Date.now()), actions: [move, add] })).json<any>();
+    expect(r.accepted).toEqual([move.id, add.id]);
+    expect(await count("SELECT COUNT(*) AS n FROM phone_actions WHERE user_id=?", u.id)).toBe(0);
+    expect((await macActions(u.key)).actions).toHaveLength(0);
+    expect(await count("SELECT COUNT(*) AS n FROM board_log WHERE user_id=? AND device<>'mac'", u.id)).toBe(2);
+    // Another user's log never counts: the same ids from them are new.
+    const other = await setup("Other sync user");
+    await put(other.key, { cards: [card(1)] });
+    const r2 = await (await send(other.cookie, { actions: [move] })).json<any>();
+    expect(r2.accepted).toEqual([move.id]);
+    expect(await count("SELECT COUNT(*) AS n FROM phone_actions WHERE user_id=?", other.id)).toBe(1);
+  });
+
   it("another_users_action_id_does_not_block_mine", async () => {
     const a = await setup("Id A");
     const b = await setup("Id B");
