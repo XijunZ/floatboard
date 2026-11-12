@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import type { AlertItem } from "./run";
 import { telegramAlert } from "./telegram";
+import { pushToUser } from "./app/webpush";
 
 let ntfyFetch: typeof fetch = (...a) => fetch(...a);
 /** Tests replace the ntfy server. */
@@ -11,8 +12,8 @@ export const NTFY_BASE = "https://ntfy.sh";
 /** One way to reach a user's phone. Resolves false when the user hasn't set the channel up, true when sent; throws when sending fails. */
 export type AlertChannel = { name: string; send: (env: Env, userId: string, item: AlertItem) => Promise<boolean> };
 
-/** ntfy message text: due and sender only. Never the email text. `why` is Claude's own one-line reason. */
-function ntfyBody(item: AlertItem): string {
+/** Alert text (ntfy and Web Push): due and sender only. Never the email text. `why` is Claude's own one-line reason. */
+export function alertBody(item: AlertItem): string {
   return [item.why, item.due && `Due: ${item.due.replace("T", " ")}`, item.sender && `From: ${item.sender}`].filter(Boolean).join("\n") || " ";
 }
 
@@ -22,13 +23,17 @@ export async function sendNtfy(topic: string, item: AlertItem): Promise<void> {
     Title: item.title.replace(/[\r\n]+/g, " ").slice(0, 120), Priority: "5", Tags: "warning",
   };
   if (item.link) headers.Click = item.link;
-  const r = await ntfyFetch(`${NTFY_BASE}/${encodeURIComponent(topic)}`, { method: "POST", headers, body: ntfyBody(item) });
+  const r = await ntfyFetch(`${NTFY_BASE}/${encodeURIComponent(topic)}`, { method: "POST", headers, body: alertBody(item) });
   if (!r.ok) throw new Error(`ntfy failed (${r.status})`);
 }
 
 /** Add new channels (Web Push, ...) here; each is tried for every alert. */
 export const CHANNELS: AlertChannel[] = [
   { name: "telegram", send: (env, userId, item) => telegramAlert(env, userId)(item) },
+  {
+    name: "webpush",
+    send: (env, userId, item) => pushToUser(env, userId, { title: item.title, body: alertBody(item), url: item.link || "/app/" }),
+  },
   {
     name: "ntfy",
     send: async (env, userId, item) => {
