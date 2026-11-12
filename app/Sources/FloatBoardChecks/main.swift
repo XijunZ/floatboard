@@ -718,6 +718,7 @@ await connectorEdgeCaseChecks()
 await phoneChecks()
 oneTaskChecks()
 phoneLinksChecks()
+await linkEmailChecks()
 oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()
 

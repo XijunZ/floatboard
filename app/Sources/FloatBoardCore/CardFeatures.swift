@@ -74,4 +74,13 @@ extension Card {
 
     /// The source chip ("✉ label"): the sorting's own cards (they carry why), and any task with a source link.
     public var showsSourceChip: Bool { isFromEmailSorting || sourceURL != nil }
+
+    /// The task has an email linked (a message id), by the sorting or by the user.
+    public var hasLinkedEmail: Bool { !(sourceKey?.messageID ?? "").isEmpty }
+
+    /// The user linked this email ("Link an email"), so they can remove it.
+    public var emailLinkedByUser: Bool { !connector.isEmpty && externalID.isEmpty && hasLinkedEmail }
+
+    /// "Link an email" is offered: a task the email sorting did not make, with no email yet.
+    public var canLinkEmail: Bool { !isFromEmailSorting && !hasLinkedEmail }
 }

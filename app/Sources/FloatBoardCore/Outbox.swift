@@ -166,6 +166,8 @@ extension Store {
     @discardableResult
     func queueOutbox(_ card: Card, kind: OutboxKind, verdict: String?, now: Date) throws -> String? {
         guard !card.connector.isEmpty else { return nil }
+        // A task the user linked to an email: only done is worth sending (it marks the email read); a delete teaches nothing.
+        guard kind == .done || card.isFromEmailSorting else { return nil }
         let uuid = UUID().uuidString
         var payload = basePayload(card, now: now)
         if let verdict { payload["verdict"] = verdict }
@@ -181,7 +183,8 @@ extension Store {
     /// collapse into it (first state -> latest state); a change back to the original removes it. Only a row that was
     /// never tried and isn't being sent right now is merged into; otherwise the change gets its own row.
     func queueChange(old: Card, new: Card, now: Date) throws {
-        guard !old.connector.isEmpty else { return }
+        // Only the sorting's own tasks: edits on a task the user linked to an email are not lessons.
+        guard old.isFromEmailSorting else { return }
         let allPending = try db.query("""
             SELECT uuid,payload_json FROM outbox
             WHERE connector=? AND kind='changed' AND sent IS NULL AND detached=0 AND attempts=0 ORDER BY created DESC, rowid DESC
@@ -247,7 +250,7 @@ extension Store {
     /// Callers' Card values may be stale, so writes derive from this.
     func currentCard(_ id: Int64) throws -> (card: Card, deleted: Bool)? {
         try db.query("""
-            SELECT title,area,importance,due,status,connector,source_mid,source_sent,source_meta,deleted
+            SELECT title,area,importance,due,status,connector,source_mid,source_sent,source_meta,deleted,external_id
             FROM cards WHERE id=?
             """, [id]) { s in
             let sent = sqlite3_column_type(s, 7) == SQLITE_NULL ? nil : DB.text(s, 7)
@@ -268,16 +271,26 @@ extension Store {
             let card = Card(id: id, title: DB.text(s, 0), notes: "", area: DB.text(s, 1),
                             importance: Importance(rawValue: Int(DB.int(s, 2))) ?? .medium, due: DB.date(s, 3),
                             status: Status(rawValue: DB.text(s, 4)) ?? .todo, created: Date(), started: nil, done: nil,
-                            sourceMeta: meta, sourceKey: mid.map { SourceKey(messageID: $0, sentAt: sent ?? "") },
+                            externalID: DB.text(s, 10), sourceMeta: meta, sourceKey: mid.map { SourceKey(messageID: $0, sentAt: sent ?? "") },
                             connector: DB.text(s, 5))
             return (card, DB.int(s, 9) == 1)
         }.first
     }
 
     private func basePayload(_ card: Card, now: Date) -> [String: String] {
-        ["source_mid": card.sourceKey?.messageID ?? "", "source_sent": card.sourceKey?.sentAt ?? "",
-         "item_id": card.sourceMeta["itemId"] ?? "", "verdict": "", "detail": "",
-         "at": String(now.timeIntervalSince1970)]
+        var p = ["source_mid": card.sourceKey?.messageID ?? "", "source_sent": card.sourceKey?.sentAt ?? "",
+                 "item_id": card.sourceMeta["itemId"] ?? "", "verdict": "", "detail": "",
+                 "at": String(now.timeIntervalSince1970)]
+        p.merge(Self.linkedInbox(card)) { a, _ in a }
+        return p
+    }
+
+    /// For a task the user linked to an email: its inbox and Gmail id, so the engine can find the email (it never saw it).
+    static func linkedInbox(_ card: Card) -> [String: String] {
+        guard card.emailLinkedByUser, let account = card.sourceMeta["account"], !account.isEmpty else { return [:] }
+        var out = ["account": account]
+        if let g = card.sourceMeta["gmailId"], !g.isEmpty { out["gmail_id"] = g }
+        return out
     }
 
     /// What the Activity row says about a row stored detached: 'no_connector' (no connector row yet) or 'removed'.

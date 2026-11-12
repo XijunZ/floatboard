@@ -259,8 +259,9 @@ public final class Store: ObservableObject {
                 UPDATE cards SET reply_draft_state='requested', reply_draft_error='', reply_draft_request=?, reply_draft_sent_at=NULL,
                     updated=? WHERE id=?
                 """, [request, now, cardID])
-            let payload = ["source_mid": key.messageID, "source_sent": key.sentAt, "item_id": card.sourceMeta["itemId"] ?? "",
+            var payload = ["source_mid": key.messageID, "source_sent": key.sentAt, "item_id": card.sourceMeta["itemId"] ?? "",
                            "notes": notes, "request_id": request]
+            payload.merge(Self.linkedInbox(card)) { a, _ in a }
             // A press before the first one was ever tried replaces it (never a tried or in-flight row, as queueChange).
             let untried = try db.query("""
                 SELECT uuid,payload_json FROM outbox WHERE connector=? AND kind=? AND sent IS NULL AND detached=0 AND attempts=0
