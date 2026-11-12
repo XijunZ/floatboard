@@ -151,9 +151,15 @@ extension SortKey {
 }
 
 /// "Bar" tab: live preview + drag-and-drop order and fields.
+extension Notification.Name {
+    /// "Due reminders on this Mac" was turned on or off.
+    static let floatBoardDueRemindersChanged = Notification.Name("FloatBoardDueRemindersChanged")
+}
+
 struct BarSettingsView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var ui: UIState
+    @AppStorage(DueReminders.settingKey) private var dueReminders = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -217,9 +223,19 @@ struct BarSettingsView: View {
                     }
                 }
             }
-            Button("Reset to defaults") { ui.bar = BarConfig() }
-                .buttonStyle(.borderless)
-                .font(.system(size: 11))
+            HStack(alignment: .firstTextBaseline, spacing: 20) {
+                Button("Reset to defaults") { ui.bar = BarConfig() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11))
+                Spacer()
+                Toggle("Due reminders on this Mac", isOn: Binding(get: { dueReminders }, set: {
+                    dueReminders = $0
+                    NotificationCenter.default.post(name: .floatBoardDueRemindersChanged, object: nil)
+                }))
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12))
+                .help("A notification 15 minutes before a task's due time, or at 09:00 on its due date. Allow FloatBoard in System Settings, Notifications.")
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activityWindow: NSWindow?
     private var localClickMonitor: Any?
     private var lastResign = Date.distantPast
+    private var reminders: SystemReminders?
+    private var reminderSync: ReminderSync?
+    private var reminderWatch: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before migration touches the real file: snapshot it, but only if it exists and needs migrating.
@@ -117,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: .floatBoardSyncConnectors, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.connectors.trigger("asked") }
         }
+        startDueReminders()
         modeWatch = ui.$mode.removeDuplicates().sink { [weak self] m in
             guard m == .expanded else { return }
             self?.connectors.boardOpened()
@@ -141,6 +145,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "expanded": ui.mode = .expanded
         case "minimized": ui.mode = .minimized
         default: panel.apply(ui.mode)
+        }
+    }
+
+    /// Due reminders from this Mac's own board: rescheduled a moment after any board change, and when the setting
+    /// changes. Permission is asked once, the first time reminders are on.
+    private func startDueReminders() {
+        guard SystemReminders.available else { return }
+        let r = SystemReminders { [weak self] level, message, detail in self?.store.activity("reminders", level, message, detail: detail) }
+        r.onOpen = { [weak self] in self?.expand() }
+        reminders = r
+        reminderSync = ReminderSync(scheduler: r, defaults: .standard)
+        let refresh = { [weak self] in
+            guard let self, let sync = self.reminderSync else { return }
+            let on = DueReminders.enabled(.standard)
+            if on { self.reminders?.askOnce() }
+            sync.sync(cards: self.store.cards, enabled: on)
+        }
+        refresh()
+        reminderWatch = store.$cards.dropFirst().debounce(for: .seconds(2), scheduler: RunLoop.main).sink { _ in refresh() }
+        NotificationCenter.default.addObserver(forName: .floatBoardDueRemindersChanged, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { refresh() }
         }
     }
 
