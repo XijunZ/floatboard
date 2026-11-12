@@ -122,19 +122,29 @@ extension Store {
     static func boardHashKey(_ connector: String) -> String { "phone_board_hash:\(connector)" }
     static func appliedKey(_ connector: String, _ id: String) -> String { "phone_action:\(connector):\(id)" }
 
-    /// The hash of the board last accepted by this connector's engine, or nil.
-    public func lastBoardHash(connector: String) -> String? {
-        do { return try db.query("SELECT value FROM meta WHERE key=?", [Self.boardHashKey(connector)]) { DB.text($0, 0) }.first }
-        catch {
+    /// How long a sent board counts as current: after this it is sent again even if unchanged (covers an engine that
+    /// lost its copy).
+    public static let boardResendInterval: TimeInterval = 3600
+
+    /// The hash of the board last accepted by this connector's engine, or nil (also when it was sent over an hour ago).
+    public func lastBoardHash(connector: String, now: Date = Date()) -> String? {
+        do {
+            guard let v = try db.query("SELECT value FROM meta WHERE key=?", [Self.boardHashKey(connector)]) { DB.text($0, 0) }.first
+            else { return nil }
+            let parts = v.split(separator: " ")
+            guard parts.count == 2, let at = Double(parts[1]), now.timeIntervalSince1970 - at < Self.boardResendInterval else { return nil }
+            return String(parts[0])
+        } catch {
             activity("connector:\(connector)", .warning, "Could not read when the phone's board was last sent; sending it again", detail: "\(error)")
             return nil
         }
     }
 
     /// Records (or with nil forgets) the hash of the board the engine accepted.
-    public func setLastBoardHash(_ hash: String?, connector: String) {
+    public func setLastBoardHash(_ hash: String?, connector: String, now: Date = Date()) {
         do {
-            if let hash { try db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", [Self.boardHashKey(connector), hash]) }
+            if let hash { try db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)",
+                                     [Self.boardHashKey(connector), "\(hash) \(Int(now.timeIntervalSince1970))"]) }
             else { try db.run("DELETE FROM meta WHERE key=?", [Self.boardHashKey(connector)]) }
         } catch {
             activity("connector:\(connector)", .warning, "Could not record the phone's board as sent; it will be sent again", detail: "\(error)")

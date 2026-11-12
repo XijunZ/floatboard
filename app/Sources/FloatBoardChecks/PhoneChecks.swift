@@ -69,6 +69,13 @@ private final class PhoneEngine {
 
     let payload = PhoneBoard.payload(store: store, now: now)
     let byID = Dictionary(uniqueKeysWithValues: payload.map { ($0.id, $0) })
+    do {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        store.setLastBoardHash("abc", connector: "hashcheck", now: t0)
+        check(store.lastBoardHash(connector: "hashcheck", now: t0.addingTimeInterval(60)) == "abc"
+              && store.lastBoardHash(connector: "hashcheck", now: t0.addingTimeInterval(3601)) == nil,
+              "phone_board_resent_after_an_hour_even_if_unchanged")
+    }
     check(Set(payload.map(\.id)) == [allDay.id, timed.id, watch.id, doneToday.id] && payload.last?.id == doneToday.id,
           "phone_board_has_only_open_and_done_today")
     let dayRE = #"^\d{4}-\d{2}-\d{2}$"#
