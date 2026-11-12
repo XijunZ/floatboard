@@ -194,6 +194,30 @@ Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (
   `POST /v2/phone-actions/ack` `{ ids?, skipped?: [{ id, reason? }] }`: skipped ones are logged and reported to the phone.
 - Hourly: `board_log` rows older than 365 days are deleted.
 
+### Sync v2 phone client (built)
+
+- **Offline first.** The last board is kept in localStorage with the account marker (`floatboard.board`:
+  `{ account, board, at }`) and shown at once on open, labelled "Last synced hh:mm" or "Offline". `/app/api/me` then
+  confirms the account; if it, or a board answer, names another account, that board and the queue are dropped before
+  anything is sent. A 401 goes to Sign in and drops the board; the queue stays and is sent only if the same account signs
+  back in. Signing out sends what it can, then drops board and queue.
+- **Queue.** Each move or add gets an id (`crypto.randomUUID`) and `made_at` when tapped, goes into `floatboard.queue`
+  (`{ account, actions }`) and shows at once ("Not synced yet" on the card). Sent in batches (up to 100, under 60 KB)
+  with `sent_at`; accepted, dropped and superseded ids leave the queue. Retries 5 s doubling to 5 minutes, and at once on
+  `online`, on coming back to the front, on open and on the refresh button; 429 and other failures keep the queue.
+  The board refreshes every 60 s while the app is in front.
+- **No error pop-ups.** One status line under the title: "Synced", "Last synced 14:02", "3 changes waiting",
+  "Offline, 3 changes waiting". A change the Mac overruled shows for a few seconds as "1 change was replaced by a newer
+  change on your Mac" and the task snaps to its real step.
+- **Push renewal.** The service worker handles `pushsubscriptionchange` (new subscription, or subscribes again with the
+  key from `/app/api/push/key`) and saves it with `POST /app/api/push/subscribe`. At start, a phone that allowed
+  notifications but lost its subscription subscribes again quietly; Settings shows "Notifications are off on this
+  phone" with Turn on otherwise.
+- **Scope.** The task sheet says "Edit details on your Mac"; Settings says in one line what is Mac only.
+- Queue logic is pure functions in `src/app/sync-logic.ts`, embedded in `/app/app.js` and tested as is
+  (`test/phone-sync.test.ts`). Layout checked in headless Chrome at 360, 390 and 430 px, light and dark, long, CJK and
+  unbroken titles, 34 tasks in one tab (titles clamp at 3 lines on the list, full in the sheet).
+
 ## Database size: warning and archive to the Mac (next, after sync v2)
 
 - **Size on the setup page** (from D1's `meta.size_after` on a cheap query): shown always; a warning above 250 MB

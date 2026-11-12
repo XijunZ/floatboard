@@ -1,0 +1,102 @@
+import { describe, expect, it } from "vitest";
+import { SYNC_EXPORTS, SYNC_JS } from "../src/app/sync-logic";
+import { APP_JS } from "../src/app/client";
+
+/** The phone's offline queue logic: the exact text embedded in /app/app.js, run here on its own. */
+// eslint-disable-next-line no-new-func
+const L: any = new Function(SYNC_JS + "\nreturn {" + SYNC_EXPORTS.join(",") + "};")();
+
+const board = {
+  updated: "2026-11-12T09:00:00.000Z", pending: 0,
+  cards: [
+    { id: 1, title: "One", status: "todo", done_at: null },
+    { id: 2, title: "Two", status: "doing", done_at: null },
+    { id: -5, title: "Added earlier", status: "todo", pending: true, action_id: "add-1" },
+  ],
+};
+const at = "2026-11-12T10:00:00.000Z";
+
+describe("phone sync logic", () => {
+  it("is_embedded_in_the_app_script", () => {
+    expect(APP_JS).toContain(SYNC_JS);
+  });
+
+  it("view_applies_queued_moves_and_adds_on_top_of_the_board", () => {
+    const v = L.viewBoard(board, [
+      { id: "a", made_at: at, card_id: 1, action: "done" },
+      { id: "b", made_at: at, action: "add", title: "New", group: "Work" },
+      { id: "add-1", made_at: at, action: "add", title: "Added earlier" }, // already on the engine's board
+      { id: "c", made_at: at, card_id: -5, action: "doing" },             // pending cards can't move
+      { id: "d", made_at: at, card_id: 99, action: "doing" },             // unknown card: nothing shown
+    ]);
+    expect(v.cards.find((c: any) => c.id === 1)).toMatchObject({ status: "done", done_at: at, queued: true });
+    expect(v.cards.filter((c: any) => c.action_id === "add-1")).toHaveLength(1);
+    expect(v.cards.find((c: any) => c.id === -5).status).toBe("todo");
+    expect(v.cards.find((c: any) => c.action_id === "b")).toMatchObject({ pending: true, queued: true, status: "todo", title: "New", group: "Work" });
+    expect(v.cards).toHaveLength(4);
+    expect(board.cards[0].status).toBe("todo"); // the stored board is not changed
+  });
+
+  it("later_queued_moves_win_and_leaving_done_clears_done_at", () => {
+    const v = L.viewBoard(board, [
+      { id: "a", made_at: at, card_id: 2, action: "done" },
+      { id: "b", made_at: at, card_id: 2, action: "watch" },
+    ]);
+    expect(v.cards.find((c: any) => c.id === 2)).toMatchObject({ status: "watch", done_at: null });
+  });
+
+  it("batch_has_sent_at_at_most_100_actions_and_stays_under_the_size_cap", () => {
+    const many = Array.from({ length: 150 }, (_, i) => ({ id: "m" + i, made_at: at, card_id: 1, action: "doing" }));
+    const b = L.takeBatch(many, at);
+    expect(b.sent_at).toBe(at);
+    expect(b.actions).toHaveLength(100);
+    expect(b.actions[0]).toEqual({ id: "m0", made_at: at, action: "doing", card_id: 1 });
+    // 100 adds with 200 Chinese characters each would be about 75 KB: split under 60 KB.
+    const big = Array.from({ length: 100 }, (_, i) => ({ id: "x" + i, made_at: at, action: "add", title: "任务".repeat(100), group: "工作" }));
+    const bb = L.takeBatch(big, at);
+    expect(bb.actions.length).toBeLessThan(100);
+    expect(new TextEncoder().encode(JSON.stringify(bb)).length).toBeLessThan(64 * 1024);
+    expect(L.byteLength("任")).toBe(3);
+    expect(L.byteLength("😀")).toBe(4);
+  });
+
+  it("after_send_drops_accepted_dropped_and_superseded_ids_only", () => {
+    const q = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+    const r = L.afterSend(q, { accepted: ["a"], dropped: [{ id: "b", reason: "card gone" }, { id: null, reason: "invalid" }], superseded: ["c", "zz"] });
+    expect(r.actions).toEqual([{ id: "d" }]);
+    expect(r.dropped).toBe(1);
+  });
+
+  it("superseded_is_noticed_once_per_sent_id_even_though_the_engine_repeats_it", () => {
+    let sent = L.rememberSent([], ["a", "b"]);
+    const first = L.noticeSuperseded(sent, ["a", "old-unknown"]);
+    expect(first.count).toBe(1);
+    sent = first.sentIds;
+    expect(L.noticeSuperseded(sent, ["a", "old-unknown"]).count).toBe(0);
+    expect(L.rememberSent(Array.from({ length: 199 }, (_, i) => "s" + i), ["x", "y"])).toHaveLength(200);
+  });
+
+  it("retry_delay_doubles_from_5_seconds_to_5_minutes", () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 8, 20].map(L.retryDelay)).toEqual([5000, 10000, 20000, 40000, 80000, 160000, 300000, 300000, 300000]);
+  });
+
+  it("status_line_says_how_things_stand", () => {
+    const now = new Date(2026, 10, 12, 14, 30).getTime();
+    const at1402 = new Date(2026, 10, 12, 14, 2).getTime();
+    expect(L.statusText({ waiting: 0, offline: false, lastSync: now - 30000, now })).toBe("Synced");
+    expect(L.statusText({ waiting: 0, offline: false, lastSync: at1402, now })).toBe("Last synced 14:02");
+    expect(L.statusText({ waiting: 3, offline: false, lastSync: now, now })).toBe("3 changes waiting");
+    expect(L.statusText({ waiting: 1, offline: false, lastSync: now, now })).toBe("1 change waiting");
+    expect(L.statusText({ waiting: 3, offline: true, lastSync: at1402, now })).toBe("Offline, 3 changes waiting");
+    expect(L.statusText({ waiting: 0, offline: true, lastSync: at1402, now })).toBe("Offline. Last synced 14:02");
+    expect(L.statusText({ waiting: 0, offline: true, lastSync: 0, now })).toBe("Offline");
+    expect(L.statusText({ waiting: 0, offline: false, lastSync: new Date(2026, 10, 11, 9, 5).getTime(), now })).toBe("Last synced yesterday 09:05");
+    expect(L.statusText({ waiting: 0, offline: false, lastSync: new Date(2026, 10, 3, 9, 5).getTime(), now })).toBe("Last synced 3 Nov 09:05");
+  });
+
+  it("replaced_note_is_one_quiet_line", () => {
+    expect(L.replacedText(1, 0)).toBe("1 change was replaced by a newer change on your Mac");
+    expect(L.replacedText(2, 1)).toBe("2 changes were replaced by newer changes on your Mac. 1 change was for a task no longer on your board");
+    expect(L.replacedText(0, 0)).toBe("");
+  });
+});

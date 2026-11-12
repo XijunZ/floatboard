@@ -5,6 +5,7 @@
  *   hash of every asset, so a new engine deploy changes sw.js, the phone installs the new version and drops the old cache.
  * - Never touches `/app/api/*`: board and sign-in requests always go to the network and are never cached.
  * - Shows Web Push alerts (`{title, body, url}`) and opens the app, or the task's link, when one is tapped.
+ * - `pushsubscriptionchange`: subscribes again with the engine's key and saves the new subscription.
  */
 import { APP_JS } from "./client";
 import { BADGE_96_B64, ICON_180_B64, ICON_192_B64, ICON_512_B64, ICON_SVG } from "./icons";
@@ -70,6 +71,38 @@ self.addEventListener("push", (event) => {
     renotify: true,
     data: { url },
   }));
+});
+
+// The browser replaced or dropped this phone's push subscription (it can do that at any time): subscribe again with the
+// engine's key and save it, so alerts keep coming without opening the app. Sends the session cookie (same origin).
+function keyBytes(s) {
+  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function resubscribe(event) {
+  let sub = event.newSubscription || null;
+  if (!sub) {
+    let key = null;
+    try {
+      const r = await fetch("/app/api/push/key", { credentials: "same-origin", cache: "no-store" });
+      if (r.ok) key = keyBytes((await r.json()).key);
+    } catch (e) { /* offline: fall back to the old subscription's key */ }
+    if (!key && event.oldSubscription && event.oldSubscription.options) key = event.oldSubscription.options.applicationServerKey;
+    if (!key) return;
+    sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  }
+  await fetch("/app/api/push/subscribe", {
+    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sub.toJSON()),
+  });
+}
+
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil(resubscribe(event).catch(() => { /* the app shows "Notifications are off" and offers Turn on */ }));
 });
 
 self.addEventListener("notificationclick", (event) => {

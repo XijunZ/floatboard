@@ -155,8 +155,11 @@ describe("I2 one browser, one account", () => {
   });
 
   it("i2_client_ties_the_cached_board_to_the_account_and_resets_the_browser_on_sign_in", () => {
-    // The cached board is stored with the account marker and only shown after /me confirms the same account.
-    expect(APP_JS).toContain("cached.account === me.account");
+    // The cached board is stored with the account marker. It is shown at launch (offline first, sync v2) only for the
+    // account last confirmed on this phone, and dropped with the queue as soon as /me names another account.
+    expect(APP_JS).toContain("store(BOARD_KEY, { account: me.account, board: board, at: lastSync })");
+    expect(APP_JS).toMatch(/function acceptAccount\(m\) \{[\s\S]*cached\.account === m\.account[\s\S]*queue\.account !== m\.account[\s\S]*dropAccountData\(\)/);
+    expect(APP_JS).toMatch(/function dropAccountData\(\) \{[\s\S]*store\(BOARD_KEY, null\);\s*store\(QUEUE_KEY, null\)/);
     // Pairing and sign-in drop the cache and unsubscribe the browser's old push subscription first.
     expect(APP_JS).toMatch(/function resetBrowser\(\)[\s\S]*store\(BOARD_KEY, null\)[\s\S]*unsubscribe\(\)/);
     expect((APP_JS.match(/await resetBrowser\(\)/g) ?? []).length).toBe(2);
