@@ -6,6 +6,8 @@
  * - `viewBoard(board, actions)`: the board as the phone shows it: the last board from the engine plus queued actions not
  *   sent yet (moves change the step, adds show as cards waiting for the Mac).
  * - `takeBatch(actions, sentAt)`: the next request body for `POST /app/api/action`: at most 100 actions and under 60 KB.
+ * - `sendBatch(body, send, now)`: sends one batch; when the engine refuses it as malformed (400), sends each action on
+ *   its own once and reports the ones still refused (`rejected`) so they can leave the queue instead of blocking it.
  * - `afterSend(actions, sentIds, result)`: drops accepted and dropped ids from the queue.
  * - `noticeSuperseded(sentIds, superseded)`: which of this phone's sent ids the engine reports as not applied.
  * - `retryDelay(failures)`: 5 s doubling to 5 minutes.
@@ -80,6 +82,27 @@ export const SYNC_JS = String.raw`
     return { actions: (actions || []).filter(function (a) { return !gone[a.id]; }), dropped: dropped };
   }
 
+  // send(body) resolves with the engine's answer or rejects with an error carrying .status. Only a 400 splits the batch:
+  // 429, other errors and no connection go up unchanged (the queue stays and is retried with back-off).
+  async function sendBatch(body, send, now) {
+    try {
+      return { results: [await send(body)], rejected: [] };
+    } catch (e) {
+      if (!e || e.status !== 400) throw e;
+    }
+    var results = [];
+    var rejected = [];
+    for (var i = 0; i < body.actions.length; i++) {
+      try {
+        results.push(await send({ sent_at: now(), actions: [body.actions[i]] }));
+      } catch (e) {
+        if (!e || e.status !== 400) throw e;
+        rejected.push(body.actions[i].id);
+      }
+    }
+    return { results: results, rejected: rejected };
+  }
+
   function rememberSent(sentIds, ids) {
     var list = (sentIds || []).concat(ids || []);
     return list.length > SENT_KEEP ? list.slice(list.length - SENT_KEEP) : list;
@@ -126,14 +149,15 @@ export const SYNC_JS = String.raw`
     return "Last synced " + d.getDate() + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()] + " " + clock(d);
   }
 
-  function replacedText(superseded, dropped) {
+  function replacedText(superseded, dropped, rejected) {
     var parts = [];
     if (superseded) parts.push(superseded === 1 ? "1 change was replaced by a newer change on your Mac" : superseded + " changes were replaced by newer changes on your Mac");
     if (dropped) parts.push(dropped === 1 ? "1 change was for a task no longer on your board" : dropped + " changes were for tasks no longer on your board");
+    if (rejected) parts.push(rejected === 1 ? "1 change couldn't be sent" : rejected + " changes couldn't be sent");
     return parts.join(". ");
   }
 `;
 
 /** Names the tests pull out of SYNC_JS. */
-export const SYNC_EXPORTS = ["viewBoard", "takeBatch", "afterSend", "rememberSent", "noticeSuperseded", "retryDelay", "statusText",
+export const SYNC_EXPORTS = ["viewBoard", "takeBatch", "sendBatch", "afterSend", "rememberSent", "noticeSuperseded", "retryDelay", "statusText",
   "replacedText", "byteLength"];
