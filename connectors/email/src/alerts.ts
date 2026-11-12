@@ -12,18 +12,30 @@ export const NTFY_BASE = "https://ntfy.sh";
 /** One way to reach a user's phone. Resolves false when the user hasn't set the channel up, true when sent; throws when sending fails. */
 export type AlertChannel = { name: string; send: (env: Env, userId: string, item: AlertItem) => Promise<boolean> };
 
-/** Alert text (ntfy and Web Push): due and sender only. Never the email text. `why` is Claude's own one-line reason. */
+/** Web Push alert text: reason, due and sender. Never the email text. `why` is Claude's own one-line reason. */
 export function alertBody(item: AlertItem): string {
   return [item.why, item.due && `Due: ${item.due.replace("T", " ")}`, item.sender && `From: ${item.sender}`].filter(Boolean).join("\n") || " ";
 }
 
-/** POST an alert to an ntfy topic (throws on a non-2xx answer). HTTP header values must be single-line ASCII-safe. */
-export async function sendNtfy(topic: string, item: AlertItem): Promise<void> {
+/**
+ * ntfy alert text: the due date and a pointer to the app only. ntfy.sh is a public server where anyone who knows the
+ * topic can read the alerts, so the reason, the sender and the email link are never sent there.
+ */
+export function ntfyBody(item: AlertItem): string {
+  return [item.due && `Due: ${item.due.replace("T", " ")}`, "Open FloatBoard for details"].filter(Boolean).join("\n");
+}
+
+/**
+ * POST an alert to an ntfy topic (throws on a non-2xx answer): title, `ntfyBody`, and a Click link to the user's phone app
+ * (`<appOrigin>/app/`) when the engine's address is known; never the email link. HTTP header values must be single-line
+ * ASCII-safe.
+ */
+export async function sendNtfy(topic: string, item: AlertItem, appOrigin?: string | null): Promise<void> {
   const headers: Record<string, string> = {
     Title: item.title.replace(/[\r\n]+/g, " ").slice(0, 120), Priority: "5", Tags: "warning",
   };
-  if (item.link) headers.Click = item.link;
-  const r = await ntfyFetch(`${NTFY_BASE}/${encodeURIComponent(topic)}`, { method: "POST", headers, body: alertBody(item) });
+  if (appOrigin) headers.Click = `${appOrigin}/app/`;
+  const r = await ntfyFetch(`${NTFY_BASE}/${encodeURIComponent(topic)}`, { method: "POST", headers, body: ntfyBody(item) });
   if (!r.ok) throw new Error(`ntfy failed (${r.status})`);
 }
 
@@ -37,9 +49,9 @@ export const CHANNELS: AlertChannel[] = [
   {
     name: "ntfy",
     send: async (env, userId, item) => {
-      const u = await env.DB.prepare("SELECT ntfy_topic FROM users WHERE id=?").bind(userId).first<{ ntfy_topic: string | null }>();
+      const u = await env.DB.prepare("SELECT ntfy_topic, app_origin FROM users WHERE id=?").bind(userId).first<{ ntfy_topic: string | null; app_origin: string | null }>();
       if (!u?.ntfy_topic) return false;
-      await sendNtfy(u.ntfy_topic, item);
+      await sendNtfy(u.ntfy_topic, item, u.app_origin);
       return true;
     },
   },

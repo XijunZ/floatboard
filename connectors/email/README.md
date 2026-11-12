@@ -123,8 +123,9 @@ that user then come from their bot. **Remove my bot** goes back to the shared bo
 **Phone alerts with the ntfy app (optional, no bot needed).** On the setup page, under **Phone alerts (ntfy app)**, press
 **Turn on**. The engine makes a private random topic and shows its address. Install the free ntfy app (Android or iPhone),
 tap +, paste the topic name (on iPhone allow notifications), then press **Send a test alert**. Urgent items go to every
-channel you have (ntfy and Telegram); one failing never stops the other. Alerts carry the task title, due date, sender and
-a link, never the email text. **New topic** replaces a leaked topic; **Turn off** stops them. `alerts_on = false` in
+channel you have (ntfy and Telegram); one failing never stops the other. ntfy.sh is a public server where anyone who knows
+the topic name can read the alerts, so ntfy alerts carry only the task title and due date, and tapping one opens the
+phone app; never the sender, the reason or the email text. **New topic** replaces a leaked topic; **Turn off** stops them. `alerts_on = false` in
 settings silences all channels.
 
 **Reporting a miss.** If an email needed action but the engine did not turn it into a task, send the bot
@@ -148,8 +149,14 @@ the Mac within a couple of minutes and show as "Waiting for your Mac" until then
    app: tap the gear, then **Turn on notifications**, and allow them.
 4. **Test it:** in the app's settings press **Send a test notification**.
 
-**Removing a phone:** on the engine's setup page, under **Phones**, press **Remove** next to it. That signs it out, deletes
-its passkey on the engine and stops its notifications. **Sign out** in the app's settings signs out only that phone.
+**Each browser is its own device.** If your passkey syncs (iCloud Keychain, Google Password Manager), you can also sign in
+on your iPad or another phone with it; that browser then shows on the setup page as a device of its own, with its own
+notifications. The Home Screen app and Safari on the same iPhone can count as two devices.
+
+**Removing a device:** on the engine's setup page, under **Phones**, press **Remove** next to it. That signs it out and
+stops its notifications. A passkey is deleted on the engine once every device using it is removed (the page says which
+devices share one), so to lock out a lost phone remove it and the devices that share its passkey. **Sign out** in the
+app's settings signs out only that device.
 
 ## Inviting other people
 

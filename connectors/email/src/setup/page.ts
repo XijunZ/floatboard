@@ -95,8 +95,8 @@ export type Dashboard = {
   fathomSecretSaved?: boolean;
   fathomKeySaved?: boolean;
   outlook?: OutlookStatus | null;
-  /** Paired phones (the phone app), oldest first. */
-  phones?: { id: string; name: string; created: string; last_seen: string | null }[];
+  /** Paired devices (the phone app; one per browser install), oldest first. */
+  phones?: { id: string; name: string; created: string; last_seen: string | null; shares_passkey?: number }[];
   /** The new ingest token, right after it was made (shown this once only). */
   outlookToken?: string | null;
   notice?: string | null;
@@ -114,12 +114,13 @@ const utc = (iso: string) => `${iso.replace("T", " ").slice(0, 16)} UTC`;
 function phonesSection(d: Dashboard): string {
   const phones = d.phones ?? [];
   const list = phones.length
-    ? `<ul>${phones.map((p) => `<li><strong>${esc(p.name)}</strong> <span class="muted">added ${esc(utc(p.created))}${p.last_seen ? `, last used ${esc(utc(p.last_seen))}` : ""}</span>
+    ? `<ul>${phones.map((p) => `<li><strong>${esc(p.name)}</strong> <span class="muted">added ${esc(utc(p.created))}${p.last_seen ? `, last used ${esc(utc(p.last_seen))}` : ""}${p.shares_passkey ? `, shares its passkey with ${p.shares_passkey} other device${p.shares_passkey === 1 ? "" : "s"}` : ""}</span>
 <form class="inline" method="post" action="/setup/phones/remove">${csrfField(d.csrf)}<input type="hidden" name="device_id" value="${esc(p.id)}">
 <button class="danger" type="submit">Remove</button></form></li>`).join("")}</ul>`
     : `<p class="muted">No phones paired yet.</p>`;
   return `${list}
-<p class="muted">To add a phone, open the FloatBoard app on your Mac, go to the Connectors tab and choose Pair a phone. Remove signs that phone out and deletes its passkey here.</p>`;
+<p class="muted">To add a phone, open the FloatBoard app on your Mac, go to the Connectors tab and choose Pair a phone. A passkey synced to another device (iCloud Keychain, Google Password Manager) can sign that device in too; it then shows here as its own device.</p>
+<p class="muted">Remove signs that device out and stops its notifications. A passkey is deleted once every device using it is removed, so to lock out a lost phone, remove it and every device that shares its passkey.</p>`;
 }
 
 export function dashboardPage(d: Dashboard): string {
@@ -182,11 +183,11 @@ ${d.telegramBot ? `<p>Your bot: <strong>@${esc(d.telegramBot)}</strong> <span cl
 <p>Status: ${d.ntfyTopic ? `<span class="ok">on ✓</span>` : `<span class="muted">off</span>`}</p>
 ${d.ntfyTopic ? `<p>Subscribe address: <code>https://ntfy.sh/${esc(d.ntfyTopic)}</code></p>
 <ol><li>Install the ntfy app on your Android phone or iPhone.</li><li>Tap +, then paste the topic name <code>${esc(d.ntfyTopic)}</code>.</li><li>On iPhone, allow notifications when asked.</li></ol>
-<p class="muted">Anyone who knows the topic name can read the alerts, so keep it private. Press New topic if it leaks.</p>
+<p class="muted">ntfy.sh is a public server: anyone who knows the topic name can read the alerts, so only task titles and due dates are sent there. Keep the topic private and press New topic if it leaks.</p>
 <form method="post" action="/setup/ntfy/test">${csrfField(d.csrf)}<button type="submit">Send a test alert</button></form>
 <form method="post" action="/setup/ntfy/new">${csrfField(d.csrf)}<button class="secondary" type="submit">New topic</button></form>
 <form method="post" action="/setup/ntfy/off">${csrfField(d.csrf)}<button class="danger" type="submit">Turn off</button></form>`
-: `<p class="muted">Urgent emails can also reach your phone through the free ntfy app. Alerts carry the task title, due date and sender, never the email text.</p>
+: `<p class="muted">Urgent emails can also reach your phone through the free ntfy app. ntfy.sh is a public server: anyone who knows the topic name can read the alerts, so only task titles and due dates are sent there, never the sender or the email text.</p>
 <form method="post" action="/setup/ntfy/on">${csrfField(d.csrf)}<button type="submit">Turn on</button></form>`}
 </section>
 

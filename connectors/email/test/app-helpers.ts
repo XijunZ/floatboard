@@ -109,22 +109,22 @@ export async function pairCode(key: string): Promise<string> {
 export const cookieOf = (r: Response) => /fb_session=([^;]*)/.exec(r.headers.get("Set-Cookie") ?? "")?.[0] ?? null;
 
 /** Pair a phone end to end; returns the authenticator and the session cookie. */
-export async function pairPhone(key: string, deviceName = "Test phone") {
+export async function pairPhone(key: string, deviceName = "Test phone", installId?: string, a?: Authenticator) {
   const code = await pairCode(key);
   const opt = await api("/app/api/pair/options", { code });
   expect(opt.status).toBe(200);
   const options = await opt.json<any>();
-  const a = await newAuthenticator();
-  const fin = await api("/app/api/pair/finish", { code, response: await register(a, options), deviceName });
+  a ??= await newAuthenticator();
+  const fin = await api("/app/api/pair/finish", { code, response: await register(a, options), deviceName, installId });
   expect(fin.status).toBe(200);
   return { a, code, cookie: cookieOf(fin)!, fin };
 }
 
-export async function login(a: Authenticator, opts: { origin?: string } = {}) {
+export async function login(a: Authenticator, opts: { origin?: string; deviceName?: string; installId?: string } = {}) {
   const o = await api("/app/api/login/options", {});
   expect(o.status).toBe(200);
   const { challengeId, options } = await o.json<any>();
-  return api("/app/api/login/finish", { challengeId, response: await assert(a, options, opts) });
+  return api("/app/api/login/finish", { challengeId, response: await assert(a, options, opts), deviceName: opts.deviceName, installId: opts.installId });
 }
 
 export const count = async (sql: string, ...args: unknown[]) => (await env.DB.prepare(sql).bind(...args).first<{ n: number }>())!.n;

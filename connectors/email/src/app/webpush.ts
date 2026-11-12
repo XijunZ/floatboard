@@ -5,15 +5,39 @@
  *   encrypted with ENC_KEY). Each push carries `Authorization: vapid t=<ES256 JWT>, k=<public key>`.
  * - Payload encryption (RFC 8291, content coding aes128gcm from RFC 8188): one record, padding delimiter 0x02.
  * - Routes (session cookie): `GET /app/api/push/key`, `POST|DELETE /app/api/push/subscribe`, `POST /app/api/push/test`.
+ * - Endpoints must be https on the default port at a known push service (`PUSH_HOSTS`); anything else is refused when
+ *   subscribing and never fetched. Pushes don't follow redirects (a 3xx is a failure), and the test route never passes
+ *   the push service's status on to the phone.
+ * - One endpoint belongs to one device: saving a subscription deletes any other row with the same endpoint, whoever's.
+ * - Alerts go to every subscribed device that is still paired (not revoked). A device whose session expired keeps
+ *   getting alerts until it is removed or turns notifications off; signing in again is needed only to open the board.
+ * - The payload JSON is trimmed to fit one 4096-byte record (RFC 8030's guaranteed size): body first, then title, by
+ *   UTF-8 bytes; a link that doesn't fit becomes `/app/`.
  */
 import { type Env, nowISO } from "../env";
 import { decrypt, encrypt } from "../crypto";
-import { readJSON } from "../http";
+import { readCappedJSON } from "../http";
 import { appJSON, requireAppSession, sameOrigin } from "./auth";
 
 const enc = new TextEncoder();
 const RECORD_SIZE = 4096;
 const MAX_ENDPOINT = 2000;
+const MAX_URL = 2000;
+/** Largest plaintext whose encrypted body (86-byte header + plaintext + delimiter + 16-byte tag) fits in 4096 bytes. */
+export const MAX_PLAINTEXT = RECORD_SIZE - 86 - 17;
+
+/** Push services browsers use: exact hosts, and suffixes (a subdomain of). */
+const PUSH_HOSTS = ["fcm.googleapis.com", "updates.push.services.mozilla.com"];
+const PUSH_SUFFIXES = [".push.apple.com", ".push.services.mozilla.com", ".notify.windows.com"];
+
+/** True for an https URL on the default port, with no user info, at a known push service. */
+export function isPushEndpoint(endpoint: string): boolean {
+  let u: URL;
+  try { u = new URL(endpoint); } catch { return false; }
+  if (u.protocol !== "https:" || u.port !== "" || u.username || u.password) return false;
+  const h = u.hostname.toLowerCase();
+  return PUSH_HOSTS.includes(h) || PUSH_SUFFIXES.some((s) => h.endsWith(s) && h.length > s.length);
+}
 const JWT_SECONDS = 12 * 3600;
 
 // ---------------------------------------------------------------- bytes
@@ -120,20 +144,56 @@ export function setPushFetch(f: typeof fetch) { pushFetch = f; }
 export type PushSubscriptionRow = { device_id: string; user_id: string; endpoint: string; p256dh: string; auth: string; origin: string };
 export type PushPayload = { title: string; body: string; url: string };
 
-/** What the service worker receives (JSON), kept short and single-line in the title. */
-function payloadJSON(p: PushPayload): string {
-  return JSON.stringify({ title: p.title.replace(/[\r\n]+/g, " ").slice(0, 120), body: p.body.slice(0, 1000), url: p.url.slice(0, MAX_ENDPOINT) });
+const utf8 = (s: string) => enc.encode(s).length;
+
+/** The longest prefix of `s` (whole code points) for which `fits` holds. */
+function longestFitting(s: string, fits: (t: string) => boolean): string {
+  if (fits(s)) return s;
+  const cps = [...s];
+  let lo = 0, hi = cps.length; // fits(lo) holds (or lo=0), fits(hi) does not
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (fits(cps.slice(0, mid).join("") + "…")) lo = mid; else hi = mid;
+  }
+  return lo === 0 ? "" : cps.slice(0, lo).join("") + "…";
+}
+
+/**
+ * What the service worker receives (JSON): single-line title of at most 120 characters, body of at most 1000, and the
+ * whole thing at most MAX_PLAINTEXT UTF-8 bytes (body trimmed first, then title; a link that is too long, or still
+ * doesn't fit, becomes /app/).
+ */
+export function payloadJSON(p: PushPayload): string {
+  const title0 = [...p.title.replace(/[\r\n]+/g, " ")].slice(0, 120).join("");
+  const body0 = [...p.body].slice(0, 1000).join("");
+  const urls = p.url.length <= MAX_URL && p.url !== "/app/" ? [p.url, "/app/"] : ["/app/"];
+  let out = "";
+  for (const url of urls) {
+    const json = (title: string, body: string) => JSON.stringify({ title, body, url });
+    const fits = (title: string, body: string) => utf8(json(title, body)) <= MAX_PLAINTEXT;
+    const body = longestFitting(body0, (b) => fits(title0, b));
+    const title = fits(title0, body) ? title0 : longestFitting(title0, (t) => fits(t, body));
+    out = json(title, body);
+    if (fits(title, body)) return out;
+  }
+  return out; // unreachable in practice: "/app/" with an empty title and body always fits
 }
 
 /**
  * Send one notification. Returns the push service's status and whether the subscription is gone (404/410: its row is
- * deleted). Network errors throw.
+ * deleted). A redirect is not followed and counts as a failure. An endpoint off the push-service list is never fetched
+ * (its row is deleted and it throws). Network errors throw.
  */
 export async function sendPush(env: Env, sub: PushSubscriptionRow, payload: PushPayload, keys?: VapidKeys): Promise<{ status: number; ok: boolean; gone: boolean }> {
+  if (!isPushEndpoint(sub.endpoint)) {
+    await env.DB.prepare("DELETE FROM app_push WHERE device_id=? AND endpoint=?").bind(sub.device_id, sub.endpoint).run();
+    throw new Error("not a push service address");
+  }
   const k = keys ?? await vapidKeys(env);
   const body = await encryptPayload(sub, payloadJSON(payload));
   const r = await pushFetch(sub.endpoint, {
     method: "POST",
+    redirect: "manual",
     headers: {
       TTL: "86400", Urgency: "high", "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
       Authorization: await vapidAuthorization(k, sub.endpoint, `${sub.origin}/app`),
@@ -145,9 +205,13 @@ export async function sendPush(env: Env, sub: PushSubscriptionRow, payload: Push
   return { status: r.status, ok: r.status >= 200 && r.status < 300, gone };
 }
 
-/** Push to every subscribed phone of one user. Resolves false when the user has none; throws when none got through. */
+/**
+ * Push to every subscribed, still-paired device of one user (an expired session doesn't stop alerts). Resolves false
+ * when the user has none; throws when none got through.
+ */
 export async function pushToUser(env: Env, userId: string, payload: PushPayload): Promise<boolean> {
-  const subs = (await env.DB.prepare("SELECT device_id, user_id, endpoint, p256dh, auth, origin FROM app_push WHERE user_id=?")
+  const subs = (await env.DB.prepare(`SELECT p.device_id, p.user_id, p.endpoint, p.p256dh, p.auth, p.origin FROM app_push p
+      JOIN app_devices d ON d.id = p.device_id AND d.user_id = p.user_id WHERE p.user_id=? AND d.revoked=0`)
     .bind(userId).all<PushSubscriptionRow>()).results;
   if (!subs.length) return false;
   const keys = await vapidKeys(env);
@@ -159,13 +223,12 @@ export async function pushToUser(env: Env, userId: string, payload: PushPayload)
 
 // ---------------------------------------------------------------- routes
 
-/** Validate a browser PushSubscription JSON: https endpoint, 65-byte p256dh, 16-byte auth. */
+/** Validate a browser PushSubscription JSON: push service endpoint, 65-byte p256dh, 16-byte auth. */
 function parseSubscription(body: any): { endpoint: string; p256dh: string; auth: string } | string {
   const { endpoint, keys } = body ?? {};
   if (typeof endpoint !== "string" || endpoint.length > MAX_ENDPOINT) return "endpoint must be a web address";
-  let u: URL;
-  try { u = new URL(endpoint); } catch { return "endpoint must be a web address"; }
-  if (u.protocol !== "https:") return "endpoint must be https";
+  try { new URL(endpoint); } catch { return "endpoint must be a web address"; }
+  if (!isPushEndpoint(endpoint)) return "endpoint must be a browser push service address";
   if (!keys || typeof keys !== "object") return "keys are required";
   if (!isB64url(keys.p256dh) || keys.p256dh.length > 100) return "keys.p256dh must be base64url";
   if (!isB64url(keys.auth) || keys.auth.length > 40) return "keys.auth must be base64url";
@@ -195,16 +258,18 @@ export async function handlePush(req: Request, env: Env): Promise<Response | nul
   }
 
   if (path === "/app/api/push/subscribe") {
-    const text = await req.text();
-    if (text.length > 5_000) return reply({ error: "too large" }, 413);
-    const rb = await readJSON(new Request(req.url, { method: "POST", body: text }));
-    if (!rb.ok) return reply({ error: "Invalid JSON" }, 400);
+    const rb = await readCappedJSON(req, 5_000);
+    if (!rb.ok) return rb.tooLarge ? reply({ error: "too large" }, 413) : reply({ error: "Invalid JSON" }, 400);
     const sub = parseSubscription(rb.body);
     if (typeof sub === "string") return reply({ error: sub }, 400);
-    await env.DB.prepare(`INSERT INTO app_push (device_id, user_id, endpoint, p256dh, auth, origin, created) VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(device_id) DO UPDATE SET user_id=excluded.user_id, endpoint=excluded.endpoint, p256dh=excluded.p256dh,
-        auth=excluded.auth, origin=excluded.origin, created=excluded.created`)
-      .bind(s.deviceId, s.userId, sub.endpoint, sub.p256dh, sub.auth, url.origin, nowISO()).run();
+    // The endpoint is this browser's: whoever had it before (another device or account on this browser) loses it.
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM app_push WHERE endpoint=? AND device_id<>?").bind(sub.endpoint, s.deviceId),
+      env.DB.prepare(`INSERT INTO app_push (device_id, user_id, endpoint, p256dh, auth, origin, created) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(device_id) DO UPDATE SET user_id=excluded.user_id, endpoint=excluded.endpoint, p256dh=excluded.p256dh,
+          auth=excluded.auth, origin=excluded.origin, created=excluded.created`)
+        .bind(s.deviceId, s.userId, sub.endpoint, sub.p256dh, sub.auth, url.origin, nowISO()),
+    ]);
     return reply({ ok: true });
   }
 
@@ -215,7 +280,7 @@ export async function handlePush(req: Request, env: Env): Promise<Response | nul
   try {
     const r = await sendPush(env, row, { title: "FloatBoard test notification", body: "Notifications work on this phone.", url: "/app/" });
     if (r.gone) return reply({ error: "This phone's notification subscription has ended. Turn notifications on again." }, 410);
-    if (!r.ok) return reply({ error: `The push service refused it (${r.status}).` }, 502);
+    if (!r.ok) return reply({ error: "The push service didn't accept the notification. Try again later." }, 502);
     return reply({ ok: true });
   } catch {
     return reply({ error: "Could not reach the push service." }, 502);
