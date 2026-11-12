@@ -97,3 +97,25 @@ tasks + done today.
 ### Task 7: Ship
 Deploy order: migrations, engine deploy, app install, push to GitHub. README: "Phone app" section (install on Android
 and iPhone, pairing, alerts). Smoke test the live `/app` and manifest.
+
+## Evaluation (the bar the phone app is measured against)
+
+1. **Long-lived.** A phone stays signed in with normal use (90-day sliding session; passkey sign-in if it lapses). Push
+   keeps working when the browser rotates its subscription (`pushsubscriptionchange` re-subscribes; the app shows
+   "Notifications are off" when it has none). Deploys update the installed app without reinstalling. VAPID keys never
+   change.
+2. **Secure.** Independent review with no open Critical/Important findings. Tests prove one user can never read or act
+   on another's board, alerts or devices. Passkeys only (phishing-resistant); a lost phone is removed in one step.
+   Alerts carry no email text.
+3. **Syncs without clashes.** Every phone action carries the time it was made and the card's `updated` time the phone
+   saw. Newest change wins: the Mac skips (and reports) a phone move when the card changed on the Mac after the phone
+   action was made. Scenarios with automated checks: phone done then Mac move later (Mac wins); phone done while the Mac
+   sleeps (applied on wake unless the Mac changed the card later); action on a card deleted on the Mac (ignored, the
+   phone shows it gone); duplicate delivery (applied once); add while the Mac is off (appears once); phone offline
+   (last board, read-only, labelled offline); stale phone copy (refresh on open and on focus).
+4. **Logical UI on a phone.** Rendered and checked at 360, 390 and 430 px wide, light and dark, long and CJK titles,
+   30+ cards per column, tap targets at least 44 px, safe areas respected.
+5. **Parity with the Mac, or clearly marked.** On the phone: board by step, move, done, add, open link, edit due /
+   importance / group, delete with Undo and teach choices, search, urgent alerts. Mac only (stated in the app's Settings
+   and on the task sheet): editing title and notes, reply drafts, Google Calendar and Meet, groups, column sort, bar
+   settings, engine settings.
