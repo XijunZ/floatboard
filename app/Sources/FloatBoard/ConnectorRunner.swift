@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import FloatBoardConnectors
 import FloatBoardCore
 import Foundation
@@ -6,7 +7,8 @@ import Network
 
 /// When connectors sync: launch, wake, board open (at least 2 minutes apart), every 15 minutes, every 15 seconds while a
 /// delivered reply draft waits for its answer (that connector only), and when the
-/// network comes back. One sync at a time per connector. The sync itself is `ConnectorSync` (Connectors target).
+/// network comes back. The phone step alone runs every 2 minutes and 10 seconds after local board changes.
+/// One sync at a time per connector. The sync itself is `ConnectorSync` (Connectors target).
 /// Which connectors are being re-checked right now (read by the Connectors tab to disable the button and show progress).
 @MainActor
 final class RecheckState: ObservableObject {
@@ -28,6 +30,10 @@ final class ConnectorRunner {
     private var syncAgain = Set<String>()
     private let monitor = NWPathMonitor()
     private var wasSatisfied = false
+    private var phoneTimer: Timer?
+    private var boardWatch: AnyCancellable?
+    /// Connectors whose phone step is running (a full sync may still start: it does the phone step too, and actions apply once).
+    private var phoneRunning = Set<String>()
 
     init(store: Store) { self.store = store; Self.shared = self }
 
@@ -72,6 +78,34 @@ final class ConnectorRunner {
             }
         }
         monitor.start(queue: DispatchQueue(label: "floatboard.network"))
+
+        // Phone app: poll for phone actions every 2 minutes, and send the board 10 seconds after local changes settle.
+        // Only engines that have the phone app (or haven't been asked yet) are polled; a full sync asks again.
+        let p = Timer(timeInterval: ConnectorSync.phonePollInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.phoneTick(skipUnknown: false) }
+        }
+        RunLoop.main.add(p, forMode: .common)
+        phoneTimer = p
+        boardWatch = Publishers.Merge(store.$cards.map { _ in () }, store.$areas.map { _ in () })
+            .debounce(for: .seconds(ConnectorSync.phonePushDebounce), scheduler: RunLoop.main)
+            .sink { [weak self] in MainActor.assumeIsolated { self?.phoneTick(skipUnknown: true) } }
+    }
+
+    /// The phone step alone (actions, then the board if it changed) for each connector not already syncing. With
+    /// `skipUnknown`, only engines known to have the phone app. Actions that queued engine events start a sync to send them.
+    private func phoneTick(skipUnknown: Bool) {
+        for info in store.connectors {
+            let id = info.id
+            let support = ConnectorSync.phoneSupport[id]
+            if support == false || (skipUnknown && support == nil) || running.contains(id) || phoneRunning.contains(id) { continue }
+            guard let client = ConnectorAccounts.client(for: info, store: store) else { continue }
+            phoneRunning.insert(id)
+            Task { @MainActor in
+                let r = await ConnectorSync.phoneTick(connector: id, store: store, client: client, now: Date())
+                phoneRunning.remove(id)
+                if r.queuedEvents { trigger("phone", only: [id]) }
+            }
+        }
     }
 
     func boardOpened() {
@@ -89,11 +123,12 @@ final class ConnectorRunner {
             guard let client = ConnectorAccounts.client(for: info, store: store) else { continue }
             running.insert(id)
             Task { @MainActor in
-                _ = await ConnectorSync.run(connector: id, store: store, client: client, now: Date())
+                let r = await ConnectorSync.run(connector: id, store: store, client: client, now: Date())
                 running.remove(id)
                 store.reload()
                 Health.refresh(store: store, backups: backups)
                 if syncAgain.remove(id) != nil { trigger("reply draft") }
+                else if r.phoneQueuedEvents { trigger("phone", only: [id]) }
             }
         }
     }
