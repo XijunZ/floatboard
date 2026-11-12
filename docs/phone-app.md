@@ -141,3 +141,33 @@ old push subscription unsubscribed); at most 20 live sign-in challenges per clie
 before reading; phone moves applied to the latest board copy with a conditional write (a Mac push in the tiny window
 between re-read and write wins, and the overlay still shows the move); a pairing code is used up only by a pairing whose
 device, passkey and session were all created; push payloads trimmed to fit 4096 bytes; ntfy alerts minimal.
+
+## Sync v2: engine keeps the record, newest change wins (decided)
+
+Scope stays **view + quick actions** on the phone: see the board, alerts, move between To do / Doing / Watch / Done,
+add a task. Editing details (title, notes, due, importance, group, delete) is Mac only; the phone's task sheet says
+"Edit details on your Mac".
+
+1. **Action log on the engine** (`board_log`, kept 1 year): one row per change from any device: `id` (UUID, unique:
+   a repeat is ignored), `user_id`, `device` ("mac" or the phone's device id), `card_id`, `kind`
+   (`status` | `add` | `delete`), `value` (new status or title), `made_at` (corrected, see 3), `received_at`.
+2. **Newest change wins per card status.** Phone actions carry `made_at`. The Mac's board push carries each card's
+   `status_at` (when its step last changed on the Mac). The engine logs Mac changes by comparing each push with the last
+   one. The board the phone sees applies an untaken phone action only when it is newer than the card's `status_at`; the
+   Mac applies a phone action only when it is newer than its own last step change for that card (else acks it and logs
+   "kept the newer Mac change").
+3. **Clock correction.** Each batch a device sends includes `sent_at` (its clock at send time). The engine computes
+   `skew = received_at - sent_at` and stores `made_at + skew`, so a wrong phone clock or hours offline in a queue still
+   orders correctly.
+4. **Phone works offline.** It opens on the last board (only the board of the account last confirmed on this phone;
+   pairing or signing in as another account clears it), queues actions locally, retries with back-off (5 s doubling to
+   5 minutes, plus on reconnect / opening the app), shows "N changes waiting to sync" or "Last synced hh:mm", never
+   error pop-ups. Syncs on any connection. Built to cope with unreliable networks (e.g. mainland China without a VPN);
+   note: Android push needs Google's push service, which mainland China blocks; iPhone push works there.
+5. **Push subscription renewal:** the service worker handles `pushsubscriptionchange` by re-subscribing and saving it;
+   the app shows "Notifications are off" when this phone has no working subscription.
+6. **Phone layout** checked at 360, 390 and 430 px, light and dark, long and CJK titles, 30+ tasks.
+
+Checks (engine and Mac): duplicate action id applied once; phone action older than the Mac's change loses (both on the
+engine's board and when the Mac applies it); newer phone action wins; skew correction (phone clock 2 h fast, action
+queued offline 3 h); action on a card deleted on the Mac is dropped and logged; Mac push logs its own changes.
