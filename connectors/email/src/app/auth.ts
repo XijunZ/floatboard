@@ -109,6 +109,7 @@ export async function removeDevice(env: Env, userId: string, deviceId: string): 
     env.DB.prepare("UPDATE app_devices SET revoked=1 WHERE id=? AND user_id=?").bind(deviceId, userId),
     env.DB.prepare("DELETE FROM app_sessions WHERE device_id=?").bind(deviceId),
     env.DB.prepare("DELETE FROM app_credentials WHERE device_id=?").bind(deviceId),
+    env.DB.prepare("DELETE FROM app_push WHERE device_id=?").bind(deviceId),
   ]);
   return dev.name;
 }

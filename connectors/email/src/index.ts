@@ -17,6 +17,7 @@ import { telegramWebhook, userBotWebhook } from "./telegram";
 import { ingestOutlook, judgeOutlookNow } from "./outlook";
 import { appJSON, handleAppAuth, purgeExpiredApp } from "./app/auth";
 import { handleBoard, purgePhoneActions } from "./app/board";
+import { handlePush } from "./app/webpush";
 
 async function createUser(req: Request, env: Env): Promise<Response> {
   const rb = await readJSON(req);
@@ -76,7 +77,7 @@ export default {
     }
     if (url.pathname.startsWith("/app/api/")) {
       // Phone app: signed in by the fb_session cookie only (never the user key).
-      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? appJSON({ error: "not found" }, 404);
+      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handlePush(req, env)) ?? appJSON({ error: "not found" }, 404);
     }
     if (url.pathname.startsWith("/v2/")) {
       const user = await authUser(req, env);
