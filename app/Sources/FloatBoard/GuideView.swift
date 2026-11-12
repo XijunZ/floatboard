@@ -38,7 +38,7 @@ struct GuideView: View {
                     icon("calendar.badge.plus", "Add to Google Calendar (choose account, with or without Meet)")
                     icon("calendar.badge.checkmark", "In Google Calendar (shown under the task): click to open the event")
                     icon("video.fill", "Join the Google Meet call")
-                    icon("eye", "Move to Watch: waiting on someone else. Watch tasks stay on the board; the bar shows only 👁 and how many at its left end (red when one is overdue to chase); click it for the list")
+                    icon("eye", "Move to Watch: waiting on someone else. Watch tasks stay on the board, off the bar; the bar's count adds “· N watch” when there are any")
                     icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending. Columns start on Due date (Done on Date finished); ties go by importance, then oldest. Group keeps each group's tasks together, in Groups tab order")
                     icon("plus", "Add row: the first chip picks the step (To do, Doing, Watch or Done) the new task goes into")
                     icon("arrow.uturn.backward", "Deleted by mistake? Press Undo on the bar that appears, or Edit → Undo Delete (⌥⌘Z) for the last deleted task")
