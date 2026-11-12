@@ -120,6 +120,13 @@ under "Fathom meeting recaps" on the setup page and paste it into Fathom's webho
 `<your-engine>/telegram/webhook/u/<random id>` with its own secret, so no command line is needed. Alerts and replies for
 that user then come from their bot. **Remove my bot** goes back to the shared bot (link the chat again).
 
+**Phone alerts with the ntfy app (optional, no bot needed).** On the setup page, under **Phone alerts (ntfy app)**, press
+**Turn on**. The engine makes a private random topic and shows its address. Install the free ntfy app (Android or iPhone),
+tap +, paste the topic name (on iPhone allow notifications), then press **Send a test alert**. Urgent items go to every
+channel you have (ntfy and Telegram); one failing never stops the other. Alerts carry the task title, due date, sender and
+a link, never the email text. **New topic** replaces a leaked topic; **Turn off** stops them. `alerts_on = false` in
+settings silences all channels.
+
 **Reporting a miss.** If an email needed action but the engine did not turn it into a task, send the bot
 `missed: <a few words from the email>`. No task is created. The engine only *learns* from it, so similar emails are
 caught next time.

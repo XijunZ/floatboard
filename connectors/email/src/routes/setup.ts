@@ -17,6 +17,7 @@ import {
 import { isWebhookSecret } from "../sources/fathom";
 import { fathomKeyWorks } from "../sources/fathomCatchup";
 import { ensureFathomHook, exchangeGoogleCode, fathomHookURL, googleAuthURL, upsertGmail } from "./sources";
+import { sendNtfy } from "../alerts";
 import { newTelegramLink, removeUserBot, saveUserBot } from "../telegram";
 import { issueOutlookToken } from "../outlook";
 
@@ -123,8 +124,8 @@ async function dashboard(req: Request, env: Env, s: Session, extra: Partial<Dash
   const userId = s.user_id!;
   const origin = new URL(req.url).origin;
   const [u, client, gmail] = await Promise.all([
-    env.DB.prepare("SELECT name, anthropic_key_enc, telegram_chat_id, tg_bot_name, tg_bot_token_enc FROM users WHERE id=?").bind(userId)
-      .first<{ name: string; anthropic_key_enc: string | null; telegram_chat_id: string | null; tg_bot_name: string | null; tg_bot_token_enc: string | null }>(),
+    env.DB.prepare("SELECT name, anthropic_key_enc, telegram_chat_id, tg_bot_name, tg_bot_token_enc, ntfy_topic FROM users WHERE id=?").bind(userId)
+      .first<{ name: string; anthropic_key_enc: string | null; telegram_chat_id: string | null; tg_bot_name: string | null; tg_bot_token_enc: string | null; ntfy_topic: string | null }>(),
     env.DB.prepare("SELECT client_id FROM google_clients WHERE user_id=?").bind(userId).first<{ client_id: string }>(),
     env.DB.prepare("SELECT id, address, enabled, last_error, last_run FROM sources WHERE user_id=? AND kind='gmail' ORDER BY created").bind(userId).all<GmailRow>(),
   ]);
@@ -140,6 +141,7 @@ async function dashboard(req: Request, env: Env, s: Session, extra: Partial<Dash
   return htmlResponse(dashboardPage({
     name: u?.name ?? "", csrf: s.csrf, origin, connectLink, googleClientId: client?.client_id ?? null, gmail: gmail.results,
     hasClaudeKey: !!u?.anthropic_key_enc, telegramLinked: !!u?.telegram_chat_id,
+    ntfyTopic: u?.ntfy_topic ?? null,
     telegramBot: u?.tg_bot_token_enc ? u.tg_bot_name : null, fathomURL: await fathomHookURL(env, req, userId),
     fathomSecretSaved: !!(await env.DB.prepare("SELECT 1 FROM sources WHERE user_id=? AND kind='fathom' AND hook_secret_enc IS NOT NULL")
       .bind(userId).first()),
@@ -351,6 +353,32 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
       return dashboard(req, env, s, { notice: removed
         ? "Your bot is removed. Alerts now come from the shared bot once you link your chat again with Get Telegram link."
         : "You have no bot of your own saved." });
+    }
+    case "/setup/ntfy/on":
+    case "/setup/ntfy/new": {
+      const topic = randomToken(24).slice(0, 24); // 24 url-safe characters
+      await env.DB.prepare("UPDATE users SET ntfy_topic=? WHERE id=?").bind(topic, userId).run();
+      await record(env, req, path === "/setup/ntfy/on" ? "ntfy_on" : "ntfy_new_topic", true, userId);
+      return dashboard(req, env, s, { notice: path === "/setup/ntfy/on"
+        ? "Phone alerts are on. Subscribe to the topic in the ntfy app, then send a test alert."
+        : "New topic created. Subscribe to it in the ntfy app; the old topic no longer gets alerts." });
+    }
+    case "/setup/ntfy/off": {
+      await env.DB.prepare("UPDATE users SET ntfy_topic=NULL WHERE id=?").bind(userId).run();
+      await record(env, req, "ntfy_off", true, userId);
+      return dashboard(req, env, s, { notice: "Phone alerts with the ntfy app are off." });
+    }
+    case "/setup/ntfy/test": {
+      const row = await env.DB.prepare("SELECT ntfy_topic FROM users WHERE id=?").bind(userId).first<{ ntfy_topic: string | null }>();
+      if (!row?.ntfy_topic) return dashboard(req, env, s, { error: "Turn on phone alerts first." }, 400);
+      try {
+        await sendNtfy(row.ntfy_topic, { id: "test", title: "FloatBoard test alert", why: "If you see this, phone alerts work.", sender: "", due: null, link: "" });
+      } catch (e) {
+        await record(env, req, "ntfy_test", false, userId, (e as Error).message);
+        return dashboard(req, env, s, { error: "Couldn't reach ntfy. Try again in a minute." }, 502);
+      }
+      await record(env, req, "ntfy_test", true, userId);
+      return dashboard(req, env, s, { notice: "Test alert sent. It should arrive on your phone in a few seconds." });
     }
     case "/setup/fathom/key": {
       const key = (f.fathom_key ?? "").trim();

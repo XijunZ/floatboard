@@ -5,7 +5,8 @@ import { runUser, runRounds } from "../src/run";
 import { classify } from "../src/classify";
 import { encrypt } from "../src/crypto";
 import { HAIKU, makeClient } from "../src/llm";
-import { alertFor, setTelegramFetch } from "../src/telegram";
+import { setTelegramFetch } from "../src/telegram";
+import { alertFor } from "../src/alerts";
 import { newUser } from "./helpers";
 import type { Message, Source } from "../src/sources/types";
 

@@ -14,7 +14,7 @@ import { readJSON } from "./http";
 import { logEvent } from "./runlog";
 import { Budget, CALLS_PER_INVOCATION } from "./budget";
 import { recordCrash, runUser } from "./run";
-import { alertFor } from "./telegram";
+import { alertFor } from "./alerts";
 import { zonedParts } from "./time";
 
 export const OUTLOOK_KIND = "outlook_web";

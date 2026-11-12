@@ -87,6 +87,8 @@ export type Dashboard = {
   hasClaudeKey: boolean;
   telegramLinked: boolean;
   telegramURL?: string | null;
+  /** The user's ntfy topic when phone alerts with the ntfy app are on. */
+  ntfyTopic?: string | null;
   /** The @username (without @) of the user's own bot, when they saved one. */
   telegramBot?: string | null;
   fathomURL: string | null;
@@ -159,6 +161,18 @@ ${d.telegramBot ? `<p>Your bot: <strong>@${esc(d.telegramBot)}</strong> <span cl
 <label for="bot_token">${d.telegramBot ? "Replace with another bot token" : "Your own bot token (optional)"}</label>
 <input type="password" id="bot_token" name="bot_token" autocomplete="off" required>
 <button type="submit">Save</button></form>
+</section>
+
+<section><h2>Phone alerts (ntfy app)</h2>
+<p>Status: ${d.ntfyTopic ? `<span class="ok">on ✓</span>` : `<span class="muted">off</span>`}</p>
+${d.ntfyTopic ? `<p>Subscribe address: <code>https://ntfy.sh/${esc(d.ntfyTopic)}</code></p>
+<ol><li>Install the ntfy app on your Android phone or iPhone.</li><li>Tap +, then paste the topic name <code>${esc(d.ntfyTopic)}</code>.</li><li>On iPhone, allow notifications when asked.</li></ol>
+<p class="muted">Anyone who knows the topic name can read the alerts, so keep it private. Press New topic if it leaks.</p>
+<form method="post" action="/setup/ntfy/test">${csrfField(d.csrf)}<button type="submit">Send a test alert</button></form>
+<form method="post" action="/setup/ntfy/new">${csrfField(d.csrf)}<button class="secondary" type="submit">New topic</button></form>
+<form method="post" action="/setup/ntfy/off">${csrfField(d.csrf)}<button class="danger" type="submit">Turn off</button></form>`
+: `<p class="muted">Urgent emails can also reach your phone through the free ntfy app. Alerts carry the task title, due date and sender, never the email text.</p>
+<form method="post" action="/setup/ntfy/on">${csrfField(d.csrf)}<button type="submit">Turn on</button></form>`}
 </section>
 
 <section><h2>5. Fathom meeting recaps</h2>

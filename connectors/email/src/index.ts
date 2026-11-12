@@ -12,7 +12,8 @@ import "./routes/v2";
 import { handleSetup, purgeExpiredSetup } from "./routes/setup";
 import { log, recordCrash, runRounds, type RunOptions } from "./run";
 import { Budget } from "./budget";
-import { alertFor, telegramWebhook, userBotWebhook } from "./telegram";
+import { alertFor } from "./alerts";
+import { telegramWebhook, userBotWebhook } from "./telegram";
 import { ingestOutlook, judgeOutlookNow } from "./outlook";
 
 async function createUser(req: Request, env: Env): Promise<Response> {
