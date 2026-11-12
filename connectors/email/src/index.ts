@@ -15,6 +15,7 @@ import { Budget } from "./budget";
 import { alertFor } from "./alerts";
 import { telegramWebhook, userBotWebhook } from "./telegram";
 import { ingestOutlook, judgeOutlookNow } from "./outlook";
+import { appJSON, handleAppAuth, purgeExpiredApp } from "./app/auth";
 
 async function createUser(req: Request, env: Env): Promise<Response> {
   const rb = await readJSON(req);
@@ -72,6 +73,10 @@ export default {
       await env.DB.prepare("UPDATE sources SET last_run=?, last_error=NULL WHERE id=?").bind(nowISO(), src.id).run();
       return json({ ok: true });
     }
+    if (url.pathname.startsWith("/app/api/")) {
+      // Phone app: signed in by the fb_session cookie only (never the user key).
+      return (await handleAppAuth(req, env)) ?? appJSON({ error: "not found" }, 404);
+    }
     if (url.pathname.startsWith("/v2/")) {
       const user = await authUser(req, env);
       if (!user) return json({ error: "unauthorized" }, 401);
@@ -105,6 +110,7 @@ export async function runAllUsers(
   // Setup-page hygiene rides on the hourly cron (no extra cron): expired sessions (with their encrypted keys) and states go.
   try {
     await purgeExpiredSetup(env);
+    await purgeExpiredApp(env);
   } catch (e) {
     const msg = `Could not purge expired setup sessions: ${(e as Error)?.message ?? e}`.slice(0, 500);
     log("setup_purge_failed", { error: msg });
