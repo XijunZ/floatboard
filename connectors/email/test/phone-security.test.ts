@@ -253,8 +253,8 @@ describe("M2 request size is checked before the body is read", () => {
   it("m2_size_is_counted_in_bytes_not_characters", async () => {
     const u = await newUser("Bytes");
     const { cookie } = await pairPhone(u.key);
-    // 2,000 three-byte characters: 6,000 bytes, over the 5,000-byte cap, but only 2,000 UTF-16 units.
-    const r = await api("/app/api/action", { action: "add", title: "x", pad: "紧".repeat(2000) }, { cookie });
+    // 25,000 three-byte characters: 75,000 bytes, over the 64,000-byte cap, but only 25,000 UTF-16 units.
+    const r = await api("/app/api/action", { action: "add", title: "x", pad: "紧".repeat(25_000) }, { cookie });
     expect(r.status).toBe(413);
   });
 });
