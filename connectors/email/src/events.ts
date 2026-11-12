@@ -3,6 +3,7 @@ import { type Env, nowISO } from "./env";
 import { logEvent } from "./runlog";
 import { maybeConsolidateForUser } from "./learn";
 import { gmailIdFromLink, gmailSource, type GmailSource } from "./sources/gmail";
+import { GMAIL_ID } from "./emails";
 import { answerUnreadable, DRAFT_CALLS, draftReplyEvent, readDraftRequest, superseded } from "./drafts";
 import type { SourceRow } from "./sources/types";
 
@@ -121,8 +122,14 @@ export async function processEvents(env: Env, userId: string, calls: Budget, fet
         continue;
       }
       item = await findItem(env, userId, p);
-      const gid = gmailIdFromLink(item?.link);
-      const src = item?.source_id ? await gmailFor(item.source_id) : null;
+      let gid = gmailIdFromLink(item?.link);
+      let srcId = item?.source_id ?? null;
+      if (!item && e.kind === "done" && typeof p.account === "string" && typeof p.gmail_id === "string" && GMAIL_ID.test(p.gmail_id)) {
+        // A task the user linked to an email: the Gmail message and inbox come with the event (only one of the user's own inboxes).
+        const own = await env.DB.prepare("SELECT id FROM sources WHERE user_id=? AND kind='gmail' AND address=?").bind(userId, p.account).first<{ id: string }>();
+        if (own) { gid = p.gmail_id; srcId = own.id; }
+      }
+      const src = srcId ? await gmailFor(srcId) : null;
       const outOfCalls = async (n: number) => {
         if (!src || calls.remaining >= n + (src.gmail.hasToken ? 0 : 1)) return false;
         await trace(env, userId, runId, e.uuid, "event waits for next run", "out of calls", item);

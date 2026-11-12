@@ -16,12 +16,17 @@
  *   until the Mac applies and acks it.
  * - The Mac polls `GET /v2/phone-actions` (with corrected `made_at`), applies them unless its own step change for the card
  *   is newer, and acks with `POST /v2/phone-actions/ack` (`skipped` ones with a reason, logged).
+ * - `link_email` / `unlink_email` (from "Link an email" on the phone) never change a card's step: they are queued with the
+ *   email to attach (`payload`; the account must be one of the user's own Gmail inboxes) and the Mac applies them to
+ *   tasks the user made. A card's optional `email` says who linked its email ("sorting" or "user") so the phone knows
+ *   which button to show.
  */
 import { type Env, json, nowISO } from "../env";
 import { decrypt, encrypt } from "../crypto";
 import { readCappedJSON } from "../http";
 import { route } from "../router";
 import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
+import { GMAIL_ID, ownGmail } from "../emails";
 
 export const MAX_CARDS = 500;
 export const MAX_UNTAKEN_ACTIONS = 200;
@@ -40,23 +45,33 @@ const MAX_SKEW_MS = 7 * 86400_000;
 const MAX_SUPERSEDED_LISTED = 200;
 const ACTION_ID = /^[A-Za-z0-9-]{8,64}$/;
 const STATUSES = ["todo", "doing", "watch", "done"] as const;
+/** Link a task to an email (or remove that link) from the phone: the Mac applies it; it never changes the task's step. */
+const LINKS = ["link_email", "unlink_email"] as const;
+const EMAIL_KINDS = ["sorting", "user"] as const;
+const MAX_MESSAGE_ID = 998;
+const MAX_ACCOUNT = 320;
 const DEFAULT_COLOR = "#8e8e93";
 
 export type Status = (typeof STATUSES)[number];
 /** One link on a task: what it opens and where. `label` "calendar" marks the task's calendar event. */
 export type CardLink = { kind: (typeof LINK_KINDS)[number]; url: string; label?: (typeof LINK_LABELS)[number] };
+/** `email`: the task's linked email, made by the email sorting ("sorting") or linked by the user ("user"); absent when none. */
 export type Card = {
   id: number; title: string; group: string; color: string; importance: 0 | 1 | 2; due: string | null; has_time: boolean;
-  status: Status; link: string | null; links?: CardLink[]; done_at: string | null; status_at?: string | null; pending?: true; action_id?: string | null;
+  status: Status; link: string | null; links?: CardLink[]; email?: (typeof EMAIL_KINDS)[number]; done_at: string | null; status_at?: string | null;
+  pending?: true; action_id?: string | null;
 };
+/** The email a `link_email` action attaches (sent_at as the search gave it). */
+export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
 export type PhoneAction = {
-  id: string; client_id: string | null; card_id: number | null; action: Status | "add"; title: string | null; group: string | null;
-  created: string; made_at: string;
+  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number]; title: string | null; group: string | null;
+  created: string; made_at: string; email?: LinkedEmail;
 };
 type ActionRow = {
   id: string; rid: number; client_id: string | null; card_id: number | null; action: string; title: string | null; group_name: string | null;
-  created: string; made_at: string; taken: number;
+  created: string; made_at: string; taken: number; payload: string | null;
 };
+const isMove = (action: string): action is Status => (STATUSES as readonly string[]).includes(action);
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const isIso = (v: unknown): v is string => typeof v === "string" && v.length <= 40 && !Number.isNaN(Date.parse(v));
@@ -115,6 +130,10 @@ export function parseCards(body: any): Card[] {
         status_at: c.status_at === undefined ? null : isoOrNull(c.status_at, "status_at") };
       const links = cardLinks(c.links);
       if (links) out.links = links;
+      if (c.email !== undefined && c.email !== null) {
+        if (!EMAIL_KINDS.includes(c.email)) throw new Error("email must be sorting or user when given");
+        out.email = c.email;
+      }
       return out;
     } catch (e) { throw new Error(`${at}.${(e as Error).message}`); }
   });
@@ -142,7 +161,7 @@ async function loadSnapshot(env: Env, userId: string): Promise<{ cards: Card[]; 
   return { cards: JSON.parse(await decrypt(env, row.data_enc)).cards as Card[], updated: row.updated };
 }
 
-const ACTION_COLS = "id, rowid AS rid, client_id, card_id, action, title, group_name, created, COALESCE(made_at, created) AS made_at, taken";
+const ACTION_COLS = "id, rowid AS rid, client_id, card_id, action, title, group_name, created, COALESCE(made_at, created) AS made_at, taken, payload";
 
 /** Actions the Mac has not acked yet (oldest first). */
 async function untaken(env: Env, userId: string): Promise<ActionRow[]> {
@@ -172,9 +191,9 @@ export function overlay(cards: Card[], actions: ActionRow[], snapUpdated: string
       const group = a.group_name || "Inbox";
       out.push({ id: -a.rid, title: a.title ?? "", group, color: out.find((c) => c.group === group)?.color ?? DEFAULT_COLOR, importance: 0,
         due: null, has_time: false, status: "todo", link: null, done_at: null, status_at: a.made_at, pending: true, action_id: a.client_id });
-    } else {
+    } else if (isMove(a.action)) {
       const c = out.find((x) => x.id === a.card_id);
-      if (c && a.made_at >= base.get(c.id)!) applyMove(c, a.action as Status, a.made_at);
+      if (c && a.made_at >= base.get(c.id)!) applyMove(c, a.action, a.made_at);
     }
   }
   return out;
@@ -251,7 +270,7 @@ route("PUT", "/v2/board", async (req, env, user) => {
   const older = new Map<number, ActionRow[]>();
   for (const a of await untaken(env, user.id)) {
     const c = a.card_id === null ? undefined : byId.get(a.card_id);
-    if (a.action === "add" || !c || a.made_at >= c.status_at!) continue;
+    if (!isMove(a.action) || !c || a.made_at >= c.status_at!) continue;
     older.set(c.id, [...(older.get(c.id) ?? []), a]);
   }
   for (const [cardId, list] of older) {
@@ -269,7 +288,8 @@ route("PUT", "/v2/board", async (req, env, user) => {
 
 route("GET", "/v2/phone-actions", async (_req, env, user) => {
   const actions: PhoneAction[] = (await untaken(env, user.id)).map((a) => ({ id: a.id, client_id: a.client_id, card_id: a.card_id,
-    action: a.action as PhoneAction["action"], title: a.title, group: a.group_name, created: a.created, made_at: a.made_at }));
+    action: a.action as PhoneAction["action"], title: a.title, group: a.group_name, created: a.created, made_at: a.made_at,
+    ...(a.action === "link_email" && a.payload ? { email: JSON.parse(a.payload) as LinkedEmail } : {}) }));
   return json({ server_time: nowISO(), actions });
 });
 
@@ -339,7 +359,7 @@ export async function handleBoard(req: Request, env: Env): Promise<Response | nu
   return null;
 }
 
-type Parsed = { card_id: number | null; action: Status | "add"; title: string | null; group: string | null };
+type Parsed = { card_id: number | null; action: PhoneAction["action"]; title: string | null; group: string | null; email?: LinkedEmail };
 type Outcome = { accepted: string[]; dropped: { id: string | null; reason: string }[] } | { error: string; status: number };
 
 /** Validate one action's content (not its id or times); a message on anything off. */
@@ -356,11 +376,19 @@ function parseAction(body: any): Parsed | string {
     }
     return { card_id: null, action, title: t, group };
   }
-  if (STATUSES.includes(action)) {
+  if (STATUSES.includes(action) || LINKS.includes(action)) {
     if (!Number.isSafeInteger(body.card_id)) return "card_id must be an integer";
-    return { card_id: body.card_id, action, title: null, group: null };
+    if (action !== "link_email") return { card_id: body.card_id, action, title: null, group: null };
+    const { message_id, gmail_id, account, sent_at } = body;
+    if (typeof message_id !== "string" || !message_id.trim() || message_id.length > MAX_MESSAGE_ID || /[\u0000-\u001f\u007f]/.test(message_id)) {
+      return "message_id must be an email's Message-ID";
+    }
+    if (typeof gmail_id !== "string" || !GMAIL_ID.test(gmail_id)) return "gmail_id must be a Gmail message id";
+    if (typeof account !== "string" || !account.includes("@") || account.length > MAX_ACCOUNT) return "account must be a Gmail address";
+    if (sent_at !== undefined && sent_at !== null && !isIso(sent_at)) return "sent_at must be an ISO date or null";
+    return { card_id: body.card_id, action, title: null, group: null, email: { message_id, gmail_id, account, sent_at: sent_at ?? null } };
   }
-  return "action must be todo, doing, watch, done or add";
+  return "action must be todo, doing, watch, done, add, link_email or unlink_email";
 }
 
 type NewAction = Parsed & { clientId: string; madeAt: string; superseded: boolean };
@@ -374,9 +402,11 @@ async function store(env: Env, userId: string, deviceId: string, list: NewAction
   const stmts: D1PreparedStatement[] = [];
   for (const a of list) {
     const id = crypto.randomUUID();
-    stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO phone_actions(id,user_id,card_id,action,title,group_name,created,taken,client_id,device_id,made_at,sent_at)
-        VALUES(?,?,?,?,?,?,?,0,?,?,?,?)`).bind(id, userId, a.card_id, a.action, a.title, a.group, now, a.clientId, deviceId, a.madeAt, sentAt));
-    stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : "status",
+    stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO phone_actions(id,user_id,card_id,action,title,group_name,created,taken,client_id,device_id,made_at,sent_at,payload)
+        VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?)`).bind(id, userId, a.card_id, a.action, a.title, a.group, now, a.clientId, deviceId, a.madeAt, sentAt,
+      a.email ? JSON.stringify(a.email) : null));
+    // The log says a link was made or removed, never which email.
+    stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : isMove(a.action) ? "status" : "link",
       value: a.action === "add" ? await encrypt(env, a.title!) : a.action, madeAt: a.madeAt, receivedAt: now, clientId: a.clientId }));
     if (a.superseded) stmts.push(...supersedeStmts(env, userId, { id, client_id: a.clientId, card_id: a.card_id }, deviceId, now));
   }
@@ -420,7 +450,8 @@ async function doSingle(env: Env, userId: string, deviceId: string, body: any, r
   if (p.card_id !== null && !c) return { error: "That task isn't on your board.", status: 404 };
   const clientId = crypto.randomUUID();
   const madeAt = iso(receivedMs);
-  const err = await store(env, userId, deviceId, [{ ...p, clientId, madeAt, superseded: !!c && madeAt < statusAt(c, snap!.updated) }], null, receivedMs);
+  if (p.email && !(await ownGmail(env, userId, p.email.account))) return { error: "account must be one of your Gmail inboxes", status: 400 };
+  const err = await store(env, userId, deviceId, [{ ...p, clientId, madeAt, superseded: !!c && isMove(p.action) && madeAt < statusAt(c, snap!.updated) }], null, receivedMs);
   return err ? { error: err, status: 429 } : { accepted: [clientId], dropped: [] };
 }
 
@@ -439,20 +470,24 @@ async function doBatch(env: Env, userId: string, deviceId: string, body: any, re
   const already = await known(env, userId, [...new Set(ids)]);
   const missing = [...new Set(valid.flatMap((p: Parsed | string) => (typeof p !== "string" && p.card_id !== null && !cards.has(p.card_id) ? [p.card_id] : [])))] as number[];
   const gone = await everSeen(env, userId, missing);
+  // A link names one of this user's own Gmail inboxes, else it is invalid.
+  const accounts = [...new Set(valid.flatMap((p: Parsed | string) => (typeof p !== "string" && p.email ? [p.email.account] : [])))] as string[];
+  const mine = new Set<string>();
+  for (const acc of accounts) if (await ownGmail(env, userId, acc)) mine.add(acc);
   const accepted: string[] = [];
   const dropped: { id: string | null; reason: string }[] = [];
   const fresh: NewAction[] = [];
   const inBatch = new Set<string>();
   list.forEach((a: any, i: number) => {
     const p = valid[i];
-    if (typeof p === "string") { dropped.push({ id: typeof a?.id === "string" ? a.id.slice(0, 64) : null, reason: "invalid" }); return; }
+    if (typeof p === "string" || (p.email && !mine.has(p.email.account))) { dropped.push({ id: typeof a?.id === "string" ? a.id.slice(0, 64) : null, reason: "invalid" }); return; }
     if (already.has(a.id) || inBatch.has(a.id)) { accepted.push(a.id); return; }
     const c = p.card_id === null ? undefined : cards.get(p.card_id);
     if (p.card_id !== null && !c) { dropped.push({ id: a.id, reason: gone.has(p.card_id) ? "card gone" : "unknown card" }); return; }
     const madeAt = corrected(a.made_at, skew, receivedMs) ?? iso(receivedMs);
     inBatch.add(a.id);
     accepted.push(a.id);
-    fresh.push({ ...p, clientId: a.id, madeAt, superseded: !!c && madeAt < statusAt(c, snap!.updated) });
+    fresh.push({ ...p, clientId: a.id, madeAt, superseded: !!c && isMove(p.action) && madeAt < statusAt(c, snap!.updated) });
   });
   const err = await store(env, userId, deviceId, fresh, sentAt, receivedMs);
   return err ? { error: err, status: 429 } : { accepted, dropped };
