@@ -92,9 +92,12 @@ public enum ConnectorError: Error, CustomStringConvertible, Equatable {
     case staleSettings(engineVersion: Int?)
     case network(String)
     case badResponse(String)
+    /// The engine answered 404 on a phone app route: it has no phone app (an older engine). Callers skip quietly.
+    case noPhoneApp
 
     public var description: String {
         switch self {
+        case .noPhoneApp: return "This engine doesn't have the phone app yet. Update the engine to pair a phone."
         case .auth: return "The engine didn't accept this connection's key."
         case .http(400, let b): return "The engine rejected the request as malformed. \(b)"
         case .http(let c, let b): return "The engine answered \(c). \(b)"
@@ -206,6 +209,60 @@ public struct ConnectorClient {
     /// Asks the engine to work on (at most) one waiting reply draft now; it answers when that is done.
     public func runDrafts() async throws {
         _ = try await call("POST", "/v2/drafts/run")
+    }
+
+    // MARK: Phone app
+
+    /// The engine's address, for telling one engine's board copy from another's.
+    public var engineAddress: String { baseURL.absoluteString }
+
+    /// Calls a phone app route; a 404 means this engine has no phone app (`ConnectorError.noPhoneApp`).
+    private func phoneCall(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
+        do { return try await call(method, path, body: body) } catch ConnectorError.http(404, _) { throw ConnectorError.noPhoneApp }
+    }
+
+    /// A one-time pairing address (valid 10 minutes) for the QR code, and when it expires.
+    public func pairPhone() async throws -> (url: URL, expires: Date) {
+        let data = try await phoneCall("POST", "/v2/app/pair")
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], // try?-ok: reported as badResponse below
+              let raw = obj["url"] as? String, let url = URL(string: raw), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else {
+            throw ConnectorError.badResponse("pairing answer needs a web address")
+        }
+        let expires = (obj["expires"] as? String).flatMap(Self.parseISO) ?? Date().addingTimeInterval(600)
+        return (url, expires)
+    }
+
+    static func parseISO(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
+    }
+
+    /// Replaces the engine's copy of the board shown on the phone.
+    public func putBoard(_ cards: [BoardCard]) async throws {
+        let body: Data
+        do { body = try PhoneBoard.body(cards) } catch { throw ConnectorError.badResponse("\(error)") }
+        _ = try await phoneCall("PUT", "/v2/board", body: body)
+    }
+
+    /// Changes made on the phone that the Mac hasn't applied yet, oldest first.
+    public func phoneActions() async throws -> [PhoneAction] {
+        let data = try await phoneCall("GET", "/v2/phone-actions")
+        struct Answer: Decodable { let actions: [PhoneAction] }
+        do { return try JSONDecoder().decode(Answer.self, from: data).actions } catch { throw ConnectorError.badResponse("phone actions: \(error)") }
+    }
+
+    /// Tells the engine these phone actions were applied (at most 200 ids per call).
+    public func ackPhoneActions(_ ids: [String]) async throws {
+        var rest = ids[...]
+        while !rest.isEmpty {
+            let chunk = Array(rest.prefix(200)); rest = rest.dropFirst(200)
+            let body: Data
+            do { body = try JSONSerialization.data(withJSONObject: ["ids": chunk]) } catch { throw ConnectorError.badResponse("\(error)") }
+            _ = try await phoneCall("POST", "/v2/phone-actions/ack", body: body)
+        }
     }
 
     /// Asks the engine to run a check for this user now. `done` is false while more email is still waiting.

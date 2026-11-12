@@ -8,6 +8,21 @@ public struct SyncReport: Equatable {
     /// Proposals the engine handed over in this run (whether or not they changed anything).
     public var received = 0
     public var error: String?
+    /// Phone actions applied in this run queued changes for the engine (sync again to send them now).
+    public var phoneQueuedEvents = false
+}
+
+/// What one phone step did.
+public struct PhoneTickResult: Equatable {
+    /// The board copy was sent (it had changed).
+    public var pushed = false
+    /// Phone action ids acknowledged to the engine.
+    public var acked = 0
+    /// False when the engine has no phone app (404): nothing was logged.
+    public var supported = true
+    public var error: String?
+    /// Applying phone actions queued events for the engine (e.g. a connector card moved to Done).
+    public var queuedEvents = false
 }
 
 /// The durable loop between the board and an online connector. Nothing here is fire-and-forget: an outbox row is
@@ -183,6 +198,10 @@ public enum ConnectorSync {
 
         if report.error != nil { return report }
 
+        // 5. Phone app: apply what was done on the phone, then send the board copy if it changed. Never fails the sync.
+        let phone = await phoneTick(connector: id, store: store, client: client, now: now)
+        report.phoneQueuedEvents = phone.queuedEvents
+
         do {
             try store.db.run("UPDATE connectors SET last_ok=?, unreachable_since=NULL WHERE id=?", [now, id])
             // When it first worked: the health watchdog needs it to tell "engine never reported a run" from "just connected".
@@ -191,6 +210,62 @@ public enum ConnectorSync {
             store.activity(component, .error, "Could not record the successful sync", detail: "\(error)")
         }
         return report
+    }
+
+    // MARK: Phone app
+
+    /// Per connector: true once its engine answered a phone app route, false after a 404 (no phone app). Unknown = nil.
+    @MainActor public static var phoneSupport: [String: Bool] = [:]
+    /// The last phone step problem logged per connector, so a poll every 2 minutes doesn't repeat it.
+    @MainActor static var phoneReported: [String: String] = [:]
+    /// How often the app polls for phone actions, and how long it waits after a local change before sending the board.
+    public static let phonePollInterval: TimeInterval = 120
+    public static let phonePushDebounce: TimeInterval = 10
+
+    /// Applies and acknowledges phone actions, then sends the board copy when it changed since the engine last accepted
+    /// one. A 404 (engine without the phone app) is skipped quietly; other problems are logged once per distinct message
+    /// and never touch the connector's sync state.
+    @MainActor @discardableResult
+    public static func phoneTick(connector id: String, store: Store, client: ConnectorClient, now: Date) async -> PhoneTickResult {
+        var result = PhoneTickResult()
+        var step = "read the phone's changes"
+        do {
+            let actions = try await client.phoneActions()
+            phoneSupport[id] = true
+            if !actions.isEmpty {
+                let before = store.pendingOutbox(connector: id, limit: 500, now: .distantFuture).count
+                let ids = store.applyPhoneActions(actions, connector: id, now: now)
+                result.queuedEvents = store.pendingOutbox(connector: id, limit: 500, now: .distantFuture).count > before
+                if !ids.isEmpty {
+                    step = "confirm the phone's changes"
+                    try await client.ackPhoneActions(ids)
+                    result.acked = ids.count
+                }
+            }
+            step = "send the board to the phone"
+            let cards = PhoneBoard.payload(store: store, now: now)
+            let hash = try PhoneBoard.hash(cards, engine: client.engineAddress)
+            if hash != store.lastBoardHash(connector: id) {
+                try await client.putBoard(cards)
+                store.setLastBoardHash(hash, connector: id)
+                result.pushed = true
+            }
+            if phoneReported.removeValue(forKey: id) != nil {
+                store.activity("connector:\(id)", .info, "The phone's board is in sync again")
+            }
+        } catch ConnectorError.noPhoneApp {
+            phoneSupport[id] = false
+            result.supported = false
+        } catch {
+            let why = (error as? ConnectorError)?.description ?? "\(error)"
+            result.error = why
+            let message = "Could not \(step); will try again"
+            if phoneReported[id] != message + why {
+                phoneReported[id] = message + why
+                store.activity("connector:\(id)", .warning, message, detail: why)
+            }
+        }
+        return result
     }
 
     @MainActor

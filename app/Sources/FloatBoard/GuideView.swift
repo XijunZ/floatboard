@@ -57,6 +57,7 @@ struct GuideView: View {
                     note("A connector is an optional add-on that suggests tasks from somewhere else, such as your email. FloatBoard works fully without one.")
                     note("To add one, open its setup page in your browser and press its “Connect to FloatBoard” link. It opens this app and adds the connector.")
                     note("Connectors tab: each connector has a status line (when it last worked, and how many changes are waiting to send) and a settings form. Edit anything that's wrong and save.")
+                    note("Pair a phone… (Connectors tab) shows a QR code: scan it with your phone's camera to see your board there and move or add tasks. The phone's changes reach this Mac within about 2 minutes.")
                     note("Deleting a connector's task offers four choices: “Not an action” (this should never have been a task) and “Wrong details” both teach the connector; “Duplicate” tells it the same task came in twice, so the gap can be found and fixed, without changing how emails are sorted; “Just delete” tells it nothing.")
                 }
                 section("Activity") {

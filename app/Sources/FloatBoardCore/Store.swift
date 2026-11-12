@@ -136,17 +136,22 @@ public final class Store: ObservableObject {
     /// Decides from the stored row (read inside the transaction), never the caller's copy, so a stale card can't
     /// finish a task twice, record the wrong "from" status, or skip a move.
     public func move(_ card: Card, to status: Status, now: Date = Date()) {
-        perform {
-            guard let stored = try db.query("SELECT status, started FROM cards WHERE id=?", [card.id], { s in
-                (Status(rawValue: DB.text(s, 0)) ?? .todo, DB.date(s, 1)) }).first, stored.0 != status else { return }
-            var started = stored.1
-            if status == .doing && started == nil { started = now }
-            let done: Date? = status == .done ? now : nil
-            try db.run("UPDATE cards SET status=?, started=?, done=?, updated=? WHERE id=?",
-                       [status.rawValue, started, done, now, card.id])
-            try log(card.id, "moved", stored.0, status, now)
-            if status == .done, let cur = try currentCard(card.id) { try queueOutbox(cur.card, kind: .done, verdict: nil, now: now) }
-        }
+        perform { try moveRow(card.id, to: status, now: now) }
+    }
+
+    /// The body of `move`, for callers already inside a transaction. Returns false when nothing changed.
+    @discardableResult
+    func moveRow(_ id: Int64, to status: Status, now: Date) throws -> Bool {
+        guard let stored = try db.query("SELECT status, started FROM cards WHERE id=?", [id], { s in
+            (Status(rawValue: DB.text(s, 0)) ?? .todo, DB.date(s, 1)) }).first, stored.0 != status else { return false }
+        var started = stored.1
+        if status == .doing && started == nil { started = now }
+        let done: Date? = status == .done ? now : nil
+        try db.run("UPDATE cards SET status=?, started=?, done=?, updated=? WHERE id=?",
+                   [status.rawValue, started, done, now, id])
+        try log(id, "moved", stored.0, status, now)
+        if status == .done, let cur = try currentCard(id) { try queueOutbox(cur.card, kind: .done, verdict: nil, now: now) }
+        return true
     }
 
     public func update(_ card: Card, now: Date = Date()) {

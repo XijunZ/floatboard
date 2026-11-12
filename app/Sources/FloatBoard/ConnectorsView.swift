@@ -167,6 +167,7 @@ struct ConnectorCard: View {
     @EnvironmentObject var store: Store
     let info: ConnectorInfo
     @State private var settingsOpen = false
+    @State private var pairing = false
     @ObservedObject private var rechecks = RecheckState.shared
 
     private var recheckMenu: some View {
@@ -210,6 +211,8 @@ struct ConnectorCard: View {
                     if let u = URL(string: info.baseURL)?.appendingPathComponent("setup") { NSWorkspace.shared.open(u) }
                 }
                 .disabled(info.baseURL.isEmpty)
+                Button("Pair a phone…") { pairing = true }
+                    .disabled(info.baseURL.isEmpty)
                 Button("Sync now") { NotificationCenter.default.post(name: .floatBoardSyncConnectors, object: nil) }
                 recheckMenu
                 Button("Remove…", role: .destructive) { remove() }
@@ -233,6 +236,7 @@ struct ConnectorCard: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .sheet(isPresented: $pairing) { PairPhoneSheet(info: info).environmentObject(store) }
     }
 
     private func remove() {
