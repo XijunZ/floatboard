@@ -279,3 +279,21 @@ part way (a page, the folder, a mismatch, an old engine) leaves the engine's dat
 
 Deploy order: migration 0030 (`npm run migrate:remote`), then the engine, then the Mac app. An older Mac ignores
 `db_size_bytes`; a newer Mac against an older engine shows no size and its archive answers "Update the engine first".
+
+## One kind of task (next)
+
+Every task is the same kind; features appear when the task has what they need, whatever created it:
+
+| Ingredient | Features |
+|---|---|
+| Due date | Alert (timed: 15 min before; date only: 09:00 that day), once per task and due value |
+| Linked email (from the email engine, or linked by the user via "Link an email" search) | Open email, Draft reply, mark read when done, links and notes from the email |
+| Meeting link (Meet / Zoom / Teams URL in the task's link) | Join meeting |
+| Other links (task link, links found in the email) | Open link |
+| Created by the email sorting (Claude's decision) | Teach choices on delete (only Claude's own decisions can be corrected) |
+
+Phone: the board payload carries every link (`links: [{kind: "email"|"meeting"|"link", url}]`); the task sheet shows a button per link; moves show "Moved to Done · Undo" for 8 seconds (undo is a new queued action with its own id and time).
+
+Link an email: in the task (Mac and phone) "Link an email" opens a search box; the engine searches the user's connected Gmail (Gmail `q=` search, newest 10, subject / sender / date only); picking one attaches it (message id, sent time, Gmail link) so the email features switch on; removing the link switches them off.
+
+Alerts for every task: the engine checks the board copy every 15 minutes (cron) and sends due alerts through the same channels; Mac notifications (UserNotifications) for the same alerts, optional, on by default.
