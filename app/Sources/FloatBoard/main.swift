@@ -201,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = sub("Edit") { m in
             add(m, "Undo", Selector(("undo:")), "z")
             add(m, "Redo", Selector(("redo:")), "z", [.command, .shift])
+            add(m, "Undo Delete", #selector(undoDelete), "z", [.command, .option], target: self)
             m.addItem(.separator())
             add(m, "Cut", #selector(NSText.cut(_:)), "x")
             add(m, "Copy", #selector(NSText.copy(_:)), "c")
@@ -326,6 +327,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc func minimize() { ui.mode = .minimized }
     @objc func newTask() { ui.openAdd() }
+
+    /// Brings back the last deleted task (the board's Undo bar does the same for 8 seconds).
+    @objc func undoDelete() { store.undoDelete() }
 
     @objc func export() {
         do {

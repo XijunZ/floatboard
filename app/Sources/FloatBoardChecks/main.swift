@@ -117,6 +117,29 @@ MainActor.assumeIsolated {
         check(SortKey.importance.naturalAscending == false && SortKey.due.naturalAscending, "column_sort_starts_in_bar_direction")
     }
 
+    // Undo a delete
+    store.add(title: "Oops deleted", area: "Personal", importance: .medium, due: nil, status: .doing)
+    if let od = store.cards.first(where: { $0.title == "Oops deleted" }) {
+        store.deleteCard(od, verdict: nil)
+        check(store.card(od.id) == nil && store.lastDeleted?.id == od.id, "delete_remembers_last_deleted")
+        store.undoDelete()
+        check(store.card(od.id)?.status == .doing && store.lastDeleted == nil, "undo_delete_brings_task_back_in_its_step")
+    }
+    store.seedCard(title: "Oops connector", area: "Personal", importance: .low, source: "email", externalID: "email:oops")
+    if let oc = store.card(externalID: "email:oops") {
+        try? store.db.run("UPDATE cards SET connector='email', source_mid='oopsmid', source_sent='2026-11-01T10:00:00Z' WHERE id=?", [oc.id]) // try?-ok: the check below fails if it didn't apply
+        try? store.db.run("INSERT OR IGNORE INTO connectors(id,name,base_url) VALUES('email','E','https://e.example')") // try?-ok: same
+        store.reload()
+        if let c = store.card(oc.id) {
+            store.deleteCard(c, verdict: "not_action")
+            let queued = (try? store.db.query("SELECT count(*) FROM outbox WHERE kind='deleted' AND payload_json LIKE '%oopsmid%'") { DB.int($0, 0) }.first) ?? -1 // try?-ok: check fails
+            store.undoDelete()
+            let left = (try? store.db.query("SELECT count(*) FROM outbox WHERE kind='deleted' AND payload_json LIKE '%oopsmid%'") { DB.int($0, 0) }.first) ?? -1 // try?-ok: check fails
+            let corr = (try? store.db.query("SELECT count(*) FROM corrections WHERE source_mid='oopsmid'") { DB.int($0, 0) }.first) ?? -1 // try?-ok: check fails
+            check(queued == 1 && left == 0 && corr == 0 && store.card(oc.id) != nil, "undo_before_sending_cancels_the_delete_and_lesson")
+        } else { check(false, "undo connector setup") }
+    }
+
     // Outbox and corrections
     @MainActor func outboxRows() -> [(kind: String, payload: [String: String], uuid: String)] {
         let r = (try? store.db.query("SELECT kind, payload_json, uuid FROM outbox ORDER BY created, rowid") { // try?-ok: a failed query makes the check fail

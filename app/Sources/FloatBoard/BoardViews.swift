@@ -46,6 +46,7 @@ struct ExpandedView: View {
         .padding(.bottom, 12)
         .padding(.top, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .bottom) { UndoDeleteBar() }
         .toolbar { toolbarContent }
         .onChange(of: ui.search) { _, q in
             if !q.isEmpty { ui.tab = .board }
@@ -529,6 +530,37 @@ struct CardView: View {
         }
         .popover(isPresented: $editing, arrowEdge: .trailing) {
             EditCardView(draft: card) { editing = false }
+        }
+    }
+}
+
+/// "Deleted “…” · Undo" at the bottom of the board for 8 seconds after a delete (Edit → Undo Delete works after).
+struct UndoDeleteBar: View {
+    @EnvironmentObject var store: Store
+
+    var body: some View {
+        if let d = store.lastDeleted, d.barShown {
+            HStack(spacing: 10) {
+                Image(systemName: "trash").foregroundStyle(.secondary)
+                Text("Deleted “\(d.title)”").lineLimit(1).truncationMode(.tail)
+                Button("Undo") { store.undoDelete() }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .help("Bring the task back (also Edit → Undo Delete, ⌥⌘Z)")
+                Button { store.dismissUndoBar(for: d) } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+            }
+            .font(.system(size: 12))
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(Capsule().fill(.regularMaterial))
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12)))
+            .shadow(radius: 6, y: 2)
+            .padding(.bottom, 16)
+            .frame(maxWidth: 520)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .task(id: d.at) {
+                try? await Task.sleep(for: .seconds(8)) // try?-ok: cancelled when another delete replaces this bar
+                if !Task.isCancelled { withAnimation { store.dismissUndoBar(for: d) } }
+            }
         }
     }
 }
