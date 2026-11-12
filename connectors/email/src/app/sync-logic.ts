@@ -12,6 +12,11 @@
  * - `noticeSuperseded(sentIds, superseded)`: which of this phone's sent ids the engine reports as not applied.
  * - `retryDelay(failures)`: 5 s doubling to 5 minutes.
  * - `statusText(s)`: the one-line sync status at the top of the board.
+ * - `undoFor(card, move, nowMs)`, `undoLive(u, nowMs)`, `undoText(u)`, `undoAction(u, id, nowIso)`: after a move the
+ *   phone shows "Moved to Done · Undo" for 8 seconds; Undo queues a new move (its own id, made after the move) back
+ *   to the step the card was on. Adds can't be undone (the phone has no delete).
+ * - `cardLinks(card)`, `linkLabel(link)`: the task sheet's link buttons (every web link the Mac sent, or the older
+ *   single `link`).
  *
  * Kept as a string: no backticks or dollar-brace inside.
  */
@@ -19,6 +24,8 @@ export const SYNC_JS = String.raw`
   var BATCH_MAX = 100;
   var BATCH_BYTES = 60000;
   var SENT_KEEP = 200;
+  var UNDO_MS = 8000;
+  var STEP_NAMES = { todo: "To do", doing: "Doing", watch: "Watch", done: "Done" };
 
   function viewBoard(board, actions) {
     var cards = ((board && Array.isArray(board.cards)) ? board.cards : []).map(function (c) { return Object.assign({}, c); });
@@ -149,6 +156,54 @@ export const SYNC_JS = String.raw`
     return "Last synced " + d.getDate() + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()] + " " + clock(d);
   }
 
+  // A move just queued, kept so it can be undone; null when there is nothing to undo (an add, a pending card, no change).
+  function undoFor(card, move, nowMs) {
+    if (!card || card.pending || !move || move.action === "add" || card.id !== move.card_id || card.status === move.action) return null;
+    return { card_id: card.id, from: card.status, to: move.action, made_at: move.made_at, at: nowMs };
+  }
+
+  function undoLive(u, nowMs) {
+    return !!u && nowMs - u.at < UNDO_MS;
+  }
+
+  function undoText(u) {
+    return "Moved to " + (STEP_NAMES[u.to] || u.to);
+  }
+
+  // The move back: a new action of its own, made after the move it undoes (even if the phone's clock went back).
+  function undoAction(u, id, nowIso) {
+    var after = Date.parse(u.made_at) + 1;
+    var made = Date.parse(nowIso) >= after ? nowIso : new Date(after).toISOString();
+    return { id: id, made_at: made, card_id: u.card_id, action: u.from };
+  }
+
+  function webUrl(v) {
+    if (typeof v !== "string" || !v || v.length > 2000) return null;
+    try {
+      var u = new URL(v);
+      return u.protocol === "https:" || u.protocol === "http:" ? v : null;
+    } catch (e) { return null; }
+  }
+
+  // The links to show as buttons: the card's links (web addresses only), else its single link from an older Mac.
+  function cardLinks(c) {
+    var list = c && Array.isArray(c.links) ? c.links : (c && c.link ? [{ kind: "link", url: c.link }] : []);
+    var out = [];
+    list.forEach(function (l) {
+      if (!l || !webUrl(l.url)) return;
+      var item = { kind: l.kind === "email" || l.kind === "meeting" ? l.kind : "link", url: l.url };
+      if (l.label === "calendar") item.label = "calendar";
+      out.push(item);
+    });
+    return out;
+  }
+
+  function linkLabel(l) {
+    if (l.kind === "meeting") return "Join meeting";
+    if (l.kind === "email") return "Open email";
+    return l.label === "calendar" ? "Open calendar" : "Open link";
+  }
+
   function replacedText(superseded, dropped, rejected) {
     var parts = [];
     if (superseded) parts.push(superseded === 1 ? "1 change was replaced by a newer change on your Mac" : superseded + " changes were replaced by newer changes on your Mac");
@@ -160,4 +215,4 @@ export const SYNC_JS = String.raw`
 
 /** Names the tests pull out of SYNC_JS. */
 export const SYNC_EXPORTS = ["viewBoard", "takeBatch", "sendBatch", "afterSend", "rememberSent", "noticeSuperseded", "retryDelay", "statusText",
-  "replacedText", "byteLength"];
+  "replacedText", "byteLength", "undoFor", "undoLive", "undoText", "undoAction", "cardLinks", "linkLabel"];

@@ -89,6 +89,9 @@ display:flex;flex-direction:column;gap:10px;max-height:85vh;overflow:auto;animat
 @keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
 .toast{position:fixed;left:16px;right:16px;bottom:calc(96px + env(safe-area-inset-bottom));z-index:30;margin:0 auto;max-width:520px;
 background:var(--text);color:var(--bg);padding:12px 16px;border-radius:14px;text-align:center;box-shadow:var(--shadow)}
+.toast.undo{display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 8px 6px 16px}
+.toast.undo .sep{opacity:.6}
+.undo-btn{min-height:40px;padding:0 12px;border-radius:10px;color:var(--bg);font-weight:700;text-decoration:underline}
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.sheet,.spin{animation:none}}
@@ -104,6 +107,9 @@ const ICONS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" styl
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
 <symbol id="i-link" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
+<symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="12.5" height="12" rx="2"/><path d="M15.5 10.5L21 7.5v9l-5.5-3z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
 <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
 </svg>`;
 
@@ -177,6 +183,7 @@ const BODY = `${ICONS}
 </main>
 
 <div id="toast" class="toast" role="status" hidden></div>
+<div id="undo" class="toast undo" role="status" hidden><span id="undo-text"></span><span class="sep" aria-hidden="true">·</span><button id="undo-btn" class="undo-btn" type="button">Undo</button></div>
 <script src="/app/app.js" defer></script>`;
 
 export const MANIFEST = JSON.stringify({
