@@ -98,6 +98,10 @@ enum Snapshot {
         }
         let backdrop = LinearGradient(colors: [.blue, .orange, .green], startPoint: .leading, endPoint: .trailing)
         save(RootView().background(backdrop), "banner.png", CGSize(width: 900, height: 30))
+        let wasSplit = ui.bar.splitCount
+        ui.bar.splitCount = true
+        save(RootView().background(backdrop), "banner-split.png", CGSize(width: 900, height: 30))
+        ui.bar.splitCount = wasSplit
         ui.quickAdding = true
         save(RootView().background(backdrop), "quickadd.png", CGSize(width: 900, height: 30))
         ui.quickAdding = false
