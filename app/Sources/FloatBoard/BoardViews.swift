@@ -596,6 +596,9 @@ struct EditCardView: View {
     /// Set when the pop-up closed via Save, Cancel or Delete (so closing it doesn't save again).
     @State private var finished = false
     @State private var replyDraftRefusal: String?
+    /// "Link an email…" search shown in place; and why a link change was refused.
+    @State private var linkingEmail = false
+    @State private var linkRefusal: String?
     /// Size of the pop-up, set by dragging its corner (remembered).
     @AppStorage("editorWidth") private var width: Double = 420
     @AppStorage("editorExtraHeight") private var extraHeight: Double = 0
@@ -671,6 +674,53 @@ struct EditCardView: View {
         .font(.system(size: 12))
     }
 
+    /// The stored card's email link (the editor's copy is a snapshot): copied in after a link change, so Save never
+    /// compares against stale link fields.
+    private func takeLink(from c: Card) {
+        draft.connector = c.connector; draft.source = c.source; draft.sourceKey = c.sourceKey; draft.sourceLink = c.sourceLink
+        draft.sourceMeta = c.sourceMeta; draft.externalID = c.externalID
+        draft.replyDraftState = c.replyDraftState; draft.replyDraftLink = c.replyDraftLink; draft.replyDraftError = c.replyDraftError
+        draft.replyDraftRequest = c.replyDraftRequest; draft.replyDraftSentAt = c.replyDraftSentAt
+    }
+
+    /// Open email, "Link an email…" (a task with no email that the sorting did not make), "Remove email link" (one the
+    /// user linked), and the search when it is open.
+    @ViewBuilder private var emailSection: some View {
+        let card = replyDraftCard
+        if linkingEmail {
+            LinkEmailSearch(cardID: draft.id) { linked in
+                linkingEmail = false
+                if let linked { takeLink(from: linked) }
+            }
+        } else if card.emailLink != nil || card.canLinkEmail || card.emailLinkedByUser {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 14) {
+                    if let mail = card.emailLink {
+                        Button { NSWorkspace.shared.open(mail) } label: { Label("Open email", systemImage: "envelope") }
+                            .help(card.sourceMeta["subject"] ?? mail.absoluteString)
+                    }
+                    if card.canLinkEmail {
+                        Button { linkRefusal = nil; linkingEmail = true } label: { Label("Link an email…", systemImage: "envelope.badge") }
+                            .help("Find an email in your Gmail and attach it to this task")
+                    }
+                    if card.emailLinkedByUser {
+                        Button {
+                            linkRefusal = nil
+                            do {
+                                try store.unlinkEmail(cardID: draft.id)
+                                if let c = store.card(draft.id) { takeLink(from: c) }
+                                ConnectorRunner.shared?.trigger("email unlinked")
+                            } catch { linkRefusal = "\(error)" }
+                        } label: { Label("Remove email link", systemImage: "xmark.circle") }
+                    }
+                }
+                if let r = linkRefusal { Text(r).foregroundStyle(.red) }
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 12))
+        }
+    }
+
     /// Drag the bottom-right corner to make the pop-up wider or taller (Notes and the AI section grow).
     private var resizeGrip: some View {
         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -742,7 +792,8 @@ struct EditCardView: View {
             }
             .buttonStyle(.borderless)
             .font(.system(size: 12))
-            if draft.canDraftReply { replyDraftSection }
+            emailSection
+            if replyDraftCard.canDraftReply { replyDraftSection }
             VStack(alignment: .leading, spacing: 2) {
                 Text("Added \(Fmt.withTime(draft.created))")
                 if let s = draft.started { Text("Started \(Fmt.withTime(s))") }

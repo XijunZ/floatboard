@@ -25,12 +25,14 @@ public struct BoardCard: Codable, Equatable {
     public var link: String?
     /// Every web link on the task, in order: source, Link field, calendar event, links in the AI summary.
     public var links: [BoardLink] = []
+    /// Who linked the task's email: "sorting" (the email sorting made the task) or "user"; nil when neither.
+    public var email: String?
     public var doneAt: String?
     /// When this card's step last changed on this Mac (Mac clock, ISO 8601 UTC with milliseconds).
     public var statusAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, group, color, importance, due, hasTime = "has_time", status, link, links, doneAt = "done_at", statusAt = "status_at"
+        case id, title, group, color, importance, due, hasTime = "has_time", status, link, links, email, doneAt = "done_at", statusAt = "status_at"
     }
 
     /// Every field is written, nil ones as null (the engine requires them all).
@@ -40,8 +42,22 @@ public struct BoardCard: Codable, Equatable {
         try c.encode(color, forKey: .color); try c.encode(importance, forKey: .importance); try c.encode(due, forKey: .due)
         try c.encode(hasTime, forKey: .hasTime); try c.encode(status, forKey: .status); try c.encode(link, forKey: .link)
         try c.encode(links, forKey: .links)
+        try c.encodeIfPresent(email, forKey: .email)
         try c.encode(doneAt, forKey: .doneAt); try c.encode(statusAt, forKey: .statusAt)
     }
+}
+
+/// The email a phone `link_email` action attaches.
+public struct PhoneEmail: Codable, Equatable {
+    public var messageID: String
+    public var gmailID: String
+    public var account: String
+    public var sentAt: String?
+    public init(messageID: String, gmailID: String, account: String, sentAt: String?) {
+        self.messageID = messageID; self.gmailID = gmailID; self.account = account; self.sentAt = sentAt
+    }
+    enum CodingKeys: String, CodingKey { case messageID = "message_id", gmailID = "gmail_id", account, sentAt = "sent_at" }
+    var linked: LinkedEmail { LinkedEmail(account: account, gmailID: gmailID, messageID: messageID, sentAt: sentAt) }
 }
 
 /// One change made on the phone, waiting on the engine for the Mac (`GET /v2/phone-actions`).
@@ -51,23 +67,25 @@ public struct PhoneAction: Codable, Equatable {
     /// The phone's own id for the action (nil for rows stored before sync v2). Used to apply each action once.
     public var clientID: String?
     public var cardID: Int64?
-    /// todo | doing | watch | done | add
+    /// todo | doing | watch | done | add | link_email | unlink_email
     public var action: String
     public var title: String?
     public var group: String?
     /// When the action was made, on the engine's clock (nil when the engine did not say).
     public var madeAt: Date?
+    /// The email to link (link_email only).
+    public var email: PhoneEmail?
 
     public init(id: String, clientID: String? = nil, cardID: Int64?, action: String, title: String? = nil, group: String? = nil,
-                madeAt: Date? = nil) {
+                madeAt: Date? = nil, email: PhoneEmail? = nil) {
         self.id = id; self.clientID = clientID; self.cardID = cardID; self.action = action; self.title = title; self.group = group
-        self.madeAt = madeAt
+        self.madeAt = madeAt; self.email = email
     }
 
     /// The key that makes an action apply once: the phone's id when there is one, else the engine's.
     public var onceKey: String { clientID.flatMap { $0.isEmpty ? nil : $0 } ?? id }
 
-    enum CodingKeys: String, CodingKey { case id, clientID = "client_id", cardID = "card_id", action, title, group, madeAt = "made_at" }
+    enum CodingKeys: String, CodingKey { case id, clientID = "client_id", cardID = "card_id", action, title, group, madeAt = "made_at", email }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -79,6 +97,8 @@ public struct PhoneAction: Codable, Equatable {
         group = try c.decodeIfPresent(String.self, forKey: .group)
         // An unreadable time counts as unknown (applied without the newest-change test), not as a broken action.
         madeAt = (try? c.decodeIfPresent(String.self, forKey: .madeAt)).flatMap { $0 }.flatMap(PhoneBoard.parseISO) // try?-ok: unreadable time is treated as unknown
+        // An unreadable email leaves it nil: the link is then skipped as invalid, never a broken batch.
+        email = (try? c.decodeIfPresent(PhoneEmail.self, forKey: .email)).flatMap { $0 } // try?-ok: unreadable email is skipped as invalid when applied
     }
 
     public func encode(to e: Encoder) throws {
@@ -86,6 +106,7 @@ public struct PhoneAction: Codable, Equatable {
         try c.encode(id, forKey: .id); try c.encodeIfPresent(clientID, forKey: .clientID); try c.encodeIfPresent(cardID, forKey: .cardID)
         try c.encode(action, forKey: .action); try c.encodeIfPresent(title, forKey: .title); try c.encodeIfPresent(group, forKey: .group)
         try c.encodeIfPresent(madeAt.map(PhoneBoard.isoUTC), forKey: .madeAt)
+        try c.encodeIfPresent(email, forKey: .email)
     }
 }
 
@@ -99,7 +120,8 @@ public struct PhoneApplyResult: Equatable {
 
 public struct PhoneSkip: Equatable {
     public var id: String
-    /// "superseded" (a newer change on this Mac won), "gone" (the task is no longer on the board), "invalid"
+    /// "superseded" (a newer change on this Mac won), "gone" (the task is no longer on the board), "invalid", "not allowed"
+    /// (an email link on a task the sorting made, a second link, or removing a link the user did not make)
     public var reason: String
     public init(id: String, reason: String) { self.id = id; self.reason = reason }
 }
@@ -131,13 +153,14 @@ public enum PhoneBoard {
         }
     }
 
-    static func card(for c: Card, color: String?, calendar: Calendar) -> BoardCard {
+    public static func card(for c: Card, color: String?, calendar: Calendar) -> BoardCard {
         let hex = color.flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
         let hasTime = c.due.map { Due.hasTime($0) } ?? false
         let all = links(for: c)
         return BoardCard(id: c.id, title: clip(c.title), group: clip(c.area), color: hex, importance: c.importance.rawValue,
                          due: c.due.map { hasTime ? iso($0, calendar) : day($0, calendar) }, hasTime: hasTime,
                          status: c.status.rawValue, link: all.first?.url, links: all,
+                         email: c.isFromEmailSorting ? "sorting" : c.emailLinkedByUser ? "user" : nil,
                          doneAt: c.status == .done ? c.done.map { iso($0, calendar) } : nil, statusAt: nil)
     }
 
@@ -306,7 +329,7 @@ extension Store {
                                   engineAhead: TimeInterval = 0) -> PhoneApplyResult {
         let component = "connector:\(connector)"
         var result = PhoneApplyResult()
-        var moved = 0, added = 0, repeated = 0, superseded = 0
+        var moved = 0, added = 0, repeated = 0, superseded = 0, linked = 0
         var unknown: [String] = []
         do {
             try db.run("DELETE FROM meta WHERE key LIKE ? AND CAST(value AS REAL) < ?",
@@ -330,6 +353,21 @@ extension Store {
                             [PhoneBoard.clip(title), group, Importance.medium.rawValue, nil, Status.todo.rawValue, now, now])
                         try insertEvent(id, "created (from the phone)", to: .todo, actor: .user, at: now)
                         outcome = "added"
+                    } else if a.action == "link_email" || a.action == "unlink_email", let cardID = a.cardID {
+                        // Only on tasks the user made; a refusal changes nothing and is acked as not allowed.
+                        let row = try db.query("SELECT deleted, withdrawn FROM cards WHERE id=?", [cardID]) { (DB.int($0, 0), DB.int($0, 1)) }.first
+                        guard let row, row.0 == 0, row.1 == 0 else { outcome = "unknown"; return }
+                        do {
+                            if a.action == "link_email" {
+                                guard let e = a.email else { outcome = "bad"; return }
+                                try linkEmailRow(cardID, connector: connector, email: e.linked, now: now)
+                            } else {
+                                try unlinkEmailRow(cardID, now: now)
+                            }
+                        } catch let e as EmailLinkError {
+                            outcome = e == .badEmail ? "bad" : "refused"; return
+                        }
+                        outcome = "linked"
                     } else if let status = Status(rawValue: a.action), let cardID = a.cardID {
                         let row = try db.query("SELECT deleted, withdrawn, status FROM cards WHERE id=?", [cardID]) {
                             (DB.int($0, 0), DB.int($0, 1), DB.text($0, 2)) }.first
@@ -348,6 +386,8 @@ extension Store {
                 switch outcome {
                 case "moved": moved += 1; result.applied.append(a.id)
                 case "added": added += 1; result.applied.append(a.id)
+                case "linked": linked += 1; result.applied.append(a.id)
+                case "refused": result.skipped.append(PhoneSkip(id: a.id, reason: "not allowed"))
                 case "repeat": repeated += 1; result.applied.append(a.id)
                 case "superseded": superseded += 1; result.skipped.append(PhoneSkip(id: a.id, reason: "superseded"))
                 case "unknown": unknown.append(a.cardID.map(String.init) ?? "?"); result.skipped.append(PhoneSkip(id: a.id, reason: "gone"))
@@ -367,10 +407,11 @@ extension Store {
         if superseded > 0 {
             activity(component, .info, "Kept a newer change from this Mac", detail: "\(superseded) phone move(s) not applied")
         }
-        if moved + added > 0 {
+        if moved + added + linked > 0 {
             var parts: [String] = []
             if moved > 0 { parts.append("\(moved) moved") }
             if added > 0 { parts.append("\(added) added") }
+            if linked > 0 { parts.append("\(linked) email link\(linked == 1 ? "" : "s") changed") }
             activity(component, .info, "From the phone: " + parts.joined(separator: ", "))
         }
         if repeated > 0 { activity(component, .info, "\(repeated) phone action(s) were already applied; acknowledged again") }

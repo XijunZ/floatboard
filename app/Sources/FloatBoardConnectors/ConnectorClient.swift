@@ -98,10 +98,13 @@ public enum ConnectorError: Error, CustomStringConvertible, Equatable {
     case badResponse(String)
     /// The engine answered 404 on a phone app route: it has no phone app (an older engine). Callers skip quietly.
     case noPhoneApp
+    /// The engine answered 404 on the email search: it is older than "Link an email".
+    case noEmailSearch
 
     public var description: String {
         switch self {
         case .noPhoneApp: return "This engine doesn't have the phone app yet. Update the engine to pair a phone."
+        case .noEmailSearch: return "This engine can't search email yet. Update the engine first."
         case .auth: return "The engine didn't accept this connection's key."
         case .http(400, let b): return "The engine rejected the request as malformed. \(b)"
         case .http(let c, let b): return "The engine answered \(c). \(b)"
@@ -131,7 +134,8 @@ public struct ConnectorClient {
     }
 
     /// Only these travel to the engine; the rest of an outbox payload is bookkeeping for collapsing changes.
-    static let payloadKeys = ["source_mid", "source_sent", "item_id", "verdict", "detail", "at", "notes", "request_id"]
+    /// `account` and `gmail_id` name the inbox and message of an email the user linked to a task.
+    public static let payloadKeys = ["source_mid", "source_sent", "item_id", "verdict", "detail", "at", "notes", "request_id", "account", "gmail_id"]
 
     private func call(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil) async throws -> Data {
         var comps = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
@@ -284,6 +288,18 @@ public struct ConnectorClient {
         }
     }
 
+    // MARK: Link an email
+
+    /// Searches the user's connected Gmail (Gmail's own search, at most 100 characters): the newest 10 per inbox, newest
+    /// first, with subject, sender and date only; an inbox that failed is listed in `errors`.
+    public func searchEmails(_ q: String) async throws -> EmailSearch {
+        let text = String(q.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
+        let data: Data
+        do { data = try await call("GET", "/v2/emails/search", query: [URLQueryItem(name: "q", value: text)]) }
+        catch ConnectorError.http(404, _) { throw ConnectorError.noEmailSearch }
+        do { return try JSONDecoder().decode(EmailSearch.self, from: data) } catch { throw ConnectorError.badResponse("email search: \(error)") }
+    }
+
     // MARK: Archive old data to this Mac
 
     /// One page of this user's old engine rows (`before` is the cut-off, ISO), each as the engine sent it, board log first;
@@ -318,4 +334,30 @@ public struct ConnectorClient {
         }
         return (processed, done)
     }
+}
+
+/// One email found by `searchEmails`: ids, the inbox, and what to show (never the email's text).
+public struct EmailHit: Decodable, Equatable, Identifiable {
+    public var account: String
+    public var gmailID: String
+    public var messageID: String
+    public var subject: String
+    public var from: String
+    public var date: String
+    public var sentAt: String?
+    public var id: String { account + "/" + gmailID }
+    enum CodingKeys: String, CodingKey {
+        case account, gmailID = "gmail_id", messageID = "message_id", subject, from, date, sentAt = "sent_at"
+    }
+    /// What linking it stores on the task.
+    public var linked: LinkedEmail {
+        LinkedEmail(account: account, gmailID: gmailID, messageID: messageID, sentAt: sentAt, subject: subject, from: from)
+    }
+}
+
+/// The answer to an email search: results newest first, and the inboxes that could not be searched.
+public struct EmailSearch: Decodable, Equatable {
+    public struct Problem: Decodable, Equatable { public var account: String; public var error: String }
+    public var results: [EmailHit]
+    public var errors: [Problem]
 }
