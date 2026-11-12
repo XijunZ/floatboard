@@ -61,17 +61,20 @@ public struct ConnectorStatus: Codable, Equatable {
     public var lastRunOK: String?
     public var lastRunError: String?
     public var oldestUnprocessedEvent: String?
+    /// The engine's whole database size in bytes (all its users); nil when the engine doesn't say (older engines).
+    public var dbSizeBytes: Int?
 
     public init(settingsVersion: Int = 0, schema: [SettingField] = [], needsAttention: [String] = [], waiting: Int = 0,
-                lastRunOK: String? = nil, lastRunError: String? = nil, oldestUnprocessedEvent: String? = nil) {
+                lastRunOK: String? = nil, lastRunError: String? = nil, oldestUnprocessedEvent: String? = nil, dbSizeBytes: Int? = nil) {
         self.settingsVersion = settingsVersion; self.schema = schema; self.needsAttention = needsAttention
         self.waiting = waiting; self.lastRunOK = lastRunOK; self.lastRunError = lastRunError
-        self.oldestUnprocessedEvent = oldestUnprocessedEvent
+        self.oldestUnprocessedEvent = oldestUnprocessedEvent; self.dbSizeBytes = dbSizeBytes
     }
 
     enum CodingKeys: String, CodingKey {
         case settingsVersion = "settings_version", schema, needsAttention = "needs_attention", waiting
         case lastRunOK = "last_run_ok", lastRunError = "last_run_error", oldestUnprocessedEvent = "oldest_unprocessed_event"
+        case dbSizeBytes = "db_size_bytes"
     }
 
     public init(from d: Decoder) throws {
@@ -83,6 +86,7 @@ public struct ConnectorStatus: Codable, Equatable {
         lastRunOK = try c.decodeIfPresent(String.self, forKey: .lastRunOK)
         lastRunError = try c.decodeIfPresent(String.self, forKey: .lastRunError)
         oldestUnprocessedEvent = try c.decodeIfPresent(String.self, forKey: .oldestUnprocessedEvent)
+        dbSizeBytes = try c.decodeIfPresent(Int.self, forKey: .dbSizeBytes)
     }
 }
 
@@ -278,6 +282,31 @@ public struct ConnectorClient {
             do { body = try JSONSerialization.data(withJSONObject: obj) } catch { throw ConnectorError.badResponse("\(error)") }
             _ = try await phoneCall("POST", "/v2/phone-actions/ack", body: body)
         }
+    }
+
+    // MARK: Archive old data to this Mac
+
+    /// One page of this user's old engine rows (`before` is the cut-off, ISO), each as the engine sent it, board log first;
+    /// `cursor` is nil after the run's last page.
+    public func archivePage(before: String, cursor: String?) async throws -> (rows: [(table: String, row: [String: Any])], cursor: String?) {
+        var q = [URLQueryItem(name: "before", value: before)]
+        if let cursor { q.append(URLQueryItem(name: "cursor", value: cursor)) }
+        let data = try await call("GET", "/v2/archive", query: q)
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], // try?-ok: reported as badResponse below
+              let rows = obj["rows"] as? [String: Any],
+              let log = rows["board_log"] as? [[String: Any]], let items = rows["items"] as? [[String: Any]] else {
+            throw ConnectorError.badResponse("archive page needs rows.board_log and rows.items")
+        }
+        return (log.map { (table: "board_log", row: $0) } + items.map { (table: "items", row: $0) }, obj["cursor"] as? String)
+    }
+
+    /// Asks the engine to delete the run it just handed over; it does only when the counts and the hash match (409 otherwise).
+    public func confirmArchive(before: String, boardLog: Int, items: Int, sha256: String) async throws {
+        let body: Data
+        do {
+            body = try JSONSerialization.data(withJSONObject: ["before": before, "counts": ["board_log": boardLog, "items": items], "sha256": sha256])
+        } catch { throw ConnectorError.badResponse("\(error)") }
+        _ = try await call("POST", "/v2/archive/confirm", body: body)
     }
 
     /// Asks the engine to run a check for this user now. `done` is false while more email is still waiting.

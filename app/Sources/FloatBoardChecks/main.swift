@@ -716,6 +716,7 @@ await healthChecks()
 await recheckChecks()
 await connectorEdgeCaseChecks()
 await phoneChecks()
+await archiveChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)
