@@ -20,6 +20,7 @@ import { ensureFathomHook, exchangeGoogleCode, fathomHookURL, googleAuthURL, ups
 import { sendNtfy } from "../alerts";
 import { newTelegramLink, removeUserBot, saveUserBot } from "../telegram";
 import { issueOutlookToken } from "../outlook";
+import { listDevices, removeDevice } from "../app/auth";
 
 const COOKIE = "fb_setup";
 const NONCE_COOKIE = "fb_oauth";
@@ -149,6 +150,7 @@ async function dashboard(req: Request, env: Env, s: Session, extra: Partial<Dash
       .bind(userId).first()),
     outlook: await env.DB.prepare("SELECT address, enabled, last_error, last_run FROM sources WHERE user_id=? AND kind='outlook_web'")
       .bind(userId).first<OutlookStatus>(),
+    phones: await listDevices(env, userId),
     ...extra,
   }), status);
 }
@@ -379,6 +381,15 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
       }
       await record(env, req, "ntfy_test", true, userId);
       return dashboard(req, env, s, { notice: "Test alert sent. It should arrive on your phone in a few seconds." });
+    }
+    case "/setup/phones/remove": {
+      const name = await removeDevice(env, userId, (f.device_id ?? "").slice(0, 100));
+      if (!name) {
+        await record(env, req, "phone_remove", false, userId, "not found");
+        return dashboard(req, env, s, { error: "That phone isn't paired." }, 404);
+      }
+      await record(env, req, "phone_remove", true, userId);
+      return dashboard(req, env, s, { notice: `${name} removed. It is signed out and its passkey no longer works here.` });
     }
     case "/setup/fathom/key": {
       const key = (f.fathom_key ?? "").trim();

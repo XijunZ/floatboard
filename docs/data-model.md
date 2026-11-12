@@ -226,6 +226,11 @@ can serve several people; each person's data is separate). `meeting_tasks` (0001
 | **Google client** | `google_clients` | Each user's own Google Cloud Web client. | `user_id`, `client_id`, `client_secret_enc`, `updated`. |
 | **Setup log entry** | `setup_log` | Every setup outcome (never secrets). | `at`, `user_id`, `ip`, `action`, `ok`, `detail`. |
 | **Draft** | `drafts` | FloatBoard's Gmail reply draft for one email card, and exactly what it wrote. | (`user_id`, `source_mid`), `gmail_draft_id`, `body`, `to_addr`, `cc_addrs`, `subject`, `updated`, `locked`. |
+| **Phone** | `app_devices` | A phone paired with the phone app (`/app`). Removing it on the setup page marks it revoked and deletes its sessions and passkeys. | `id`, `user_id`, `name`, `created`, `last_seen`, `revoked`. |
+| **Phone passkey** | `app_credentials` | The passkey (WebAuthn credential) a phone signs in with. | `credential_id` (base64url), `device_id`, `user_id`, `public_key` (base64url COSE key), `counter` (signature counter), `transports` (JSON), `created`. |
+| **Phone session** | `app_sessions` | A signed-in phone (the `fb_session` cookie, 90 days, renewed on use). | `token_hash` (SHA-256 of the cookie value), `device_id`, `user_id`, `created`, `expires`, `last_used`. |
+| **Pairing code** | `app_pairings` | A one-time phone pairing link made by the Mac (valid 10 minutes, one device per code). | `code_hash` (SHA-256 of the code), `user_id`, `expires`, `used`, `challenge` (the passkey registration challenge). |
+| **Sign-in challenge** | `app_challenges` | A passkey sign-in in progress (valid 5 minutes, used once). | `id`, `challenge`, `purpose` (login), `expires`, `used`. |
 
 Relationships:
 
@@ -243,6 +248,8 @@ Relationships:
 | User | Item, Seen message, Feedback, Run, App event, Telegram message, Judge attempt, Draft, Outlook row, Setup session, OAuth state | 1 to many | `user_id` |
 | User | Missed report (pending) | 1 to 0..1 | `missed_pending.user_id` |
 | Draft | Item (kind `draft`) | 1 to 1 per card | `source_mid` = `items.message_id` |
+| User | Phone, Pairing code | 1 to many | `app_devices.user_id`, `app_pairings.user_id` |
+| Phone | Phone passkey, Phone session | 1 to many | `device_id` |
 
 ```mermaid
 erDiagram
@@ -265,6 +272,10 @@ erDiagram
   USERS ||--o{ SETUP_SESSIONS : "signed in"
   USERS ||--o{ OAUTH_STATES : "Google sign-in"
   USERS ||--o{ SETUP_LOG : "setup outcomes"
+  USERS ||--o{ APP_DEVICES : "paired phones"
+  USERS ||--o{ APP_PAIRINGS : "pairing codes"
+  APP_DEVICES ||--o{ APP_CREDENTIALS : "passkeys"
+  APP_DEVICES ||--o{ APP_SESSIONS : "signed in"
   USERS {
     text id PK
     text name
@@ -414,4 +425,5 @@ How each proposal kind lands in the board:
 | Engine `drafts` | `body`, `to_addr`, `cc_addrs`, `subject` | Draft email content, addresses | Kept per card (no pruning today). |
 | Engine `setup_sessions`, `oauth_states` | `key_enc` | Secret (encrypted) | Deleted when expired. |
 | Engine `setup_attempts`, `setup_log` | `ip`, `detail` | Network address | Attempts pruned after 24 hours; log kept. |
+| Engine `app_devices`, `app_credentials`, `app_sessions`, `app_pairings`, `app_challenges` | `name`, `public_key`, hashes | Phone name, public keys, hashed tokens (no secrets in clear) | Sessions, codes and challenges deleted when expired; removed phones keep only the revoked device row. |
 | Code (this repository) | None | | Enforced by `.gitignore`, `.example` templates and the pre-commit deny-list. |

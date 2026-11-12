@@ -95,6 +95,8 @@ export type Dashboard = {
   fathomSecretSaved?: boolean;
   fathomKeySaved?: boolean;
   outlook?: OutlookStatus | null;
+  /** Paired phones (the phone app), oldest first. */
+  phones?: { id: string; name: string; created: string; last_seen: string | null }[];
   /** The new ingest token, right after it was made (shown this once only). */
   outlookToken?: string | null;
   notice?: string | null;
@@ -105,6 +107,19 @@ function gmailStatus(g: GmailRow): string {
   if (!g.enabled) return `<span class="muted">paused</span>`;
   if (g.last_error) return `<span class="bad">needs attention</span> <span class="muted">${esc(g.last_error)}</span>`;
   return `<span class="ok">connected</span>${g.last_run ? ` <span class="muted">last checked ${esc(g.last_run.replace("T", " ").slice(0, 16))} UTC</span>` : ""}`;
+}
+
+const utc = (iso: string) => `${iso.replace("T", " ").slice(0, 16)} UTC`;
+
+function phonesSection(d: Dashboard): string {
+  const phones = d.phones ?? [];
+  const list = phones.length
+    ? `<ul>${phones.map((p) => `<li><strong>${esc(p.name)}</strong> <span class="muted">added ${esc(utc(p.created))}${p.last_seen ? `, last used ${esc(utc(p.last_seen))}` : ""}</span>
+<form class="inline" method="post" action="/setup/phones/remove">${csrfField(d.csrf)}<input type="hidden" name="device_id" value="${esc(p.id)}">
+<button class="danger" type="submit">Remove</button></form></li>`).join("")}</ul>`
+    : `<p class="muted">No phones paired yet.</p>`;
+  return `${list}
+<p class="muted">To add a phone, open the FloatBoard app on your Mac, go to the Connectors tab and choose Pair a phone. Remove signs that phone out and deletes its passkey here.</p>`;
 }
 
 export function dashboardPage(d: Dashboard): string {
@@ -173,6 +188,10 @@ ${d.ntfyTopic ? `<p>Subscribe address: <code>https://ntfy.sh/${esc(d.ntfyTopic)}
 <form method="post" action="/setup/ntfy/off">${csrfField(d.csrf)}<button class="danger" type="submit">Turn off</button></form>`
 : `<p class="muted">Urgent emails can also reach your phone through the free ntfy app. Alerts carry the task title, due date and sender, never the email text.</p>
 <form method="post" action="/setup/ntfy/on">${csrfField(d.csrf)}<button type="submit">Turn on</button></form>`}
+</section>
+
+<section><h2>Phones</h2>
+${phonesSection(d)}
 </section>
 
 <section><h2>5. Fathom meeting recaps</h2>
