@@ -231,6 +231,8 @@ can serve several people; each person's data is separate). `meeting_tasks` (0001
 | **Phone session** | `app_sessions` | A signed-in phone (the `fb_session` cookie, 90 days, renewed on use). | `token_hash` (SHA-256 of the cookie value), `device_id`, `user_id`, `created`, `expires`, `last_used`. |
 | **Pairing code** | `app_pairings` | A one-time phone pairing link made by the Mac (valid 10 minutes, one device per code). | `code_hash` (SHA-256 of the code), `user_id`, `expires`, `used`, `challenge` (the passkey registration challenge). |
 | **Sign-in challenge** | `app_challenges` | A passkey sign-in in progress (valid 5 minutes, used once). | `id`, `challenge`, `purpose` (login), `expires`, `used`. |
+| **Board copy** | `board_snapshots` | The Mac's open tasks plus tasks done today, pushed for the phone to read (encrypted JSON, replaced on each push, at most 500 cards). | `user_id`, `data_enc`, `updated`. |
+| **Phone action** | `phone_actions` | A change made on the phone (move a task, add a task) waiting for the Mac to apply it. | `id`, `user_id`, `card_id` (empty for add), `action` (todo, doing, watch, done, add), `title`, `group_name`, `created`, `taken` (1 once the Mac acked it). |
 
 Relationships:
 
@@ -426,4 +428,5 @@ How each proposal kind lands in the board:
 | Engine `setup_sessions`, `oauth_states` | `key_enc` | Secret (encrypted) | Deleted when expired. |
 | Engine `setup_attempts`, `setup_log` | `ip`, `detail` | Network address | Attempts pruned after 24 hours; log kept. |
 | Engine `app_devices`, `app_credentials`, `app_sessions`, `app_pairings`, `app_challenges` | `name`, `public_key`, hashes | Phone name, public keys, hashed tokens (no secrets in clear) | Sessions, codes and challenges deleted when expired; removed phones keep only the revoked device row. |
+| Engine `board_snapshots`, `phone_actions` | `data_enc`, `title`, `group_name` | Task titles and groups (snapshot encrypted; queued phone actions in clear) | Snapshot replaced on each push; acked actions deleted after 7 days. |
 | Code (this repository) | None | | Enforced by `.gitignore`, `.example` templates and the pre-commit deny-list. |
