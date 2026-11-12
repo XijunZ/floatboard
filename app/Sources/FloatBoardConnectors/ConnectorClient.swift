@@ -240,27 +240,42 @@ public struct ConnectorClient {
         return f.date(from: s)
     }
 
-    /// Replaces the engine's copy of the board shown on the phone.
-    public func putBoard(_ cards: [BoardCard]) async throws {
+    /// Replaces the engine's copy of the board shown on the phone. `sent_at` is this Mac's clock at send time, so the
+    /// engine can correct each card's `status_at` for a wrong Mac clock.
+    public func putBoard(_ cards: [BoardCard], sentAt: Date = Date()) async throws {
         let body: Data
-        do { body = try PhoneBoard.body(cards) } catch { throw ConnectorError.badResponse("\(error)") }
+        do { body = try PhoneBoard.body(cards, sentAt: sentAt) } catch { throw ConnectorError.badResponse("\(error)") }
         _ = try await phoneCall("PUT", "/v2/board", body: body)
     }
 
-    /// Changes made on the phone that the Mac hasn't applied yet, oldest first.
-    public func phoneActions() async throws -> [PhoneAction] {
+    /// Changes made on the phone that the Mac hasn't applied yet, oldest first, plus how far the engine's clock is
+    /// ahead of this Mac's (`server_time` minus this Mac's time when the answer arrived; 0 when the engine did not say).
+    public func phoneActions() async throws -> (actions: [PhoneAction], engineAhead: TimeInterval) {
         let data = try await phoneCall("GET", "/v2/phone-actions")
-        struct Answer: Decodable { let actions: [PhoneAction] }
-        do { return try JSONDecoder().decode(Answer.self, from: data).actions } catch { throw ConnectorError.badResponse("phone actions: \(error)") }
+        let arrived = Date()
+        struct Answer: Decodable {
+            let actions: [PhoneAction]; let serverTime: String?
+            enum CodingKeys: String, CodingKey { case actions, serverTime = "server_time" }
+        }
+        do {
+            let answer = try JSONDecoder().decode(Answer.self, from: data)
+            let ahead = answer.serverTime.flatMap(PhoneBoard.parseISO).map { $0.timeIntervalSince(arrived) } ?? 0
+            return (answer.actions, ahead)
+        } catch { throw ConnectorError.badResponse("phone actions: \(error)") }
     }
 
-    /// Tells the engine these phone actions were applied (at most 200 ids per call).
-    public func ackPhoneActions(_ ids: [String]) async throws {
-        var rest = ids[...]
-        while !rest.isEmpty {
+    /// Tells the engine which phone actions were applied and which were not (with the reason), at most 200 of each
+    /// per call.
+    public func ackPhoneActions(_ ids: [String], skipped: [PhoneSkip] = []) async throws {
+        var rest = ids[...], restSkipped = skipped[...]
+        while !rest.isEmpty || !restSkipped.isEmpty {
             let chunk = Array(rest.prefix(200)); rest = rest.dropFirst(200)
+            let skipChunk = Array(restSkipped.prefix(200)); restSkipped = restSkipped.dropFirst(200)
+            var obj: [String: Any] = [:]
+            if !chunk.isEmpty { obj["ids"] = chunk }
+            if !skipChunk.isEmpty { obj["skipped"] = skipChunk.map { ["id": $0.id, "reason": $0.reason] } }
             let body: Data
-            do { body = try JSONSerialization.data(withJSONObject: ["ids": chunk]) } catch { throw ConnectorError.badResponse("\(error)") }
+            do { body = try JSONSerialization.data(withJSONObject: obj) } catch { throw ConnectorError.badResponse("\(error)") }
             _ = try await phoneCall("POST", "/v2/phone-actions/ack", body: body)
         }
     }

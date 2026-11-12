@@ -7,6 +7,8 @@ private final class PhoneEngine {
     var pending: [[String: Any]] = []
     var ackStatus = 200
     var actionsStatus = 200
+    /// How far the engine's clock is ahead of the Mac's (sent as server_time).
+    var serverAhead: TimeInterval = 0
     let fake: FakeEngine
     init() {
         let good = goodEngine().handler
@@ -16,10 +18,12 @@ private final class PhoneEngine {
             switch p {
             case "/v2/phone-actions":
                 guard e.actionsStatus == 200 else { return (e.actionsStatus, #"{"error":"boom"}"#) }
-                return (200, String(decoding: try JSONSerialization.data(withJSONObject: ["actions": e.pending]), as: UTF8.self))
+                let serverTime = PhoneBoard.isoUTC(Date().addingTimeInterval(e.serverAhead))
+                return (200, String(decoding: try JSONSerialization.data(withJSONObject: ["actions": e.pending, "server_time": serverTime]), as: UTF8.self))
             case "/v2/phone-actions/ack":
                 guard e.ackStatus == 200 else { return (e.ackStatus, #"{"error":"boom"}"#) }
-                let ids = Set(((try JSONSerialization.jsonObject(with: b) as? [String: Any])?["ids"] as? [String]) ?? [])
+                let obj = try JSONSerialization.jsonObject(with: b) as? [String: Any]
+                let ids = Set((obj?["ids"] as? [String] ?? []) + (obj?["skipped"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String })
                 e.pending.removeAll { ids.contains($0["id"] as? String ?? "") }
                 return (200, #"{"ok":true}"#)
             case "/v2/board": return (200, #"{"ok":true,"count":0}"#)
@@ -29,12 +33,21 @@ private final class PhoneEngine {
         }
         me = self
     }
-    func action(_ id: String, _ kind: String, card: Int64? = nil, title: String? = nil, group: String? = nil) {
-        pending.append(["id": id, "card_id": card.map { $0 as Any } ?? NSNull(), "action": kind, "title": title.map { $0 as Any } ?? NSNull(),
-                        "group": group.map { $0 as Any } ?? NSNull(), "created": "2026-11-12T09:00:00.000Z"])
+    /// `madeAt` is on the engine's clock; `clientID` is the phone's own id.
+    func action(_ id: String, _ kind: String, card: Int64? = nil, title: String? = nil, group: String? = nil,
+                madeAt: Date? = nil, clientID: String? = nil) {
+        var row: [String: Any] = ["id": id, "card_id": card.map { $0 as Any } ?? NSNull(), "action": kind, "title": title.map { $0 as Any } ?? NSNull(),
+                                  "group": group.map { $0 as Any } ?? NSNull(), "created": "2026-11-12T09:00:00.000Z"]
+        if let madeAt { row["made_at"] = PhoneBoard.isoUTC(madeAt) }
+        row["client_id"] = clientID.map { $0 as Any } ?? NSNull()
+        pending.append(row)
     }
     var puts: Int { fake.requests.filter { $0.method == "PUT" && $0.path == "/v2/board" }.count }
-    var ackedIDs: [String] { fake.bodies("/v2/phone-actions/ack").flatMap { $0["ids"] as? [String] ?? [] } }
+    var ackedIDs: [String] { appliedIDs + skipped.map(\.id) }
+    var appliedIDs: [String] { fake.bodies("/v2/phone-actions/ack").flatMap { $0["ids"] as? [String] ?? [] } }
+    var skipped: [(id: String, reason: String)] {
+        fake.bodies("/v2/phone-actions/ack").flatMap { ($0["skipped"] as? [[String: Any]] ?? []).map { ($0["id"] as? String ?? "", $0["reason"] as? String ?? "") } }
+    }
 }
 
 @MainActor func phoneChecks() async {
@@ -94,7 +107,7 @@ private final class PhoneEngine {
     do {
         let obj = try JSONSerialization.jsonObject(with: try PhoneBoard.body(payload)) as? [String: Any]
         let first = (obj?["cards"] as? [[String: Any]])?.first { ($0["id"] as? Int).map(Int64.init) == watch.id }
-        check(first.map { Set($0.keys) == ["id", "title", "group", "color", "importance", "due", "has_time", "status", "link", "done_at"]
+        check(first.map { Set($0.keys) == ["id", "title", "group", "color", "importance", "due", "has_time", "status", "link", "done_at", "status_at"]
                           && $0["due"] is NSNull && $0["link"] is NSNull } ?? false, "phone_board_body_has_every_field")
     } catch { check(false, "phone_board_body_has_every_field: \(error)") }
     check(PhoneBoard.clip(String(repeating: "é", count: 150) + String(repeating: "😀", count: 100)).utf16.count <= 200,
@@ -183,7 +196,7 @@ private final class PhoneEngine {
         e.action("un-2", "doing", card: deleted.id)
         _ = await ConnectorSync.phoneTick(connector: "ph", store: store, client: e.fake.client(), now: now)
         let line = connectorActivity(store, "ph").first { $0.message.contains("no longer on the board") }
-        check(Set(e.ackedIDs) == ["un-1", "un-2"] && e.pending.isEmpty && line?.message.hasPrefix("2 ") == true
+        check(Set(e.ackedIDs) == ["un-1", "un-2"] && e.appliedIDs.isEmpty && e.skipped.allSatisfy { $0.reason == "gone" } && e.pending.isEmpty && line?.message.hasPrefix("2 ") == true
               && line?.detail?.contains("987654") == true && store.card(deleted.id) == nil, "phone_unknown_card_acked_and_logged")
         let texts = connectorActivity(store, "ph").map { $0.message + ($0.detail ?? "") }.joined(separator: "\n")
         check(!texts.contains("Phone in Work") && !texts.contains("Phone dup") && !texts.contains("P all-day"), "phone_activity_has_no_task_titles")
@@ -220,6 +233,85 @@ private final class PhoneEngine {
         let left = (try? store.db.query("SELECT count(*) FROM meta WHERE key='phone_action:ph:ancient'") { DB.int($0, 0) }.first) ?? -1 // try?-ok: check helper
         let kept = (try? store.db.query("SELECT count(*) FROM meta WHERE key='phone_action:ph:mv-1'") { DB.int($0, 0) }.first) ?? -1 // try?-ok: check helper
         check(left == 0 && kept == 1, "phone_applied_ids_kept_7_days")
+    }
+
+    // Sync v2: each card's status_at, sent_at, and newest change wins.
+    do {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        store.add(title: "V2 status", area: "Work", importance: .medium, due: nil)
+        store.add(title: "V2 fresh", area: "Work", importance: .medium, due: nil)
+        guard let v = newest("V2 status"), let fresh = newest("V2 fresh") else { check(false, "phone v2 seed"); return }
+        store.move(v, to: .doing, now: t0)
+        let p1 = PhoneBoard.payload(store: store, now: now)
+        let b1 = p1.first { $0.id == v.id }, f1 = p1.first { $0.id == fresh.id }
+        check(b1?.statusAt == "2027-01-15T08:00:00.000Z" && b1?.statusAt.flatMap(PhoneBoard.parseISO) == t0
+              && f1?.statusAt.flatMap(PhoneBoard.parseISO).map { abs($0.timeIntervalSince(fresh.created)) < 0.001 } == true,
+              "phone_v2_status_at_is_last_step_change")
+        let h1 = try PhoneBoard.hash(p1, engine: "e")
+        guard let v1 = store.card(v.id) else { return }
+        store.move(v1, to: .todo, now: t0.addingTimeInterval(10))
+        guard let v2 = store.card(v.id) else { return }
+        store.move(v2, to: .doing, now: t0.addingTimeInterval(20))
+        let p2 = PhoneBoard.payload(store: store, now: now)
+        let h2 = try PhoneBoard.hash(p2, engine: "e")
+        check(h1 != h2 && p2.first { $0.id == v.id }?.status == "doing" && p2.first { $0.id == v.id }?.statusAt == PhoneBoard.isoUTC(t0.addingTimeInterval(20)),
+              "phone_v2_step_change_changes_hash")
+
+        // Store level, engine clock exactly 2 h ahead: equal time goes to the phone, a millisecond older loses.
+        store.add(title: "V2 tie", area: "Work", importance: .medium, due: nil)
+        store.add(title: "V2 older", area: "Work", importance: .medium, due: nil)
+        guard let tie = newest("V2 tie"), let older = newest("V2 older") else { return }
+        store.move(tie, to: .watch, now: t0)
+        store.move(older, to: .watch, now: t0)
+        let r = store.applyPhoneActions([
+            PhoneAction(id: "s-tie", clientID: "c-tie", cardID: tie.id, action: "doing", madeAt: t0.addingTimeInterval(7200)),
+            PhoneAction(id: "s-older", clientID: "c-older", cardID: older.id, action: "doing", madeAt: t0.addingTimeInterval(7200 - 0.01)),
+        ], connector: "v2s", now: t0.addingTimeInterval(100), engineAhead: 7200)
+        check(store.card(tie.id)?.status == .doing && r.applied == ["s-tie"], "phone_v2_equal_time_goes_to_the_phone")
+        check(store.card(older.id)?.status == .watch && r.skipped == [PhoneSkip(id: "s-older", reason: "superseded")],
+              "phone_v2_clock_conversion_orders_correctly")
+    } catch { check(false, "phone v2 status_at: \(error)") }
+
+    // End to end: engine clock 2 h ahead of the Mac's.
+    do {
+        let n2 = Date()
+        let tMac = n2.addingTimeInterval(-600)
+        let ahead: TimeInterval = 7200
+        for t in ["V2 lose", "V2 win", "V2 two"] { store.add(title: t, area: "Work", importance: .medium, due: nil) }
+        guard let lose = newest("V2 lose"), let win = newest("V2 win"), let two = newest("V2 two") else { check(false, "phone v2 e2e seed"); return }
+        // The tasks were made before the Mac's change (their created rows are moved back an hour).
+        store.performForTest("UPDATE events SET at=\(tMac.timeIntervalSince1970 - 3600) WHERE kind='created' AND card_id IN (\(lose.id),\(win.id),\(two.id))")
+        for c in [lose, win, two] { store.move(c, to: .watch, now: tMac) }
+        let e = PhoneEngine()
+        e.serverAhead = ahead
+        // Made 60 s before the Mac's change: on the engine's clock it reads 2 h later, but it is older.
+        e.action("sv-lose", "doing", card: lose.id, madeAt: tMac.addingTimeInterval(-60 + ahead), clientID: "cl-lose")
+        e.action("sv-win", "doing", card: win.id, madeAt: tMac.addingTimeInterval(60 + ahead), clientID: "cl-win")
+        e.action("sv-two-a", "doing", card: two.id, madeAt: tMac.addingTimeInterval(60 + ahead), clientID: "cl-two-a")
+        e.action("sv-two-b", "done", card: two.id, madeAt: tMac.addingTimeInterval(120 + ahead), clientID: "cl-two-b")
+        e.action("sv-gone", "doing", card: 987_655, madeAt: tMac.addingTimeInterval(ahead), clientID: "cl-gone")
+        e.action("sv-add-1", "add", title: "V2 phone add", group: "Work", madeAt: tMac.addingTimeInterval(ahead), clientID: "cl-add")
+        e.action("sv-add-2", "add", title: "V2 phone add", group: "Work", madeAt: tMac.addingTimeInterval(ahead), clientID: "cl-add")
+        let r = await ConnectorSync.phoneTick(connector: "v2", store: store, client: e.fake.client(), now: n2)
+        let skipped = Dictionary(e.skipped.map { ($0.id, $0.reason) }, uniquingKeysWith: { a, _ in a })
+        check(store.card(lose.id)?.status == .watch && skipped["sv-lose"] == "superseded" && !e.appliedIDs.contains("sv-lose"),
+              "phone_v2_older_phone_move_skipped_as_superseded")
+        check(store.card(win.id)?.status == .doing && e.appliedIDs.contains("sv-win"), "phone_v2_newer_phone_move_applied")
+        check(store.card(two.id)?.status == .done && e.appliedIDs.contains("sv-two-a") && e.appliedIDs.contains("sv-two-b"),
+              "phone_v2_two_phone_moves_in_one_batch_both_apply")
+        check(skipped["sv-gone"] == "gone" && !e.appliedIDs.contains("sv-gone"), "phone_v2_gone_card_skipped_as_gone")
+        check(store.cards.filter { $0.title == "V2 phone add" }.count == 1 && e.appliedIDs.contains("sv-add-1") && e.appliedIDs.contains("sv-add-2")
+              && e.pending.isEmpty && r.acked == 7 && r.skipped == 2, "phone_v2_add_applied_once_by_client_id")
+        let line = connectorActivity(store, "v2").first { $0.message == "Kept a newer change from this Mac" }
+        let texts = connectorActivity(store, "v2").map { $0.message + ($0.detail ?? "") }.joined(separator: "\n")
+        check(line?.detail?.hasPrefix("1 ") == true && !texts.contains("V2 "), "phone_v2_kept_mac_change_logged_without_titles")
+        let sent = e.fake.bodies("/v2/board").last
+        let winSent = (sent?["cards"] as? [[String: Any]])?.first { ($0["id"] as? Int).map(Int64.init) == win.id }
+        let winAt = (winSent?["status_at"] as? String).flatMap(PhoneBoard.parseISO)
+        let sentAt = (sent?["sent_at"] as? String).flatMap(PhoneBoard.parseISO)
+        check(r.pushed && sentAt.map { abs($0.timeIntervalSinceNow) < 60 } == true
+              && winAt.map { abs($0.timeIntervalSince(tMac.addingTimeInterval(60))) < 2 } == true,
+              "phone_v2_board_sends_sent_at_and_applied_move_time")
     }
 
     // Pairing.
