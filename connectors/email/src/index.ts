@@ -10,6 +10,7 @@ import { catchUpFathom } from "./sources/fathomCatchup";
 import "./routes/sources";
 import "./routes/v2";
 import "./archive";
+import { handleEmailSearch } from "./emails";
 import { handleSetup, purgeExpiredSetup } from "./routes/setup";
 import { log, recordCrash, runRounds, type RunOptions } from "./run";
 import { Budget } from "./budget";
@@ -80,7 +81,7 @@ export default {
     }
     if (url.pathname.startsWith("/app/api/")) {
       // Phone app: signed in by the fb_session cookie only (never the user key).
-      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handlePush(req, env)) ?? appJSON({ error: "not found" }, 404);
+      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handlePush(req, env)) ?? (await handleEmailSearch(req, env)) ?? appJSON({ error: "not found" }, 404);
     }
     // Phone app page, script, service worker, manifest and icons (no sign-in needed).
     const appFile = handleAppStatic(req);

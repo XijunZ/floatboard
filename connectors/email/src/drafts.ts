@@ -30,7 +30,8 @@ export const DRAFT_ERRORS = {
   gmailOnly: "Draft reply works for Gmail emails only for now",
 } as const;
 
-export type DraftRequest = { source_mid: string; source_sent: string | null; item_id: string | null; notes: string; request_id: string };
+/** `account`: the Gmail inbox of an email the user linked to a task themselves (the sorting has no item for it). */
+export type DraftRequest = { source_mid: string; source_sent: string | null; item_id: string | null; notes: string; request_id: string; account?: string | null };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
 
@@ -38,8 +39,8 @@ const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
 export function readDraftRequest(p: Record<string, unknown>): { ok: true; req: DraftRequest } | { ok: false; answer: { request_id: string; source_mid: string } | null } {
   const request_id = str(p.request_id), source_mid = str(p.source_mid), notes = str(p.notes);
   const optional = (v: unknown) => v === undefined || v === null || typeof v === "string";
-  if (request_id && source_mid && notes && optional(p.item_id) && optional(p.source_sent)) {
-    return { ok: true, req: { request_id, source_mid, notes, item_id: str(p.item_id), source_sent: str(p.source_sent) } };
+  if (request_id && source_mid && notes && optional(p.item_id) && optional(p.source_sent) && optional(p.account)) {
+    return { ok: true, req: { request_id, source_mid, notes, item_id: str(p.item_id), source_sent: str(p.source_sent), account: str(p.account) } };
   }
   return { ok: false, answer: request_id && source_mid ? { request_id, source_mid } : null };
 }
@@ -101,9 +102,14 @@ async function makeDraft(c: Ctx, req: DraftRequest): Promise<Outcome & { sourceI
     ?? await env.DB.prepare(`SELECT ${cols} FROM items WHERE user_id=? AND message_id=? AND kind='action' LIMIT 1`).bind(userId, req.source_mid).first<{ source_id: string | null }>();
   // Outlook emails (read by the Chrome extension) can't be replied to from here: nothing is ever written to Outlook.
   if (req.source_mid.startsWith("owa:")) return { error: DRAFT_ERRORS.gmailOnly, sourceId: item?.source_id ?? undefined };
-  if (!item) return { error: DRAFT_ERRORS.gone };
-  if (!item.source_id) return { error: DRAFT_ERRORS.noInbox };
-  const sourceId = item.source_id;
+  let sourceId: string | null = item?.source_id ?? null;
+  if (!item && req.account) {
+    // An email the user linked to a task: its inbox is the one they picked it from, if it is one of theirs.
+    const own = await env.DB.prepare("SELECT id FROM sources WHERE user_id=? AND kind='gmail' AND address=?").bind(userId, req.account).first<{ id: string }>();
+    if (!own) return { error: DRAFT_ERRORS.noInbox };
+    sourceId = own.id;
+  } else if (!item) return { error: DRAFT_ERRORS.gone };
+  if (!sourceId) return { error: DRAFT_ERRORS.noInbox };
   const src = c.gmailFor ? await c.gmailFor(sourceId) : await (async () => {
     const row = await env.DB.prepare("SELECT * FROM sources WHERE id=? AND user_id=? AND kind='gmail' AND enabled=1").bind(sourceId, userId).first<SourceRow>();
     return row ? { row, gmail: gmailSource(env, row, c.calls.wrap(c.fetchFn)) } : null;

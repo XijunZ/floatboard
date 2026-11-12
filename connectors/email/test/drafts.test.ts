@@ -137,6 +137,21 @@ async function postEvents(key: string, events: unknown[], f: ReturnType<typeof f
 }
 
 describe("draft_reply events", () => {
+  it("draft_for_an_email_the_user_linked_finds_its_inbox_by_account", async () => {
+    const u = await setup("Linked draft");
+    await env.DB.prepare("DELETE FROM items WHERE user_id=?").bind(u.id).run(); // the sorting never saw this email
+    const f = fake();
+    await postEvents(u.key, [{ uuid: crypto.randomUUID(), kind: "draft_reply", payload: payload(u, { item_id: "", account: "me@gmail.com" }) }], f);
+    const [d] = await drafts(u);
+    expect(d.link).toBe("https://mail.google.com/mail/u/me@gmail.com/#drafts?compose=mm1");
+    expect(f.creates[0].message.threadId).toBe("t1");
+    // Another address than the user's own inboxes: no inbox, and Gmail is never called.
+    const g = fake();
+    await postEvents(u.key, [{ uuid: crypto.randomUUID(), kind: "draft_reply", payload: payload(u, { item_id: "", account: "someone@else.com" }) }], g);
+    expect((await drafts(u)).map((x: any) => x.why)).toContain("The inbox isn't connected");
+    expect(g.creates).toEqual([]);
+  });
+
   it("draft_created_and_proposed", async () => {
     const u = await setup("D1");
     const f = fake();
