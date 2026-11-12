@@ -131,6 +131,26 @@ settings silences all channels.
 `missed: <a few words from the email>`. No task is created. The engine only *learns* from it, so similar emails are
 caught next time.
 
+## 8. Phone app (optional)
+
+The engine also serves a small phone app at `<your-engine>/app`: your board (To do, Doing, Watch, Done today), with a
+tap to move a task, open its link or add a new one, and lock-screen notifications for urgent tasks. It is a web app you
+put on your Home Screen, so there is no app store. Your Mac stays in charge: changes made on the phone are picked up by
+the Mac within a couple of minutes and show as "Waiting for your Mac" until then.
+
+1. **Pair the phone.** On your Mac open FloatBoard, **Connectors** tab, **Pair a phone**, and scan the code with the
+   phone's camera (the code works once, for 10 minutes). Tap **Set up this phone**; the phone makes a passkey with your
+   face, fingerprint or screen lock. Later sign-ins use the same passkey; no password.
+2. **Android (Chrome):** open the menu (three dots), then **Install app** (or **Add to Home screen**). Open FloatBoard
+   from the Home Screen, tap the gear, then **Turn on notifications**.
+3. **iPhone (Safari, iOS 16.4 or later):** tap **Share**, then **Add to Home Screen**. Open FloatBoard from the Home
+   Screen and tap **Sign in** (the Home Screen app keeps its own sign-in). Notifications only work from the Home Screen
+   app: tap the gear, then **Turn on notifications**, and allow them.
+4. **Test it:** in the app's settings press **Send a test notification**.
+
+**Removing a phone:** on the engine's setup page, under **Phones**, press **Remove** next to it. That signs it out, deletes
+its passkey on the engine and stops its notifications. **Sign out** in the app's settings signs out only that phone.
+
 ## Inviting other people
 
 Open `<your-engine>/setup/admin`, sign in with the admin key, enter a name and press **Create invite**. Send them the link
