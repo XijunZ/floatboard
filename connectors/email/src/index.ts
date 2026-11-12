@@ -14,6 +14,7 @@ import { handleSetup, purgeExpiredSetup } from "./routes/setup";
 import { log, recordCrash, runRounds, type RunOptions } from "./run";
 import { Budget } from "./budget";
 import { alertFor } from "./alerts";
+import { purgeDueAlerts, runDueAlerts } from "./due";
 import { telegramWebhook, userBotWebhook } from "./telegram";
 import { ingestOutlook, judgeOutlookNow } from "./outlook";
 import { appJSON, handleAppAuth, purgeExpiredApp } from "./app/auth";
@@ -95,11 +96,15 @@ export default {
     return json({ error: "not found" }, 404);
   },
 
-  /** Hourly: every user with an enabled source gets a few passes; backlogs continue next hour. */
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runAllUsers(env));
+  /** Every 15 minutes: due reminders. Hourly: every user with an enabled source gets a few passes; backlogs continue next hour. */
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === DUE_CRON) ctx.waitUntil(runDueAlerts(env));
+    else ctx.waitUntil(runAllUsers(env));
   },
 } satisfies ExportedHandler<Env>;
+
+/** The 15-minute schedule (wrangler.toml); every other schedule is the hourly work. */
+export const DUE_CRON = "*/15 * * * *";
 
 const cronProblem = (env: Env, decision: string, detail: string) =>
   logEvent(env, { run_id: "cron", user_id: "", decision, detail, trace: "cron" });
@@ -120,6 +125,7 @@ export async function runAllUsers(
     await purgeExpiredApp(env);
     await purgePhoneActions(env);
     await purgeBoardLog(env);
+    await purgeDueAlerts(env);
   } catch (e) {
     const msg = `Could not purge expired setup sessions: ${(e as Error)?.message ?? e}`.slice(0, 500);
     log("setup_purge_failed", { error: msg });

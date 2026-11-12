@@ -22,7 +22,8 @@ export function alertBody(item: AlertItem): string {
  * topic can read the alerts, so the reason, the sender and the email link are never sent there.
  */
 export function ntfyBody(item: AlertItem): string {
-  return [item.due && `Due: ${item.due.replace("T", " ")}`, "Open FloatBoard for details"].filter(Boolean).join("\n");
+  // A due reminder's text is the task's due time ("Due 14:30"), never email text.
+  return [item.reminder ? item.why : item.due && `Due: ${item.due.replace("T", " ")}`, "Open FloatBoard for details"].filter(Boolean).join("\n");
 }
 
 /**
@@ -32,7 +33,7 @@ export function ntfyBody(item: AlertItem): string {
  */
 export async function sendNtfy(topic: string, item: AlertItem, appOrigin?: string | null): Promise<void> {
   const headers: Record<string, string> = {
-    Title: item.title.replace(/[\r\n]+/g, " ").slice(0, 120), Priority: "5", Tags: "warning",
+    Title: item.title.replace(/[\r\n]+/g, " ").slice(0, 120), Priority: item.reminder ? "4" : "5", Tags: item.reminder ? "alarm_clock" : "warning",
   };
   if (appOrigin) headers.Click = `${appOrigin}/app/`;
   const r = await ntfyFetch(`${NTFY_BASE}/${encodeURIComponent(topic)}`, { method: "POST", headers, body: ntfyBody(item) });

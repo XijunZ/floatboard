@@ -191,6 +191,12 @@ async function notApplied(env: Env, userId: string, deviceId: string): Promise<s
       ORDER BY rowid DESC LIMIT ${MAX_SUPERSEDED_LISTED}`).bind(userId, deviceId).all<{ client_id: string }>()).results.map((r) => r.client_id).reverse();
 }
 
+/** The board as the phone would see it now (the Mac's copy plus phone moves not yet applied); empty without a copy. */
+export async function currentBoard(env: Env, userId: string): Promise<Card[]> {
+  const [snap, actions] = await Promise.all([loadSnapshot(env, userId), overlayActions(env, userId)]);
+  return snap ? overlay(snap.cards, actions, snap.updated) : [];
+}
+
 async function boardBody(env: Env, userId: string, deviceId: string) {
   const [snap, actions, waiting, superseded, account] = await Promise.all([loadSnapshot(env, userId), overlayActions(env, userId),
     env.DB.prepare("SELECT COUNT(*) AS n FROM phone_actions WHERE user_id=? AND taken=0").bind(userId).first<{ n: number }>(),

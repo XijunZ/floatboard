@@ -48,7 +48,7 @@ export function telegramAlert(env: Env, userId: string): (item: AlertItem) => Pr
       .bind(userId).first<{ chat: string | null; own: string | null }>();
     const token = u?.own ? await decrypt(env, u.own) : env.TELEGRAM_BOT_TOKEN;
     if (!u?.chat || !token) return false;
-    const lines = [`⚠️ <b>${esc(item.title)}</b>`, item.why && esc(item.why), item.due && `Due: ${esc(item.due.replace("T", " "))}`,
+    const lines = [`${item.reminder ? "⏰" : "⚠️"} <b>${esc(item.title)}</b>`, item.why && esc(item.why), item.due && `Due: ${esc(item.due.replace("T", " "))}`,
       item.sender && `From: ${esc(item.sender)}`].filter(Boolean);
     await tg(env, "sendMessage", {
       chat_id: u.chat, text: lines.join("\n"), parse_mode: "HTML",
