@@ -28,6 +28,9 @@ export const MAX_UNTAKEN_ACTIONS = 200;
 export const MAX_BATCH = 100;
 const MAX_TITLE = 200;
 const MAX_LINK = 2000;
+const MAX_LINKS = 6;
+const LINK_KINDS = ["email", "meeting", "link"] as const;
+const LINK_LABELS = ["calendar"] as const;
 const MAX_REASON = 200;
 const MAX_BOARD_BYTES = 1_500_000;
 const MAX_ACTION_BYTES = 64_000;
@@ -40,9 +43,11 @@ const STATUSES = ["todo", "doing", "watch", "done"] as const;
 const DEFAULT_COLOR = "#8e8e93";
 
 export type Status = (typeof STATUSES)[number];
+/** One link on a task: what it opens and where. `label` "calendar" marks the task's calendar event. */
+export type CardLink = { kind: (typeof LINK_KINDS)[number]; url: string; label?: (typeof LINK_LABELS)[number] };
 export type Card = {
   id: number; title: string; group: string; color: string; importance: 0 | 1 | 2; due: string | null; has_time: boolean;
-  status: Status; link: string | null; done_at: string | null; status_at?: string | null; pending?: true; action_id?: string | null;
+  status: Status; link: string | null; links?: CardLink[]; done_at: string | null; status_at?: string | null; pending?: true; action_id?: string | null;
 };
 export type PhoneAction = {
   id: string; client_id: string | null; card_id: number | null; action: Status | "add"; title: string | null; group: string | null;
@@ -71,6 +76,22 @@ function httpLink(v: unknown): string | null {
   return v;
 }
 
+/** A card's `links`: optional; when sent, a list of at most 6 `{ kind, url, label? }` with nothing else, http(s) urls only. */
+function cardLinks(v: unknown): CardLink[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.length > MAX_LINKS) throw new Error(`links must be a list of at most ${MAX_LINKS}`);
+  return v.map((l: any, i: number): CardLink => {
+    const at = `links[${i}]`;
+    if (!l || typeof l !== "object" || Array.isArray(l)) throw new Error(`${at} must be an object`);
+    if (Object.keys(l).some((k) => k !== "kind" && k !== "url" && k !== "label")) throw new Error(`${at} may only have kind, url and label`);
+    if (!LINK_KINDS.includes(l.kind)) throw new Error(`${at}.kind must be email, meeting or link`);
+    if (l.label !== undefined && !LINK_LABELS.includes(l.label)) throw new Error(`${at}.label must be calendar when given`);
+    if (l.url === null) throw new Error(`${at}.url must be a web address`);
+    try { httpLink(l.url); } catch (e) { throw new Error(`${at}.url: ${(e as Error).message}`); }
+    return l.label === undefined ? { kind: l.kind, url: l.url } : { kind: l.kind, url: l.url, label: l.label };
+  });
+}
+
 /** Strictly validate a pushed board; throws Error(message) on anything off. `status_at` is optional (as the Mac sent it). */
 export function parseCards(body: any): Card[] {
   if (!body || !Array.isArray(body.cards)) throw new Error("cards must be a list");
@@ -89,9 +110,12 @@ export function parseCards(body: any): Card[] {
     if (typeof c.has_time !== "boolean") throw new Error(`${at}.has_time must be true or false`);
     if (!STATUSES.includes(c.status)) throw new Error(`${at}.status must be todo, doing, watch or done`);
     try {
-      return { id: c.id, title: c.title, group: c.group, color: c.color, importance: c.importance, due: isoOrNull(c.due, "due"),
+      const out: Card = { id: c.id, title: c.title, group: c.group, color: c.color, importance: c.importance, due: isoOrNull(c.due, "due"),
         has_time: c.has_time, status: c.status, link: httpLink(c.link), done_at: isoOrNull(c.done_at, "done_at"),
         status_at: c.status_at === undefined ? null : isoOrNull(c.status_at, "status_at") };
+      const links = cardLinks(c.links);
+      if (links) out.links = links;
+      return out;
     } catch (e) { throw new Error(`${at}.${(e as Error).message}`); }
   });
 }
