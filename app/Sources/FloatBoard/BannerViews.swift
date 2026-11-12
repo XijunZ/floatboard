@@ -76,6 +76,9 @@ struct BannerView: View {
             BarButton("xmark", "Close (⌃⌥B or menu bar icon to reopen)") { ui.mode = .hidden }
         }
         .padding(.horizontal, 8)
+        // Double-click anywhere on the bar (not a button, not while typing a quick add) opens the full board.
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { if !ui.quickAdding { ui.mode = .expanded } }
     }
 }
 
