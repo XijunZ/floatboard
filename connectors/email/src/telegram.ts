@@ -41,18 +41,20 @@ export const tgSend = async (env: Env, chatId: string, text: string, botUser?: s
 
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 
-/** Alert sender for a user: no-op when Telegram isn't linked or alerts are off. Uses the user's own bot when set. */
-export function alertFor(env: Env, userId: string): (item: AlertItem) => Promise<void> {
+/** Telegram alert sender for a user (one channel of alerts.ts): no-op when Telegram isn't linked. Uses the user's own bot when set. */
+export function telegramAlert(env: Env, userId: string): (item: AlertItem) => Promise<boolean> {
   return async (item) => {
-    const u = await env.DB.prepare(`SELECT u.telegram_chat_id AS chat, u.tg_bot_token_enc AS own, s.alerts_on AS on_ FROM users u
-        LEFT JOIN settings s ON s.user_id=u.id WHERE u.id=?`).bind(userId).first<{ chat: string | null; own: string | null; on_: number | null }>();
-    if (!u?.chat || u.on_ === 0) return;
+    const u = await env.DB.prepare("SELECT telegram_chat_id AS chat, tg_bot_token_enc AS own FROM users WHERE id=?")
+      .bind(userId).first<{ chat: string | null; own: string | null }>();
+    const token = u?.own ? await decrypt(env, u.own) : env.TELEGRAM_BOT_TOKEN;
+    if (!u?.chat || !token) return false;
     const lines = [`⚠️ <b>${esc(item.title)}</b>`, item.why && esc(item.why), item.due && `Due: ${esc(item.due.replace("T", " "))}`,
       item.sender && `From: ${esc(item.sender)}`].filter(Boolean);
     await tg(env, "sendMessage", {
       chat_id: u.chat, text: lines.join("\n"), parse_mode: "HTML",
       ...(item.link ? { reply_markup: { inline_keyboard: [[{ text: "Open email", url: item.link }]] } } : {}),
-    }, u.own ? await decrypt(env, u.own) : env.TELEGRAM_BOT_TOKEN);
+    }, token);
+    return true;
   };
 }
 

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { call, newUser } from "./helpers";
-import { alertFor, newTelegramLink, setTelegramFetch } from "../src/telegram";
+import { newTelegramLink, setTelegramFetch } from "../src/telegram";
+import { alertFor } from "../src/alerts";
 
 let sent: { method: string; body: any }[] = [];
 beforeEach(() => {

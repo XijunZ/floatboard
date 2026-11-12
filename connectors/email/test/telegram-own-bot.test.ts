@@ -3,7 +3,8 @@ import { env } from "cloudflare:test";
 import { BASE, call, form, get, newUser, signIn } from "./helpers";
 import { decrypt } from "../src/crypto";
 import { sha256Hex } from "../src/auth";
-import { alertFor, newTelegramLink, setTelegramFetch } from "../src/telegram";
+import { newTelegramLink, setTelegramFetch } from "../src/telegram";
+import { alertFor } from "../src/alerts";
 
 // A user's own Telegram bot: everything Telegram is faked here. Calls are recorded with the bot token they used.
 const ENGINE = "123:test-token";

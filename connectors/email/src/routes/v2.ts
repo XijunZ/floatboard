@@ -5,7 +5,7 @@ import { route } from "../router";
 import { readJSON } from "../http";
 import { Budget, CALLS_PER_INVOCATION } from "../budget";
 import { recordCrash, runRounds } from "../run";
-import { alertFor } from "../telegram";
+import { alertFor } from "../alerts";
 import { LEARNING_PAUSED } from "../learn";
 import { processEvents } from "../events";
 import { DEFAULT_TIME_ZONE, isTimeZone, zoneOrDefault } from "../time";
