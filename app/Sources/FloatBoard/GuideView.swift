@@ -44,7 +44,8 @@ struct GuideView: View {
                     icon("arrow.uturn.backward", "Deleted by mistake? Press Undo on the bar that appears, or Edit → Undo Delete (⌥⌘Z) for the last deleted task")
                     icon("cursorarrow.click.2", "Double-click the bar to open the full board (a single click on a task does too)")
                     icon("pin", "Pin the board so it stays open when you click another app")
-                    icon("envelope.fill", "✉ chip on a connector's task (where it came from): click to open the source; red if high importance")
+                    icon("envelope.fill", "✉ chip on a task with a source (where it came from): click to open the email or notes; red if high importance")
+                    icon("video.fill", "Join on a task whose Link is a call (Meet, Zoom, Teams); Open for any other link. Any task can have one")
                     icon("magnifyingglass", "Search: highlights matches; Enter jumps to the next")
                 }
                 section("Connector tasks") {
@@ -58,7 +59,7 @@ struct GuideView: View {
                     note("To add one, open its setup page in your browser and press its “Connect to FloatBoard” link. It opens this app and adds the connector.")
                     note("Connectors tab: each connector has a status line (when it last worked, and how many changes are waiting to send) and a settings form. Edit anything that's wrong and save.")
                     note("Pair a phone… (Connectors tab) shows a QR code: scan it with your phone's camera to see your board there and move or add tasks. The phone's changes reach this Mac within about 2 minutes.")
-                    note("Deleting a connector's task offers four choices: “Not an action” (this should never have been a task) and “Wrong details” both teach the connector; “Duplicate” tells it the same task came in twice, so the gap can be found and fixed, without changing how emails are sorted; “Just delete” tells it nothing.")
+                    note("Deleting a task the email sorting made offers four choices: “Not an action” (this should never have been a task) and “Wrong details” both teach the connector; “Duplicate” tells it the same task came in twice, so the gap can be found and fixed, without changing how emails are sorted; “Just delete” tells it nothing.")
                 }
                 section("Activity") {
                     note("Help → Activity… lists everything FloatBoard did and every problem it hit, newest first.")
