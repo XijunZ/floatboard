@@ -109,3 +109,62 @@ describe("phone app routes", () => {
     expect(r.headers.get("Content-Type")).toBe("application/json");
   });
 });
+
+describe("phone app sync v2 (client text checks; logic is tested in phone-sync.test.ts)", () => {
+  it("queue_is_stored_with_its_account_and_each_action_carries_an_id_and_made_at", () => {
+    expect(APP_JS).toContain('var QUEUE_KEY = "floatboard.queue"');
+    expect(APP_JS).toMatch(/function act\(a, done\) \{[\s\S]*a\.id = newId\(\);\s*a\.made_at = new Date\(\)\.toISOString\(\);[\s\S]*saveQueue\(\);[\s\S]*render\(\);/);
+    expect(APP_JS).toContain("crypto.randomUUID()");
+  });
+
+  it("batches_carry_sent_at_and_go_to_the_action_endpoint", () => {
+    expect(APP_JS).toMatch(/takeBatch\(queue\.actions, new Date\(\)\.toISOString\(\)\)/);
+    expect(APP_JS).toContain("return { sent_at: sentAt, actions: out }");
+    expect(APP_JS).toMatch(/api\("\/app\/api\/action", \{ method: "POST", body: body \}\)/);
+  });
+
+  it("account_is_checked_before_the_queue_is_sent_and_cache_of_another_account_is_dropped", () => {
+    // Sync asks /me first when the account isn't confirmed in this session, and acceptAccount drops another account's data.
+    expect(APP_JS).toMatch(/if \(!me\) acceptAccount\(await api\("\/app\/api\/me"\)\);[\s\S]*while \(queue\.actions\.length\)/);
+    // A board answering for another account drops the board and the queue.
+    expect(APP_JS).toMatch(/function gotBoard\(b\) \{\s*if \(b\.account && me && b\.account !== me\.account\) \{[\s\S]*dropAccountData\(\)/);
+    // The cache shown at launch must belong to the queue's account too.
+    expect(APP_JS).toContain("(!queue.account || queue.account === cached.account)");
+  });
+
+  it("a_401_goes_to_sign_in_and_keeps_the_queue_but_not_the_board", () => {
+    const signIn = /function showSignIn\(\) \{([\s\S]*?)\n  \}/.exec(APP_JS)?.[1] ?? "";
+    expect(signIn).toContain("store(BOARD_KEY, null)");
+    expect(signIn).not.toContain("QUEUE_KEY");
+    expect(APP_JS).toMatch(/if \(e instanceof SignedOut\) \{[^\n]*showSignIn\(\); return; \}/);
+  });
+
+  it("retries_with_back_off_and_at_once_on_online_and_visible", () => {
+    expect(APP_JS).toContain("retryTimer = setTimeout(sync, retryDelay(failures))");
+    expect(APP_JS).toContain('window.addEventListener("online", refreshSoon)');
+    expect(APP_JS).toContain('document.addEventListener("visibilitychange", refreshSoon)');
+    expect(APP_JS).toMatch(/setInterval\([\s\S]*REFRESH_MS\)/);
+    expect(APP_JS).toContain("var REFRESH_MS = 60000;");
+  });
+
+  it("shows_no_error_pop_ups_while_syncing", () => {
+    const sync = /async function sync\(\) \{([\s\S]*?)\n  \}\n/.exec(APP_JS)?.[1] ?? "";
+    expect(sync.length).toBeGreaterThan(100);
+    expect(sync).not.toContain("toast(");
+  });
+
+  it("service_worker_renews_the_push_subscription", () => {
+    expect(SW_JS).toContain('addEventListener("pushsubscriptionchange"');
+    expect(SW_JS).toContain('fetch("/app/api/push/key"');
+    expect(SW_JS).toMatch(/fetch\("\/app\/api\/push\/subscribe", \{\s*method: "POST", credentials: "same-origin"/);
+    expect(APP_JS).toContain("Notifications are off on this phone");
+    expect(APP_JS).toMatch(/async function checkPush\(\)[\s\S]*getSubscription\(\)/);
+  });
+
+  it("phone_says_what_is_mac_only_and_uses_no_em_dashes", () => {
+    expect(APP_JS).toContain("Edit details on your Mac.");
+    expect(PAGE_HTML).toContain("Mac only:");
+    expect(PAGE_HTML).toContain('id="sync-status"');
+    for (const text of [APP_JS, PAGE_HTML, SW_JS]) expect(text).not.toContain("—");
+  });
+});

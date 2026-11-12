@@ -7,21 +7,35 @@
  *
  * - Each browser install keeps a random install id in localStorage and sends it, with a device name, when pairing and
  *   signing in, so the engine knows it as one device (see app/auth.ts).
- * - The cached board is stored with the account marker from `/app/api/me` and only shown after `/me` confirms the same
- *   account (so with no connection at launch, the app asks to retry instead of showing a board it can't vouch for).
+ * - Works offline (sync v2). The last board is kept with the account marker of the account last confirmed on this phone
+ *   and shown at once, labelled "Last synced hh:mm" or "Offline". When `/app/api/me` or the board answers with another
+ *   account, that board and the queue are dropped before anything else happens. A 401 goes to Sign in; the queue is kept
+ *   and sent only if the same account signs back in.
+ * - Moves and adds go into a queue in localStorage, each with its own id and the time it was made, and show at once.
+ *   The queue is sent in batches (`POST /app/api/action` with `sent_at`), retried 5 s doubling to 5 minutes and at once
+ *   when the phone comes online, the app is opened or comes back to the front. No error pop-ups: a one-line status at the
+ *   top says "Synced", "Last synced 14:02", "3 changes waiting" or "Offline, 3 changes waiting".
  * - After pairing or signing in, the browser is reset: cached board dropped and any old push subscription unsubscribed,
  *   so a browser that changes hands never shows or receives the previous account's data.
+ * - The queue logic is in src/app/sync-logic.ts (pure functions, tested on their own).
  *
- * Kept as a string: no backticks or dollar-brace inside.
+ * Kept as a string: no backticks or dollar-brace inside (apart from the SYNC_JS insert).
  */
+import { SYNC_JS } from "./sync-logic";
+
 export const APP_JS = String.raw`"use strict";
 (function () {
+${SYNC_JS}
+
   var $ = function (id) { return document.getElementById(id); };
   var SCREENS = ["loading", "pair", "signin", "board", "settings"];
   var STATUSES = ["todo", "doing", "watch", "done"];
   var MOVE = { todo: "Move to To do", doing: "Move to Doing", watch: "Move to Watch", done: "Mark as done" };
   var MOVED = { todo: "Moved to To do", doing: "Moved to Doing", watch: "Moved to Watch", done: "Done" };
-  var BOARD_KEY = "floatboard.board";
+  var BOARD_KEY = "floatboard.board";   // { account, board, at }: the last board and when it was synced
+  var QUEUE_KEY = "floatboard.queue";   // { account, actions: [{ id, made_at, card_id?, action, title?, group? }] }
+  var SENT_KEY = "floatboard.sent";     // ids this phone sent lately, to notice when the engine reports one not applied
+  var REFRESH_MS = 60000;
   var PAIR_KEY = "floatboard.pair";
   var INSTALL_KEY = "floatboard.install";
   var ua = navigator.userAgent;
@@ -30,13 +44,22 @@ export const APP_JS = String.raw`"use strict";
     return navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
   };
 
-  var board = null;      // { updated, cards, pending }
-  var me = null;         // { user, device }
+  var board = null;      // the last board from the engine: { updated, cards, pending }
+  var me = null;         // { user, device, account }: set only once /app/api/me has answered in this session
+  var shownAccount = null; // account whose board and queue are in memory (from the cache before /me answers)
+  var queue = { account: null, actions: [] };
+  var sentIds = [];
+  var shown = [];        // cards as shown: the board plus queued actions
+  var lastSync = 0;      // phone clock (ms) of the last good answer from the engine
+  var isOffline = false;
+  var syncing = false;
+  var syncAgain = false;
+  var failures = 0;
+  var retryTimer = 0;
   var tab = "todo";
   var current = "loading";
   var busy = false;
   var sheetOpen = false;
-  var lastLoad = 0;
   var reloadWhenIdle = false;
 
   // ------------------------------------------------------------ small helpers
@@ -201,9 +224,11 @@ export const APP_JS = String.raw`"use strict";
   }
 
   // A new sign-in on this browser: forget the previous account's board and stop its notifications on this browser.
+  // The queue stays until /app/api/me names the account: kept for the same account, dropped for another (acceptAccount).
   async function resetBrowser() {
     board = null;
     me = null;
+    shownAccount = null;
     store(BOARD_KEY, null);
     try {
       var sub = await currentSubscription();
@@ -249,10 +274,13 @@ export const APP_JS = String.raw`"use strict";
     }
   }
 
+  // Signed out (401): the board is no longer shown or kept; the queue stays, tied to its account, for a sign-in back.
   function showSignIn() {
     board = null;
     me = null;
+    shownAccount = null;
     store(BOARD_KEY, null);
+    clearTimeout(retryTimer);
     closeSheet();
     show("signin");
     $("signin-error").textContent = passkeysMissing();
@@ -312,8 +340,7 @@ export const APP_JS = String.raw`"use strict";
   }
 
   function cardsFor(status) {
-    if (!board || !Array.isArray(board.cards)) return [];
-    var list = board.cards.filter(function (c) { return status === "done" ? doneToday(c) : c.status === status; });
+    var list = shown.filter(function (c) { return status === "done" ? doneToday(c) : c.status === status; });
     if (status === "done") {
       return list.sort(function (a, b) {
         var x = parseDate(a.done_at), y = parseDate(b.done_at);
@@ -330,7 +357,7 @@ export const APP_JS = String.raw`"use strict";
 
   function groups() {
     var seen = [];
-    ((board && board.cards) || []).forEach(function (c) {
+    shown.forEach(function (c) {
       if (typeof c.group === "string" && c.group && seen.indexOf(c.group) < 0) seen.push(c.group);
     });
     return seen.length ? seen : ["Inbox"];
@@ -345,13 +372,9 @@ export const APP_JS = String.raw`"use strict";
     return m;
   }
 
-  function updatedText() {
-    if (!board || !board.updated) return "Waiting for your Mac to send the board";
-    var d = parseDate(board.updated);
-    if (!d) return "";
-    var time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-    if (dayStart(d).getTime() === dayStart(new Date()).getTime()) return "Updated " + time;
-    return "Updated " + d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + ", " + time;
+  function waitingText() {
+    var n = typeof board.pending === "number" ? board.pending : 0;
+    return n === 0 ? "" : n === 1 ? "1 change is waiting for your Mac." : n + " changes are waiting for your Mac.";
   }
 
   function cardButton(c) {
@@ -365,7 +388,8 @@ export const APP_JS = String.raw`"use strict";
     var due = dueInfo(c);
     if (due) meta.appendChild(el("span", "due" + (due.late ? " late" : ""), due.label));
     if (c.group) meta.appendChild(el("span", null, c.group));
-    if (c.pending) meta.appendChild(el("span", null, "Waiting for your Mac"));
+    if (c.queued) meta.appendChild(el("span", "wait", "Not synced yet"));
+    else if (c.pending) meta.appendChild(el("span", null, "Waiting for your Mac"));
     body.appendChild(meta);
     b.appendChild(body);
     b.appendChild(marks(c));
@@ -373,22 +397,28 @@ export const APP_JS = String.raw`"use strict";
     return b;
   }
 
+  function statusLine() {
+    return statusText({ waiting: queue.actions.length, offline: isOffline, lastSync: lastSync, now: Date.now() }) || "Syncing…";
+  }
+
   function render() {
     if (!board) return;
+    shown = viewBoard(board, queue.actions).cards;
     STATUSES.forEach(function (s) {
       document.querySelector('[data-count="' + s + '"]').textContent = String(cardsFor(s).length);
       document.querySelector('[data-tab="' + s + '"]').setAttribute("aria-selected", String(s === tab));
     });
-    $("updated").textContent = updatedText();
-    var pending = typeof board.pending === "number" ? board.pending : 0;
-    $("pending-note").hidden = pending === 0;
-    $("pending-note").textContent = pending === 1 ? "1 change is waiting for your Mac." : pending + " changes are waiting for your Mac.";
+    $("sync-status").textContent = statusLine();
+    $("sync-status").classList.toggle("off", isOffline);
+    var w = waitingText();
+    $("pending-note").hidden = !w;
+    $("pending-note").textContent = w;
     var list = $("list");
     list.replaceChildren();
     var cards = cardsFor(tab);
     cards.forEach(function (c) { list.appendChild(cardButton(c)); });
     $("empty").hidden = cards.length > 0;
-    $("empty").textContent = {
+    $("empty").textContent = !board.updated && !shown.length ? "Waiting for your Mac to send the board." : {
       todo: "Nothing to do. Tap + to add a task.",
       doing: "Nothing in progress.",
       watch: "Nothing you're waiting on.",
@@ -396,59 +426,144 @@ export const APP_JS = String.raw`"use strict";
     }[tab];
   }
 
-  function setBoard(b, fromNetwork) {
-    board = b;
-    if (fromNetwork && me && me.account) store(BOARD_KEY, { account: me.account, board: b });
-    $("offline").hidden = !!fromNetwork;
-    render();
+  var noteTimer = 0;
+  function note(text) {
+    if (!text) return;
+    var n = $("sync-note");
+    n.textContent = text;
+    n.hidden = false;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(function () { n.hidden = true; }, 6000);
   }
 
-  async function loadBoard(quiet) {
-    lastLoad = Date.now();
+  function saveQueue() { store(QUEUE_KEY, queue.actions.length ? queue : null); }
+
+  // Forget everything this phone holds for an account: its board, its queue and the ids it sent.
+  function dropAccountData() {
+    board = null;
+    shownAccount = null;
+    queue = { account: null, actions: [] };
+    sentIds = [];
+    store(BOARD_KEY, null);
+    store(QUEUE_KEY, null);
+    store(SENT_KEY, null);
+  }
+
+  // /app/api/me answered: the session's account. Any board or queue of another account is dropped, never shown or sent.
+  function acceptAccount(m) {
+    var cached = load(BOARD_KEY);
+    var other = (cached && !(cached.account === m.account)) || (shownAccount && shownAccount !== m.account) ||
+      (queue.account && queue.account !== m.account);
+    if (other) dropAccountData();
+    me = m;
+    shownAccount = m.account;
+    queue.account = m.account;
+  }
+
+  // A board from the engine (GET /app/api/board or the answer to a batch of actions).
+  function gotBoard(b) {
+    if (b.account && me && b.account !== me.account) {
+      // The session now belongs to another account (signed in elsewhere in this browser): start clean for it.
+      dropAccountData();
+      me.account = b.account;
+      shownAccount = b.account;
+      queue.account = b.account;
+    }
+    board = { updated: b.updated || null, cards: Array.isArray(b.cards) ? b.cards : [], pending: b.pending || 0 };
+    var sup = noticeSuperseded(sentIds, b.superseded);
+    sentIds = sup.sentIds;
+    store(SENT_KEY, sentIds);
+    queue.actions = afterSend(queue.actions, { superseded: b.superseded }).actions;
+    saveQueue();
+    lastSync = Date.now();
+    isOffline = false;
+    if (me && me.account) store(BOARD_KEY, { account: me.account, board: board, at: lastSync });
+    return sup.count;
+  }
+
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(sync, retryDelay(failures));
+  }
+
+  // Send the queue (if any) and get the latest board. Never shows an error: the status line says how things stand.
+  async function sync() {
+    if (current === "pair" || current === "signin") return;
+    if (syncing) { syncAgain = true; return; } // a tap during a sync: go again once this one is done
+    syncing = true;
+    syncAgain = false;
+    clearTimeout(retryTimer);
     var spin = $("refresh").firstElementChild;
     spin.classList.add("spin");
+    var replaced = 0, dropped = 0;
     try {
-      setBoard(await api("/app/api/board"), true);
+      if (!me) acceptAccount(await api("/app/api/me"));
+      var got = false;
+      while (queue.actions.length) {
+        var body = takeBatch(queue.actions, new Date().toISOString());
+        if (!body.actions.length) break;
+        var r = await api("/app/api/action", { method: "POST", body: body });
+        sentIds = rememberSent(sentIds, r.accepted);
+        var after = afterSend(queue.actions, r);
+        queue.actions = after.actions;
+        dropped += after.dropped;
+        saveQueue();
+        replaced += gotBoard(r);
+        got = true;
+      }
+      if (!got) replaced += gotBoard(await api("/app/api/board"));
+      failures = 0;
     } catch (e) {
-      if (e instanceof SignedOut) { showSignIn(); return; }
-      if (offline(e)) {
-        $("offline").hidden = false;
-        if (!quiet) toast("No connection. Showing the last board this phone loaded.");
-      } else if (!quiet) toast(message(e));
+      if (e instanceof SignedOut) { syncing = false; spin.classList.remove("spin"); showSignIn(); return; }
+      isOffline = offline(e);
+      failures += 1;
+      scheduleRetry();
+      if (current === "loading") {
+        $("loading-text").textContent = isOffline ? "Can't reach FloatBoard. Check your internet connection." : message(e);
+        $("retry").hidden = false;
+      }
     } finally {
+      syncing = false;
       spin.classList.remove("spin");
     }
+    if (!board && me) board = { updated: null, cards: [], pending: 0 };
+    if (board && current === "loading") show("board");
+    render();
+    note(replacedText(replaced, dropped));
+    if (syncAgain && failures === 0 && me) { syncAgain = false; sync(); }
   }
 
   async function openBoard() {
-    show("board");
-    if (!me) {
-      try { me = await api("/app/api/me"); } catch (e) {
-        if (e instanceof SignedOut) { showSignIn(); return; }
-      }
-    }
-    // Only a board cached for this same account is shown, and only once /me has confirmed the account.
-    var cached = load(BOARD_KEY);
-    if (cached && me && !(cached.account === me.account)) { store(BOARD_KEY, null); cached = null; }
-    if (!board && cached && me && cached.account === me.account && cached.board) setBoard(cached.board, false);
-    if (!board) setBoard({ updated: null, cards: [], pending: 0 }, false);
-    await loadBoard(true);
+    show("loading");
+    $("loading-text").textContent = "Loading…";
+    $("retry").hidden = true;
+    failures = 0;
+    await sync();
+    if (me) checkPush();
   }
 
-  async function act(body, done) {
-    if (busy) return;
-    busy = true;
-    try {
-      setBoard(await api("/app/api/action", { method: "POST", body: body }), true);
-      closeSheet();
-      toast(done);
-    } catch (e) {
-      if (e instanceof SignedOut) { showSignIn(); return; }
-      if (e.status === 404) { closeSheet(); toast("That task changed on your Mac. Refreshing."); busy = false; await loadBoard(true); return; }
-      toast(message(e));
-    } finally {
-      busy = false;
-    }
+  function newId() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    var b = crypto.getRandomValues(new Uint8Array(16));
+    var h = "";
+    for (var i = 0; i < 16; i++) h += (b[i] < 16 ? "0" : "") + b[i].toString(16);
+    return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+  }
+
+  // A tap: queued with its own id and the time it was made, shown at once, sent as soon as possible.
+  function act(a, done) {
+    var account = me ? me.account : shownAccount;
+    if (!account || !board) return;
+    a.id = newId();
+    a.made_at = new Date().toISOString();
+    queue.account = account;
+    queue.actions.push(a);
+    saveQueue();
+    closeSheet();
+    render();
+    toast(done);
+    failures = 0;
+    sync();
   }
 
   // ------------------------------------------------------------ sheets
@@ -490,7 +605,8 @@ export const APP_JS = String.raw`"use strict";
       var due = dueInfo(c);
       sheet.appendChild(el("p", "sub", [c.group, due ? "Due " + due.label : ""].filter(Boolean).join(" · ")));
       if (c.pending) {
-        sheet.appendChild(el("p", "sub", "Waiting for your Mac. You can move it once your Mac has added it."));
+        sheet.appendChild(el("p", "sub", c.queued ? "Not synced yet. You can move it once your Mac has added it."
+          : "Waiting for your Mac. You can move it once your Mac has added it."));
       } else {
         STATUSES.forEach(function (s) {
           if (s === c.status) return;
@@ -512,6 +628,7 @@ export const APP_JS = String.raw`"use strict";
         a.appendChild(document.createTextNode("Open link"));
         sheet.appendChild(a);
       }
+      sheet.appendChild(el("p", "sub hint", "Edit details on your Mac."));
     });
   }
 
@@ -543,7 +660,7 @@ export const APP_JS = String.raw`"use strict";
         var t = title.value.trim();
         if (!t) { title.focus(); return; }
         tab = "todo";
-        act({ action: "add", title: t, group: group.value }, "Added. It will show on your Mac shortly.");
+        act({ action: "add", title: t.slice(0, 200), group: group.value }, "Added. It will show on your Mac shortly.");
       });
       sheet.appendChild(form);
       setTimeout(function () { title.focus(); }, 50);
@@ -554,10 +671,15 @@ export const APP_JS = String.raw`"use strict";
 
   function pushSupported() { return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window; }
 
+  // The service worker's registration, or null when it isn't running (ready never settles then, so wait at most 4 s).
+  function workerReady() {
+    return Promise.race([navigator.serviceWorker.ready, new Promise(function (r) { setTimeout(function () { r(null); }, 4000); })]);
+  }
+
   async function currentSubscription() {
     if (!pushSupported()) return null;
-    var reg = await navigator.serviceWorker.ready;
-    return reg.pushManager.getSubscription();
+    var reg = await workerReady();
+    return reg ? reg.pushManager.getSubscription() : null;
   }
 
   function notifButtons(on, test, off) {
@@ -590,7 +712,7 @@ export const APP_JS = String.raw`"use strict";
         status.textContent = "Notifications are on for this phone. Urgent tasks will show on your lock screen.";
         notifButtons(false, true, true);
       } else {
-        status.textContent = "Notifications are off. Turn them on to hear about urgent tasks.";
+        status.textContent = "Notifications are off on this phone. Turn them on to hear about urgent tasks.";
         notifButtons(true, false, false);
       }
     } catch (e) {
@@ -601,6 +723,19 @@ export const APP_JS = String.raw`"use strict";
 
   async function sendSubscription(sub) {
     await api("/app/api/push/subscribe", { method: "POST", body: sub.toJSON() });
+  }
+
+  // At start: notifications were allowed but the browser has no subscription any more (it can drop one): make a new one
+  // quietly. Asking for permission needs a tap, so a phone that never allowed them is left to Settings.
+  async function checkPush() {
+    try {
+      if (!pushSupported() || Notification.permission !== "granted" || (isIOS && !standalone())) return;
+      var reg = await workerReady();
+      if (!reg || await reg.pushManager.getSubscription()) return;
+      var key = (await api("/app/api/push/key")).key;
+      var sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromB64url(key) });
+      await sendSubscription(sub);
+    } catch (e) { /* Settings shows "Notifications are off on this phone" */ }
   }
 
   async function turnOn() {
@@ -615,7 +750,8 @@ export const APP_JS = String.raw`"use strict";
         return;
       }
       var key = (await api("/app/api/push/key")).key;
-      var reg = await navigator.serviceWorker.ready;
+      var reg = await workerReady();
+      if (!reg) throw new Error("The app is still starting. Close it, open it again and try once more.");
       var sub = await reg.pushManager.getSubscription();
       var old = sub && sub.options && sub.options.applicationServerKey;
       if (sub && (!old || toB64url(old) !== key)) { await sub.unsubscribe(); sub = null; }
@@ -682,7 +818,7 @@ export const APP_JS = String.raw`"use strict";
   function openSettings() {
     show("settings");
     $("who").textContent = me && me.device ? "This phone: " + me.device : "";
-    if (!me) api("/app/api/me").then(function (m) { me = m; $("who").textContent = "This phone: " + m.device; }).catch(function (e) {
+    if (!me) api("/app/api/me").then(function (m) { acceptAccount(m); $("who").textContent = "This phone: " + m.device; render(); }).catch(function (e) {
       if (e instanceof SignedOut) showSignIn();
     });
     renderNotifications();
@@ -700,8 +836,11 @@ export const APP_JS = String.raw`"use strict";
           await sub.unsubscribe();
         }
       } catch (e) { /* best effort */ }
+      // Changes still waiting get one last chance to go before the queue is dropped with the rest of this account's data.
+      if (queue.actions.length && me) await sync();
       await api("/app/api/logout", { method: "POST", body: {} });
       busy = false;
+      dropAccountData();
       showSignIn();
     } catch (e) {
       if (e instanceof SignedOut) { busy = false; showSignIn(); return; }
@@ -721,17 +860,28 @@ export const APP_JS = String.raw`"use strict";
       history.replaceState(null, "", location.pathname + location.search);
     }
     if (sessionGet(PAIR_KEY)) { showPair(); return; }
-    show("loading");
-    $("loading-text").textContent = "Loading…";
-    $("retry").hidden = true;
-    try {
-      me = await api("/app/api/me");
-      await openBoard();
-    } catch (e) {
-      if (e instanceof SignedOut) { showSignIn(); return; }
-      $("loading-text").textContent = offline(e) ? "Can't reach FloatBoard. Check your internet connection." : message(e);
-      $("retry").hidden = false;
+    var q = load(QUEUE_KEY);
+    queue = q && typeof q.account === "string" && Array.isArray(q.actions) ? q : { account: null, actions: [] };
+    var sent = load(SENT_KEY);
+    sentIds = Array.isArray(sent) ? sent : [];
+    me = null;
+    // Offline first: the last board of the account last confirmed on this phone shows at once, labelled with when it was
+    // synced, while /app/api/me and the board load. If /me names another account, acceptAccount drops it.
+    var cached = load(BOARD_KEY);
+    if (cached && typeof cached.account === "string" && cached.board && Array.isArray(cached.board.cards) &&
+        (!queue.account || queue.account === cached.account)) {
+      shownAccount = cached.account;
+      board = cached.board;
+      lastSync = typeof cached.at === "number" ? cached.at : 0;
+      queue.account = cached.account;
+      show("board");
+      render();
+      failures = 0;
+      await sync();
+      if (me) checkPush();
+      return;
     }
+    await openBoard();
   }
 
   STATUSES.forEach(function (s) {
@@ -741,7 +891,7 @@ export const APP_JS = String.raw`"use strict";
   $("pair-skip").addEventListener("click", function () { sessionSet(PAIR_KEY, null); start(); });
   $("signin-go").addEventListener("click", signIn);
   $("retry").addEventListener("click", start);
-  $("refresh").addEventListener("click", function () { loadBoard(false); });
+  $("refresh").addEventListener("click", function () { failures = 0; sync(); });
   $("open-settings").addEventListener("click", openSettings);
   $("close-settings").addEventListener("click", function () { show("board"); render(); });
   $("add").addEventListener("click", addSheet);
@@ -754,12 +904,19 @@ export const APP_JS = String.raw`"use strict";
   function refreshSoon() {
     if (document.visibilityState !== "visible") return;
     if (reloadWhenIdle && !busy && !sheetOpen) { location.reload(); return; }
-    if (current === "board" && !busy && !sheetOpen && Date.now() - lastLoad > 3000) loadBoard(true);
+    if (current === "board" || current === "settings" || (current === "loading" && !$("retry").hidden)) { failures = 0; sync(); }
     if (current === "settings") renderNotifications();
   }
+  // Retry at once when the phone comes back online or the app comes back to the front.
   document.addEventListener("visibilitychange", refreshSoon);
   window.addEventListener("focus", refreshSoon);
   window.addEventListener("online", refreshSoon);
+  window.addEventListener("offline", function () { isOffline = true; render(); });
+  // While the app is open and in front: the latest board every minute (sync skips while a retry is waiting its turn).
+  setInterval(function () {
+    if (document.visibilityState !== "visible" || failures > 0) { render(); return; }
+    if (current === "board" || current === "settings") sync();
+  }, REFRESH_MS);
 
   if ("serviceWorker" in navigator) {
     var hadController = !!navigator.serviceWorker.controller;
