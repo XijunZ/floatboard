@@ -175,9 +175,10 @@ async function boardBody(env: Env, userId: string, deviceId: string) {
     pending: waiting?.n ?? 0, superseded };
 }
 
-const logStmt = (env: Env, r: { id: string; userId: string; device: string; cardId: number | null; kind: string; value: string | null; madeAt: string; receivedAt: string }) =>
-  env.DB.prepare("INSERT OR IGNORE INTO board_log(id,user_id,device,card_id,kind,value,made_at,received_at) VALUES(?,?,?,?,?,?,?,?)")
-    .bind(r.id, r.userId, r.device, r.cardId, r.kind, r.value, r.madeAt, r.receivedAt);
+const logStmt = (env: Env, r: { id: string; userId: string; device: string; cardId: number | null; kind: string; value: string | null; madeAt: string;
+    receivedAt: string; clientId?: string | null }) =>
+  env.DB.prepare("INSERT OR IGNORE INTO board_log(id,user_id,device,card_id,kind,value,made_at,received_at,client_id) VALUES(?,?,?,?,?,?,?,?,?)")
+    .bind(r.id, r.userId, r.device, r.cardId, r.kind, r.value, r.madeAt, r.receivedAt, r.clientId ?? null);
 
 /** Mark a waiting action superseded and log it (the log row id is derived from the action, so it is written once). */
 function supersedeStmts(env: Env, userId: string, a: { id: string; client_id: string | null; card_id: number | null }, device: string, at: string) {
@@ -346,7 +347,7 @@ async function store(env: Env, userId: string, deviceId: string, list: NewAction
     stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO phone_actions(id,user_id,card_id,action,title,group_name,created,taken,client_id,device_id,made_at,sent_at)
         VALUES(?,?,?,?,?,?,?,0,?,?,?,?)`).bind(id, userId, a.card_id, a.action, a.title, a.group, now, a.clientId, deviceId, a.madeAt, sentAt));
     stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : "status",
-      value: a.action === "add" ? await encrypt(env, a.title!) : a.action, madeAt: a.madeAt, receivedAt: now }));
+      value: a.action === "add" ? await encrypt(env, a.title!) : a.action, madeAt: a.madeAt, receivedAt: now, clientId: a.clientId }));
     if (a.superseded) stmts.push(...supersedeStmts(env, userId, { id, client_id: a.clientId, card_id: a.card_id }, deviceId, now));
   }
   if (stmts.length) await env.DB.batch(stmts);
@@ -365,13 +366,16 @@ async function everSeen(env: Env, userId: string, cardIds: number[]): Promise<Se
   return seen;
 }
 
-/** Action ids (the phone's own) this user has already sent. */
+/** Action ids (the phone's own) this user has already sent: in the queue (acked rows are kept 7 days) or in the board log
+ *  (kept a year), so a late resend after the queue row was purged is still ignored. */
 async function known(env: Env, userId: string, clientIds: string[]): Promise<Set<string>> {
   const seen = new Set<string>();
-  for (let i = 0; i < clientIds.length; i += 50) {
-    const part = clientIds.slice(i, i + 50);
-    const rows = await env.DB.prepare(`SELECT client_id FROM phone_actions WHERE user_id=? AND client_id IN (${part.map(() => "?").join(",")})`)
-      .bind(userId, ...part).all<{ client_id: string }>();
+  for (let i = 0; i < clientIds.length; i += 40) {
+    const part = clientIds.slice(i, i + 40);
+    const q = part.map(() => "?").join(",");
+    const rows = await env.DB.prepare(`SELECT client_id FROM phone_actions WHERE user_id=? AND client_id IN (${q})
+        UNION SELECT client_id FROM board_log WHERE user_id=? AND client_id IN (${q})`)
+      .bind(userId, ...part, userId, ...part).all<{ client_id: string }>();
     for (const r of rows.results) seen.add(r.client_id);
   }
   return seen;
