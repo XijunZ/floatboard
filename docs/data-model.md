@@ -233,8 +233,9 @@ can serve several people; each person's data is separate). `meeting_tasks` (0001
 | **Sign-in challenge** | `app_challenges` | A passkey sign-in in progress (valid 5 minutes, used once; at most 20 live per client address, 2000 in all). | `id`, `challenge`, `purpose` (login), `expires`, `used`, `ip_hash` (SHA-256 of the client address). |
 | **Push subscription** | `app_push` | A device's Web Push subscription (one per device, and one device per endpoint; known push services only; deleted when the push service says it is gone, or when the device is removed or turns notifications off, or another device saves the same endpoint). | `device_id`, `user_id`, `endpoint` (push service address, unique), `p256dh` (phone public key), `auth` (phone auth secret), `origin` (engine address it subscribed on), `created`. |
 | **Engine key** | `app_keys` | Keys the engine makes for itself on first use: the Web Push (VAPID) key pair. | `name` (vapid), `value_enc` (private key, encrypted), `created`. |
-| **Board copy** | `board_snapshots` | The Mac's open tasks plus tasks done today, pushed for the phone to read (encrypted JSON, replaced on each push, at most 500 cards). | `user_id`, `data_enc`, `updated`. |
-| **Phone action** | `phone_actions` | A change made on the phone (move a task, add a task) waiting for the Mac to apply it. | `id`, `user_id`, `card_id` (empty for add), `action` (todo, doing, watch, done, add), `title`, `group_name`, `created`, `taken` (1 once the Mac acked it). |
+| **Board copy** | `board_snapshots` | The Mac's open tasks plus tasks done today, pushed for the phone to read (encrypted JSON, replaced on each push, at most 500 cards). Each card keeps `status_at`, when its step last changed on the Mac (on the engine's clock). | `user_id`, `data_enc`, `updated`. |
+| **Phone action** | `phone_actions` | A change made on the phone (move a task, add a task) waiting for the Mac to apply it. | `id`, `user_id`, `card_id` (empty for add), `action` (todo, doing, watch, done, add), `title`, `group_name`, `created`, `taken` (1 once the Mac acked it or it was superseded), `client_id` (the phone's own action id, unique per user: a repeat is applied once), `device_id`, `made_at` (when it was made, corrected for the phone's clock), `sent_at` (the phone's clock when it sent it), `outcome` (empty, or why it was not applied: superseded or the Mac's skip reason). |
+| **Board log** | `board_log` | Every board change from any device, kept 1 year: the Mac's step changes, cards that appeared or went (seen by comparing pushes), the phone's moves and adds, and moves that were superseded or skipped. | `id`, `user_id`, `device` (mac, or the phone's device id), `card_id` (empty for a phone add), `kind` (status, add, gone, superseded, skipped), `value` (the new step; for add the title, encrypted; for superseded and skipped the action id and reason), `made_at` (corrected for the device's clock), `received_at`. |
 
 Relationships:
 
@@ -256,6 +257,9 @@ Relationships:
 | Phone passkey | Phone | 1 to many (a synced passkey signs in several browsers) | `app_devices.credential_id` |
 | Phone | Phone passkey, Phone session | 1 to many | `device_id` |
 | Phone | Push subscription | 1 to 0..1 | `app_push.device_id` |
+| User | Board copy | 1 to 0..1 | `board_snapshots.user_id` |
+| User | Phone action, Board log row | 1 to many | `phone_actions.user_id`, `board_log.user_id` |
+| Phone | Phone action, Board log row | 1 to many | `phone_actions.device_id`, `board_log.device` |
 
 ```mermaid
 erDiagram
@@ -434,5 +438,5 @@ How each proposal kind lands in the board:
 | Engine `setup_attempts`, `setup_log` | `ip`, `detail` | Network address | Attempts pruned after 24 hours; log kept. |
 | Engine `app_devices`, `app_credentials`, `app_sessions`, `app_pairings`, `app_challenges` | `name`, `public_key`, hashes | Device name, public keys, hashed tokens, install ids and client addresses (no secrets in clear) | Sessions, codes and challenges deleted when expired; removed devices keep only the revoked device row; a passkey is deleted when no paired device uses it. |
 | Engine `app_push`, `app_keys` | `endpoint`, `p256dh`, `auth`, `value_enc` | Push addresses and phone keys; engine private key (encrypted) | Subscription deleted when gone, turned off or the phone is removed; the key pair is kept. |
-| Engine `board_snapshots`, `phone_actions` | `data_enc`, `title`, `group_name` | Task titles and groups (snapshot encrypted; queued phone actions in clear) | Snapshot replaced on each push; acked actions deleted after 7 days. |
+| Engine `board_snapshots`, `phone_actions`, `board_log` | `data_enc`, `title`, `group_name`, `value` | Task titles and groups (snapshot and log titles encrypted; queued phone actions in clear) | Snapshot replaced on each push; acked actions deleted after 7 days; log rows deleted after 1 year. |
 | Code (this repository) | None | | Enforced by `.gitignore`, `.example` templates and the pre-commit deny-list. |

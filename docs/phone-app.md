@@ -47,7 +47,8 @@ second channel, so alerts no longer depend on Telegram.
 3. **Board mirror:** the Mac `PUT /v2/board` with its open tasks plus tasks done today (id, title, group, group colour,
    importance, due, has_time, status, link), at most 500, after each local change (debounced 10 s) and on every sync.
 4. **Phone actions:** `POST /app/api/action` `{card_id, action: todo|doing|watch|done}` or `{action: add, title, group}`.
-   Queued in `phone_actions` and also applied to the stored copy so the phone shows it at once. The Mac polls
+   Queued in `phone_actions`; the phone sees it through the overlay at once (sync v2: the stored copy is never changed
+   by the phone, and a batch shape carries the phone's action ids and times, see below). The Mac polls
    `GET /v2/phone-actions` every 2 minutes (and on each sync), applies them (as the user, so connector "done" events
    still go to the engine) and acks with `POST /v2/phone-actions/ack`. Unknown or deleted card ids are acked and logged.
 5. **Web Push:** RFC 8291 (aes128gcm) + RFC 8292 (VAPID, ES256) written with WebCrypto, tested against RFC 8291's
@@ -171,3 +172,24 @@ add a task. Editing details (title, notes, due, importance, group, delete) is Ma
 Checks (engine and Mac): duplicate action id applied once; phone action older than the Mac's change loses (both on the
 engine's board and when the Mac applies it); newer phone action wins; skew correction (phone clock 2 h fast, action
 queued offline 3 h); action on a card deleted on the Mac is dropped and logged; Mac push logs its own changes.
+
+### Sync v2 engine contract (built)
+
+Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (unique per user), `device_id`,
+`made_at`, `sent_at`, `outcome`.
+
+- `PUT /v2/board` `{ sent_at?, cards: [{ ...card, status_at? }] }`. A missing `status_at` keeps the previous time when
+  the step is unchanged, else the push time. Each push is compared with the last one: step changes, new cards and gone
+  cards are logged (device "mac"); the first push is the baseline. Waiting phone moves older than a card's new
+  `status_at` are marked taken (the Mac already shows that step) or superseded.
+- `POST /app/api/action` `{ sent_at?, actions: [{ id, made_at?, card_id?, action, title?, group? }] }` (1 to 100; body
+  at most 64 KB; the older single action still works). Times are corrected by `received_at - sent_at` (ignored past
+  7 days) and never later than `received_at`. A repeated id is accepted and not stored again. A move older than the
+  card's `status_at` is stored as superseded. Dropped: `invalid`, `unknown card`, `card gone`. A batch that would take
+  the waiting queue past 200 is refused whole (429). Ties go to the phone.
+- `GET /app/api/board` and the action response: `{ updated, server_time, account, cards (with status_at; pending cards
+  carry action_id), pending, superseded }` (+ `accepted`, `dropped` on the action response). `superseded` lists this
+  phone's action ids that were not applied (a newer change won or the Mac skipped them; newest 200).
+- `GET /v2/phone-actions`: `{ server_time, actions: [{ id, client_id, card_id, action, title, group, created, made_at }] }`.
+  `POST /v2/phone-actions/ack` `{ ids?, skipped?: [{ id, reason? }] }`: skipped ones are logged and reported to the phone.
+- Hourly: `board_log` rows older than 365 days are deleted.

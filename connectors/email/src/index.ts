@@ -16,7 +16,7 @@ import { alertFor } from "./alerts";
 import { telegramWebhook, userBotWebhook } from "./telegram";
 import { ingestOutlook, judgeOutlookNow } from "./outlook";
 import { appJSON, handleAppAuth, purgeExpiredApp } from "./app/auth";
-import { handleBoard, purgePhoneActions } from "./app/board";
+import { handleBoard, purgeBoardLog, purgePhoneActions } from "./app/board";
 import { handlePush } from "./app/webpush";
 import { handleAppStatic } from "./app/static";
 
@@ -118,6 +118,7 @@ export async function runAllUsers(
     await purgeExpiredSetup(env);
     await purgeExpiredApp(env);
     await purgePhoneActions(env);
+    await purgeBoardLog(env);
   } catch (e) {
     const msg = `Could not purge expired setup sessions: ${(e as Error)?.message ?? e}`.slice(0, 500);
     log("setup_purge_failed", { error: msg });

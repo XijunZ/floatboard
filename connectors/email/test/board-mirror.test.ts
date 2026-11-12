@@ -43,7 +43,7 @@ describe("board mirror", () => {
 
   it("no_snapshot_yet_gives_an_empty_board", async () => {
     const u = await setup();
-    expect(await (await board(u.cookie)).json()).toEqual({ updated: null, cards: [], pending: 0 });
+    expect(await (await board(u.cookie)).json()).toEqual({ updated: null, server_time: expect.any(String), account: expect.any(String), cards: [], pending: 0, superseded: [] });
   });
 
   it("a_move_is_applied_to_the_stored_copy_and_listed_for_the_mac", async () => {
