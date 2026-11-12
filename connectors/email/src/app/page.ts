@@ -86,6 +86,11 @@ display:flex;flex-direction:column;gap:10px;max-height:85vh;overflow:auto;animat
 .sheet .sub{margin:0 4px 6px;color:var(--muted);font-size:14px}
 .sheet .hint{margin:2px 4px 0;text-align:center}
 .sheet .act{justify-content:flex-start;background:var(--surface);color:var(--text);font-weight:500}
+.sheet .hit{flex-direction:column;align-items:flex-start;gap:2px;text-align:left}
+.sheet .hit .hs{font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sheet .hit .hd{font-size:13px;color:var(--muted);font-weight:400;overflow-wrap:anywhere}
+.sheet form.find{display:flex;gap:8px}
+.sheet form.find .btn{width:auto;flex:none}
 @keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
 .toast{position:fixed;left:16px;right:16px;bottom:calc(96px + env(safe-area-inset-bottom));z-index:30;margin:0 auto;max-width:520px;
 background:var(--text);color:var(--bg);padding:12px 16px;border-radius:14px;text-align:center;box-shadow:var(--shadow)}
@@ -172,7 +177,7 @@ const BODY = `${ICONS}
 </div>
 <h2>Phone and Mac</h2>
 <div class="group">
-<p class="muted small">Move tasks, add tasks and open links here. Mac only: editing or deleting tasks, notes, reply drafts, calendar and settings.</p>
+<p class="muted small">Move tasks, add tasks, open links and link an email here. Mac only: editing or deleting tasks, notes, reply drafts, calendar and settings.</p>
 </div>
 <h2>This phone</h2>
 <div class="group">

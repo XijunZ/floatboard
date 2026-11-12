@@ -17,6 +17,9 @@
  *   to the step the card was on. Adds can't be undone (the phone has no delete).
  * - `cardLinks(card)`, `linkLabel(link)`: the task sheet's link buttons (every web link the Mac sent, or the older
  *   single `link`).
+ * - `emailChoice(card)`, `linkAction(card, hit, id, nowIso)`, `hitLines(hit, nowMs)`: "Link an email" on a task the
+ *   user made ("Remove email link" once they linked one; neither on the email sorting's own tasks), the queued action
+ *   for a picked search result, and the two lines a result shows.
  *
  * Kept as a string: no backticks or dollar-brace inside.
  */
@@ -44,6 +47,11 @@ export const SYNC_JS = String.raw`
       }
       for (var i = 0; i < cards.length; i++) {
         var c = cards[i];
+        if (c.id === a.card_id && !c.pending && (a.action === "link_email" || a.action === "unlink_email")) {
+          if (a.action === "link_email") c.email = "user"; else delete c.email;
+          c.queued = true;
+          break;
+        }
         if (c.id === a.card_id && !c.pending) {
           if (c.status !== a.action) c.done_at = a.action === "done" ? a.made_at : null;
           c.status = a.action;
@@ -72,6 +80,7 @@ export const SYNC_JS = String.raw`
       var a = actions[i];
       var item = { id: a.id, made_at: a.made_at, action: a.action };
       if (a.action === "add") { item.title = a.title; if (a.group) item.group = a.group; } else item.card_id = a.card_id;
+      if (a.action === "link_email") { item.message_id = a.message_id; item.gmail_id = a.gmail_id; item.account = a.account; item.sent_at = a.sent_at || null; }
       var n = byteLength(JSON.stringify(item)) + 1;
       if (out.length && size + n > BATCH_BYTES) break;
       size += n;
@@ -158,7 +167,7 @@ export const SYNC_JS = String.raw`
 
   // A move just queued, kept so it can be undone; null when there is nothing to undo (an add, a pending card, no change).
   function undoFor(card, move, nowMs) {
-    if (!card || card.pending || !move || move.action === "add" || card.id !== move.card_id || card.status === move.action) return null;
+    if (!card || card.pending || !move || !STEP_NAMES[move.action] || card.id !== move.card_id || card.status === move.action) return null;
     return { card_id: card.id, from: card.status, to: move.action, made_at: move.made_at, at: nowMs };
   }
 
@@ -204,6 +213,34 @@ export const SYNC_JS = String.raw`
     return l.label === "calendar" ? "Open calendar" : "Open link";
   }
 
+  // "link" (Link an email), "unlink" (Remove email link) or null: never on the sorting's own tasks or a task not on the
+  // Mac yet; a task with an email link from an older Mac (which does not say who linked it) gets neither.
+  function emailChoice(c) {
+    if (!c || c.pending) return null;
+    if (c.email === "user") return "unlink";
+    if (c.email === "sorting") return null;
+    var hasEmail = Array.isArray(c.links) && c.links.some(function (l) { return l && l.kind === "email"; });
+    return hasEmail ? null : "link";
+  }
+
+  function linkAction(c, hit, id, nowIso) {
+    return { id: id, made_at: nowIso, card_id: c.id, action: "link_email", message_id: hit.message_id, gmail_id: hit.gmail_id,
+      account: hit.account, sent_at: hit.sent_at || null };
+  }
+
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function hitLines(hit, nowMs) {
+    var from = String(hit.from || "");
+    var name = from.replace(/<[^>]*>\s*$/, "").replace(/^\s*"|"\s*$/g, "").trim() || from.trim();
+    var t = Date.parse(hit.sent_at || hit.date || "");
+    var day = "";
+    if (!isNaN(t)) {
+      var d = new Date(t);
+      day = d.getDate() + " " + MONTHS[d.getMonth()] + (d.getFullYear() !== new Date(nowMs).getFullYear() ? " " + d.getFullYear() : "");
+    }
+    return { subject: String(hit.subject || "").trim() || "(no subject)", detail: [name, day].filter(Boolean).join(" · ") };
+  }
+
   function replacedText(superseded, dropped, rejected) {
     var parts = [];
     if (superseded) parts.push(superseded === 1 ? "1 change was replaced by a newer change on your Mac" : superseded + " changes were replaced by newer changes on your Mac");
@@ -215,4 +252,4 @@ export const SYNC_JS = String.raw`
 
 /** Names the tests pull out of SYNC_JS. */
 export const SYNC_EXPORTS = ["viewBoard", "takeBatch", "sendBatch", "afterSend", "rememberSent", "noticeSuperseded", "retryDelay", "statusText",
-  "replacedText", "byteLength", "undoFor", "undoLive", "undoText", "undoAction", "cardLinks", "linkLabel"];
+  "replacedText", "byteLength", "undoFor", "undoLive", "undoText", "undoAction", "cardLinks", "linkLabel", "emailChoice", "linkAction", "hitLines"];

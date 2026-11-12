@@ -20,6 +20,8 @@
  * - After a move, a bar says "Moved to Done · Undo" for 8 seconds; Undo queues a new move back (its own id and time).
  * - The task sheet has a button per link the Mac sent ("Join meeting", "Open email", "Open calendar", "Open link"),
  *   each opening in a new tab or app.
+ * - "Link an email" on a task the user made opens a search of their Gmail (subject, sender and day only); picking a
+ *   result queues a link_email action for the Mac. "Remove email link" queues unlink_email.
  * - The queue logic is in src/app/sync-logic.ts (pure functions, tested on their own).
  *
  * Kept as a string: no backticks or dollar-brace inside (apart from the SYNC_JS insert).
@@ -658,6 +660,17 @@ ${SYNC_JS}
           sheet.appendChild(b);
         });
       }
+      var choice = emailChoice(c);
+      if (choice) {
+        var eb = el("button", "btn act");
+        eb.appendChild(icon("mail"));
+        eb.appendChild(document.createTextNode(choice === "link" ? "Link an email" : "Remove email link"));
+        eb.addEventListener("click", function () {
+          if (choice === "link") emailSheet(c);
+          else act({ card_id: c.id, action: "unlink_email" }, "Email link removed. Your Mac will update the task.");
+        });
+        sheet.appendChild(eb);
+      }
       cardLinks(c).forEach(function (l) {
         var href = safeLink(l.url);
         if (!href) return;
@@ -671,6 +684,68 @@ ${SYNC_JS}
         sheet.appendChild(a);
       });
       sheet.appendChild(el("p", "sub hint", "Edit details on your Mac."));
+    });
+  }
+
+  // Search the user's Gmail and link the email they pick to the task (the Mac attaches it).
+  function emailSheet(c) {
+    openSheet(function (sheet) {
+      sheet.appendChild(el("h3", null, "Link an email"));
+      sheet.appendChild(el("p", "sub", c.title));
+      var form = el("form", "find");
+      var q = el("input");
+      q.type = "text";
+      q.maxLength = 100;
+      q.autocomplete = "off";
+      q.enterKeyHint = "search";
+      q.placeholder = "Subject, sender or any words";
+      q.setAttribute("aria-label", "Search your email");
+      var go = el("button", "btn", "Search");
+      go.type = "submit";
+      form.appendChild(q);
+      form.appendChild(go);
+      sheet.appendChild(form);
+      var status = el("p", "sub");
+      status.setAttribute("aria-live", "polite");
+      sheet.appendChild(status);
+      var results = el("div");
+      results.style.display = "flex";
+      results.style.flexDirection = "column";
+      results.style.gap = "8px";
+      sheet.appendChild(results);
+      var seq = 0;
+      form.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var text = q.value.trim();
+        if (!text) { q.focus(); return; }
+        var mine = ++seq;
+        go.disabled = true;
+        status.textContent = "Searching…";
+        results.textContent = "";
+        try {
+          var r = await api("/app/api/emails/search?q=" + encodeURIComponent(text.slice(0, 100)));
+          if (mine !== seq) return;
+          var hits = Array.isArray(r.results) ? r.results : [];
+          var problems = (Array.isArray(r.errors) ? r.errors : []).map(function (x) { return "Couldn't search " + x.account + ": " + x.error; });
+          status.textContent = [hits.length ? "" : "No emails found.", problems.join(" ")].filter(Boolean).join(" ");
+          hits.forEach(function (h) {
+            var lines = hitLines(h, Date.now());
+            var b = el("button", "btn act hit");
+            b.appendChild(el("span", "hs", lines.subject));
+            b.appendChild(el("span", "hd", lines.detail));
+            b.addEventListener("click", function () {
+              act(linkAction(c, h, newId(), new Date().toISOString()), "Linked. Your Mac will attach the email.");
+            });
+            results.appendChild(b);
+          });
+        } catch (err) {
+          if (err instanceof SignedOut) { closeSheet(); showSignIn(); return; }
+          if (mine === seq) status.textContent = message(err);
+        } finally {
+          if (mine === seq) go.disabled = false;
+        }
+      });
+      setTimeout(function () { q.focus(); }, 50);
     });
   }
 
