@@ -14,7 +14,7 @@ To do / Doing / Done board with groups, due dates, importance and timestamps.
 | Folder | What it is |
 |---|---|
 | `app/` | The Mac app (Swift). `FloatBoardCore` is the offline board, database, backups and health checks. |
-| `connectors/email/` | An optional email connector: a Cloudflare Worker you run yourself. See its [README](connectors/email/README.md). |
+| `connectors/email/` | An optional email connector: a Cloudflare Worker you run yourself. It also serves the phone app (Android and iPhone). See its [README](connectors/email/README.md). |
 | `connectors/outlook-web/` | Build plan for an Outlook on the web connector (a Chrome extension). See [PLAN.md](connectors/outlook-web/PLAN.md). |
 | `docs/` | The data model: every local data location and how each data point links into which field ([data-model.md](docs/data-model.md)). |
 

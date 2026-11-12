@@ -18,6 +18,7 @@ import { ingestOutlook, judgeOutlookNow } from "./outlook";
 import { appJSON, handleAppAuth, purgeExpiredApp } from "./app/auth";
 import { handleBoard, purgePhoneActions } from "./app/board";
 import { handlePush } from "./app/webpush";
+import { handleAppStatic } from "./app/static";
 
 async function createUser(req: Request, env: Env): Promise<Response> {
   const rb = await readJSON(req);
@@ -79,6 +80,9 @@ export default {
       // Phone app: signed in by the fb_session cookie only (never the user key).
       return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handlePush(req, env)) ?? appJSON({ error: "not found" }, 404);
     }
+    // Phone app page, script, service worker, manifest and icons (no sign-in needed).
+    const appFile = handleAppStatic(req);
+    if (appFile) return appFile;
     if (url.pathname.startsWith("/v2/")) {
       const user = await authUser(req, env);
       if (!user) return json({ error: "unauthorized" }, 401);
