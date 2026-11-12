@@ -18,7 +18,8 @@ import { type Message, type Source, SourceAuthError, type SourceRow } from "./so
 
 export const BATCH_SIZE = 10;
 
-export type AlertItem = { id: string; title: string; why: string; sender: string; due: string | null; link: string };
+/** One alert. `reminder` marks a due reminder for a task ("Due 14:30" in `why`): not email text, so ntfy may show it. */
+export type AlertItem = { id: string; title: string; why: string; sender: string; due: string | null; link: string; reminder?: boolean };
 
 export type RunOptions = {
   budget?: number;                             // max messages per pass
