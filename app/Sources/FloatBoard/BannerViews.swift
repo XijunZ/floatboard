@@ -53,10 +53,7 @@ struct BannerView: View {
                 .help("Needs attention — click to open " + (problems.contains(where: \.isAppWide) ? "Activity" : "Connectors") + "\n" + problems.map(\.message).joined(separator: "\n"))
             }
             // Overview of everything open, regardless of the bar's filters.
-            Text(ui.bar.countLabel(store.active))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .fixedSize()
+            BarCount(open: store.active)
             Divider().frame(height: 14)
             if ui.quickAdding {
                 QuickAddField()
@@ -79,6 +76,40 @@ struct BannerView: View {
             BarButton("xmark", "Close (⌃⌥B or menu bar icon to reopen)") { ui.mode = .hidden }
         }
         .padding(.horizontal, 8)
+    }
+}
+
+/// The count at the left of the bar. Split by step it shows icons in the board's column order (○ to do, ◐ doing,
+/// 👁 watch, the last only when there is one); otherwise "7 tasks". The words are in the tooltip.
+struct BarCount: View {
+    @EnvironmentObject var ui: UIState
+    let open: [Card]
+
+    var body: some View {
+        let label = ui.bar.countLabel(open)
+        Group {
+            if ui.bar.splitCount ?? false {
+                let n = { (s: Status) in open.filter { $0.status == s }.count }
+                HStack(spacing: 8) {
+                    part(Status.todo.icon, n(.todo))
+                    part(Status.doing.icon, n(.doing))
+                    if n(.watch) > 0 { part(Status.watch.icon, n(.watch)) }
+                }
+            } else {
+                Text(label)
+            }
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(.secondary)
+        .fixedSize()
+        .help(label)
+    }
+
+    private func part(_ icon: String, _ count: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            Text("\(count)").monospacedDigit()
+        }
     }
 }
 

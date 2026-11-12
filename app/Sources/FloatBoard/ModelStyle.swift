@@ -64,3 +64,15 @@ enum UrgencyStyle {
     static let ringColor = Color.red
     static let ringStyle = StrokeStyle(lineWidth: 1.5, dash: [2.5, 2.5])
 }
+
+extension Status {
+    /// SF Symbol for the step: ○ to do, ◐ doing, 👁 watch, ✓ done.
+    var icon: String {
+        switch self {
+        case .todo: "circle"
+        case .doing: "circle.lefthalf.filled"
+        case .watch: "eye"
+        case .done: "checkmark.circle"
+        }
+    }
+}
