@@ -218,13 +218,64 @@ Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (
   (`test/phone-sync.test.ts`). Layout checked in headless Chrome at 360, 390 and 430 px, light and dark, long, CJK and
   unbroken titles, 34 tasks in one tab (titles clamp at 3 lines on the list, full in the sheet).
 
-## Database size: warning and archive to the Mac (next, after sync v2)
+## Database size: warning and archive to the Mac (built)
 
-- **Size on the setup page** (from D1's `meta.size_after` on a cheap query): shown always; a warning above 250 MB
-  (D1 free limit is 500 MB per database).
-- **Archive old data to this Mac** (Mac app, Connectors tab, per user): choose a cut-off (default 6 months, minimum
-  3 months). `GET /v2/archive?before=<ISO>` returns that user's `board_log` rows and finished/old `items` older than the
-  cut-off (paged). The Mac writes them to `archives/engine-<date>.json` beside the board (verified by re-reading), then
-  `POST /v2/archive/confirm {before, count, sha256}`; the engine deletes exactly those rows only when count and hash
-  match. Items newer than 3 months are never archived (they stop the same email making a task twice). Checks: other
-  user's rows never returned or deleted; mismatch deletes nothing; interrupted archive deletes nothing.
+- **Size on the setup page** (from D1's `meta.size_after` on `SELECT 1`, else `PRAGMA page_count` * `page_size`): shown
+  always ("Database: 1.4 MB of 500 MB"); above 250 MB a warning points to the Mac's archive button (D1 free limit is
+  500 MB per database). `GET /v2/status` carries it as `db_size_bytes` (a number, or null when D1 doesn't say). It is the
+  whole engine database, all users.
+- **Archive old data to this Mac** (Mac app, Connectors tab, per connector and per user): the card shows the engine's
+  database size and "Archive old data to this Mac…". The sheet offers a cut-off of 3, 6 (default) or 12 months
+  (never less than 92 days back), says in two lines what happens, and shows progress and the result ("Saved 1,234
+  entries to engine-email-2026-11-12.jsonl; removed from the engine."), with Show in Finder.
+
+### Archive engine contract (built)
+
+Migration `0030_archive.sql`: `archived_items(user_id, message_id, archived_at)` (tombstones), `board_log.client_id`
+(see fixes below), indexes `board_log(user_id, id)` and `items(user_id, id)`.
+
+- **One run** is the first 2,000 rows of this user's archivable rows, in this order: `board_log` rows with
+  `received_at` before `before`, by id; then `items` rows with `created` before `before`, by id. `before` must be at least
+  30 days ago (400 otherwise). Items are included only when `before` is at least 90 days ago, so items newer than 90 days
+  are never archived (they stop the same email making a task twice), and an `action` item whose link is an open task on
+  the Mac's board copy is kept (its done event still needs it to mark the email read).
+- `GET /v2/archive?before=<ISO>&cursor=<opaque>` (user key): `{ rows: { board_log: [...], items: [...] }, cursor }`,
+  pages of up to 500 rows of the run, `cursor` null after the run's last page. A cursor names its cut-off: one from
+  another cut-off is refused. Rows never carry `user_id`; an `add` log row's title comes back decrypted.
+- **Canonical form and hash.** Each row is an object of text, whole numbers or null (lone surrogates become U+FFFD).
+  Its line is `{"row":{...},"table":"board_log"|"items"}` with keys sorted, no spaces, written as JSON.stringify writes
+  it (only `"`, `\` and control characters escaped: `\b \f \n \r \t`, else `\u00xx`), ending in `\n`. The run's hash is the
+  lowercase hex SHA-256 of all its lines' UTF-8 bytes in run order, which are exactly the bytes the Mac appends to its
+  file. A golden row set and hash are shared by the engine test and the Mac check.
+- `POST /v2/archive/confirm { before, counts: { board_log, items }, sha256 }`: the engine builds the run again and, only
+  when both counts and the hash match, deletes exactly those rows (and writes a tombstone per deleted item's
+  `message_id`) in one batch. Anything else is 409 and nothing is deleted. Another user's key builds that user's own
+  run, so it can never match or delete someone else's rows.
+- **Never a task twice:** before an email is judged, the engine checks `seen` and `archived_items`; the meeting recap
+  dedupe checks `archived_items` too.
+
+### Archive on the Mac (built)
+
+`EngineArchive.run` (FloatBoardConnectors): for each run, page `GET /v2/archive` to the end (if any page fails, nothing
+is written or deleted); append the run's canonical lines to `archives/engine-<connector>-<yyyy-MM-dd>.jsonl` beside the
+`Backups/` folder (owner read/write only; a later archive the same day appends), fsync, read the file back and check it
+ends with exactly those bytes; only then confirm with the counts and the SHA-256. Runs repeat until one is empty (at
+most 50 rounds per press). On any failure the engine keeps the run's rows, the file is kept, and the sheet says which
+(a 409 says the engine's data changed: try again). Progress and the outcome go to the Activity log.
+
+Checks: other user's rows never returned or deleted; count or hash mismatch deletes nothing; items newer than 90 days
+never archived; an archived email read again makes no task; the Mac writes the file and only then confirms; a failure
+part way (a page, the folder, a mismatch, an old engine) leaves the engine's data intact; the size is shown.
+
+### Fixes that shipped with it
+
+- **Phone: a batch refused with 400 no longer blocks the queue.** It is sent again once as single actions; a single
+  action still refused leaves the queue and the status line says "1 change couldn't be sent" for a few seconds.
+  Other failures (offline, 429, 5xx) keep the queue as before. Logic in `sendBatch` (`sync-logic.ts`).
+- **Engine: a resent phone action id is ignored for as long as its log row is kept.** `board_log.client_id` holds the
+  phone's own action id (filled for existing rows by the migration), and dedupe checks it as well as `phone_actions`
+  (whose acked rows go after 7 days). After a board log row is archived (30 days at the earliest), its id is no longer
+  known.
+
+Deploy order: migration 0030 (`npm run migrate:remote`), then the engine, then the Mac app. An older Mac ignores
+`db_size_bytes`; a newer Mac against an older engine shows no size and its archive answers "Update the engine first".

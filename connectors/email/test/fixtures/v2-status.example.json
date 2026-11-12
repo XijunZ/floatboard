@@ -17,5 +17,6 @@
   "waiting": 0,
   "last_run_ok": "2026-11-08T10:00:00.000Z",
   "last_run_error": null,
-  "oldest_unprocessed_event": null
+  "oldest_unprocessed_event": null,
+  "db_size_bytes": 1400000
 }

@@ -37,6 +37,12 @@ public enum LocalData {
         return supportDirectory.appendingPathComponent("Backups", isDirectory: true)
     }
 
+    /// Engine data archived to this Mac ("Archive old data to this Mac"): `archives/` beside the backups folder (same
+    /// base folder, so it follows `FLOATBOARD_BACKUPS`); nil when there is no backups folder (a scratch database).
+    public static var archives: URL? {
+        backups?.deletingLastPathComponent().appendingPathComponent("archives", isDirectory: true)
+    }
+
     /// The small diagnostic log written by the window avoider: `~/Library/Logs/FloatBoard.log` (no override).
     public static var logFile: URL {
         FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]

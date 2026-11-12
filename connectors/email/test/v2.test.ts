@@ -102,6 +102,7 @@ describe("v2", () => {
     expect(Number.isInteger(s.waiting)).toBe(true);
     for (const k of ["last_run_ok", "last_run_error", "oldest_unprocessed_event"]) expect(s[k] === null || typeof s[k] === "string").toBe(true);
     expect(s).toMatchObject({ last_run_ok: null, last_run_error: null, oldest_unprocessed_event: null });
+    expect(typeof s.db_size_bytes).toBe(typeof fixture.db_size_bytes); // a number, as in the shared fixture
     await post("/v2/events", u.key, { events: [{ uuid: "e1", kind: "done", payload: {} }] });
     expect((await (await call("/v2/status", { key: u.key })).json<any>()).oldest_unprocessed_event).toEqual(expect.any(String));
   });

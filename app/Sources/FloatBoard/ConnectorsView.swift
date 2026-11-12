@@ -168,6 +168,7 @@ struct ConnectorCard: View {
     let info: ConnectorInfo
     @State private var settingsOpen = false
     @State private var pairing = false
+    @State private var archiving = false
     @ObservedObject private var rechecks = RecheckState.shared
 
     private var recheckMenu: some View {
@@ -224,6 +225,16 @@ struct ConnectorCard: View {
                 Label(ConnectorHealth.unreadableStatus, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11)).foregroundStyle(.orange)
             }
+            HStack(spacing: 8) {
+                if let size = status?.dbSizeBytes {
+                    Text(EngineArchive.sizeText(size) + (EngineArchive.isLarge(size) ? ". Archive old data to make room." : ""))
+                        .font(.system(size: 11))
+                        .foregroundStyle(EngineArchive.isLarge(size) ? Color.orange : Color.secondary)
+                }
+                Button("Archive old data to this Mac…") { archiving = true }
+                    .font(.system(size: 11))
+                    .disabled(info.baseURL.isEmpty)
+            }
             ForEach(status?.needsAttention ?? [], id: \.self) { m in
                 Label(m, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11)).foregroundStyle(.orange)
@@ -237,6 +248,7 @@ struct ConnectorCard: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
         .sheet(isPresented: $pairing) { PairPhoneSheet(info: info).environmentObject(store) }
+        .sheet(isPresented: $archiving) { ArchiveSheet(info: info).environmentObject(store) }
     }
 
     private func remove() {
