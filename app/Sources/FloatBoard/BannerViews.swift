@@ -72,7 +72,6 @@ struct BannerView: View {
                 BarButton("plus", "Quick add a task here (⌃⌥N)") { ui.openAdd() }
             }
             BarButton("rectangle.expand.vertical", "Open full board (due dates, importance, history)") { ui.mode = .expanded }
-            BarButton("minus", "Minimise to a small pill") { ui.mode = .minimized }
             BarButton("xmark", "Close (⌃⌥B or menu bar icon to reopen)") { ui.mode = .hidden }
         }
         .padding(.horizontal, 8)
