@@ -53,6 +53,8 @@ struct GuideView: View {
                     note("Changing a connector's task, finishing it, or deleting it with “Not an action (teach)” / “Wrong details (teach)” tells the connector, so it learns.")
                     note("If a connector can't be reached, your changes are kept and sent when it's back. A ⚠︎ on the bar means a connector needs attention.")
                     note("Connectors → Settings shows each connector's settings and what FloatBoard has learned about you; edit anything that's wrong.")
+                    note("Link an email… (in a task you made) searches your connected Gmail and attaches the email you pick: Open email and Draft reply then work as on an email task. Remove email link takes it off. The phone has the same button.")
+                    note("Due reminders: a notification 15 minutes before a task's due time, or at 09:00 on its due date. Turn them off on this Mac under Settings, Bar. Phones get the same reminders from the connector.")
                 }
                 section("Connectors") {
                     note("A connector is an optional add-on that suggests tasks from somewhere else, such as your email. FloatBoard works fully without one.")

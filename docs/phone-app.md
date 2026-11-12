@@ -324,6 +324,49 @@ Phone: the board payload carries every link (`links: [{kind: "email"|"meeting"|"
 Deploy order: engine first (an older engine ignores `links`, so the order is not critical), then the Mac app. An older
 Mac sends no `links`; the phone falls back to `link`.
 
-Link an email: in the task (Mac and phone) "Link an email" opens a search box; the engine searches the user's connected Gmail (Gmail `q=` search, newest 10, subject / sender / date only); picking one attaches it (message id, sent time, Gmail link) so the email features switch on; removing the link switches them off.
+### Built: Link an email
 
-Alerts for every task: the engine checks the board copy every 15 minutes (cron) and sends due alerts through the same channels; Mac notifications (UserNotifications) for the same alerts, optional, on by default.
+- **Search (engine).** `GET /v2/emails/search?q=` (user key, the Mac) and `GET /app/api/emails/search?q=` (session, the
+  phone) search this user's enabled Gmail inboxes with Gmail's own `q` (control characters and runs of spaces taken out,
+  at most 100 characters), newest 10 per inbox, merged newest first. Each result is only `{ account, gmail_id,
+  message_id, subject, from, date, sent_at }`, never the email's text. An inbox that fails is listed in `errors`
+  (a reconnect message as it is, else a plain "couldn't be searched") and never stops the others. Empty `q` is 400.
+- **On the Mac** (`FloatBoardCore/EmailLink.swift`). The task editor shows "Link an email…" on a task the sorting did
+  not make that has no email yet (`Card.canLinkEmail`): an in-place search (a separate sheet would close the editor's
+  pop-up), results with subject, sender and day; picking one sets `connector`, `source`, `sourceKey` (message id, sent
+  time), `sourceLink` (the Gmail link) and `sourceMeta` (account, Gmail id, sender, subject), never `externalID`. Draft
+  reply, Open email and the chip then appear by the existing rules; the teach choices do not. "Remove email link"
+  (`Card.emailLinkedByUser`) clears them. Refused: a task the email sorting made, a task that already has an email, and
+  an email already on another task (the board's unique source key).
+- **On the phone.** The task sheet shows "Link an email" (or "Remove email link" on one the user linked; neither on the
+  sorting's own tasks, nor on a task with an email from an older Mac that does not say who linked it). It opens a search
+  box; picking a result queues `{ action: "link_email", card_id, message_id, gmail_id, account, sent_at }` with its own
+  id and time like any action; `unlink_email` likewise. The engine checks the account is one of the user's own Gmail
+  inboxes, stores the email ids in `phone_actions.payload` (migration 0032), never treats a link as a move, and lists it
+  in `GET /v2/phone-actions` with `email`. The Mac applies it with the same rules as on the Mac (a refusal is acked as
+  skipped, "not allowed"). Each pushed card says who linked its email: `email: "sorting" | "user"` (absent when none).
+- **What a linked email does on the engine.** Edits and deletes of a user-linked task send nothing (they are not lessons
+  for the sorting). Done and Draft reply carry `account` and `gmail_id`, so the engine finds the email it never sorted:
+  mark read on done, and the draft in that inbox's thread (only one of the user's own inboxes). If the sorting later
+  proposes a task for the same email, the user's task is the match and stays as the user made it.
+
+### Built: due reminders for every task
+
+- **Engine.** A second cron, `*/15 * * * *`, runs only the due reminders (everything else stays on the hourly cron). It
+  reads each user's board copy with phone moves not yet applied and reminds of open tasks (To do, Doing, Watch):
+  timed from 15 minutes before to 15 minutes after the due time ("Due 14:30" in the user's time zone), date-only on
+  that day from 09:00 in the user's zone ("Due today"). Once per user, task and due value (`due_alerts_sent`,
+  migration 0031, purged after 30 days); claimed before sending and given back when no channel delivered it, so it is
+  tried again. Same channels as urgent emails (Web Push, ntfy with the due text, Telegram with a clock); nothing while
+  alerts are off. An email task already alerted as urgent still gets its "Due soon" reminder.
+- **Mac** (`FloatBoardCore/DueReminders.swift`, `FloatBoard/Reminders.swift`). Local notifications from the Mac's own
+  board: 15 minutes before a due time, 09:00 on a due date, at once when that moment has passed but the due has not.
+  Rescheduled 2 seconds after any board change; a task done, deleted or with a new due loses its old reminder (also
+  from Notification Centre). Each is shown once, also across restarts (the ids handed over are kept in UserDefaults).
+  At most 60 waiting. Permission is asked once; "Due reminders on this Mac" (Settings, Bar) is on by default. Needs the
+  app bundle (a `swift run` build has no bundle id and gets none). The phone and the Mac both remind: different devices.
+
+Deploy order: migrations 0031 and 0032 (`npm run migrate:remote`), then the engine (with the new cron in
+`wrangler.toml`), then the Mac app. An older Mac skips a phone link as invalid (the phone shows it as replaced) and
+sends no `email` marker (the phone then offers Link an email only on tasks without an email link); a newer Mac
+against an older engine says "Update the engine first" when searching.
