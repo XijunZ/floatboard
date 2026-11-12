@@ -120,7 +120,17 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
   it("batches_carry_sent_at_and_go_to_the_action_endpoint", () => {
     expect(APP_JS).toMatch(/takeBatch\(queue\.actions, new Date\(\)\.toISOString\(\)\)/);
     expect(APP_JS).toContain("return { sent_at: sentAt, actions: out }");
-    expect(APP_JS).toMatch(/api\("\/app\/api\/action", \{ method: "POST", body: body \}\)/);
+    expect(APP_JS).toMatch(/api\("\/app\/api\/action", \{ method: "POST", body: b \}\)/);
+  });
+
+  it("a_batch_refused_with_400_is_split_once_and_a_still_refused_change_leaves_the_queue_quietly", () => {
+    const sync = /async function sync\(\) \{([\s\S]*?)\n  \}\n/.exec(APP_JS)?.[1] ?? "";
+    // The queue is sent through sendBatch (split into single actions after a 400), never with a bare api call.
+    expect(sync).toMatch(/await sendBatch\(body, function \(b\) \{ return api\("\/app\/api\/action", \{ method: "POST", body: b \}\); \}/);
+    // Refused single actions are removed from the queue and counted for the note.
+    expect(sync).toMatch(/queue\.actions = afterSend\(queue\.actions, \{ accepted: sent\.rejected \}\)\.actions;[\s\S]*rejected \+= sent\.rejected\.length;[\s\S]*saveQueue\(\);/);
+    expect(sync).toContain("note(replacedText(replaced, dropped, rejected));");
+    expect(sync).not.toContain("toast(");
   });
 
   it("account_is_checked_before_the_queue_is_sent_and_cache_of_another_account_is_dropped", () => {

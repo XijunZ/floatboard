@@ -495,21 +495,31 @@ ${SYNC_JS}
     clearTimeout(retryTimer);
     var spin = $("refresh").firstElementChild;
     spin.classList.add("spin");
-    var replaced = 0, dropped = 0;
+    var replaced = 0, dropped = 0, rejected = 0;
     try {
       if (!me) acceptAccount(await api("/app/api/me"));
       var got = false;
       while (queue.actions.length) {
         var body = takeBatch(queue.actions, new Date().toISOString());
         if (!body.actions.length) break;
-        var r = await api("/app/api/action", { method: "POST", body: body });
-        sentIds = rememberSent(sentIds, r.accepted);
-        var after = afterSend(queue.actions, r);
-        queue.actions = after.actions;
-        dropped += after.dropped;
-        saveQueue();
-        replaced += gotBoard(r);
-        got = true;
+        // A batch the engine refuses as malformed (400) is sent again one action at a time; one still refused leaves the queue.
+        var sent = await sendBatch(body, function (b) { return api("/app/api/action", { method: "POST", body: b }); },
+          function () { return new Date().toISOString(); });
+        for (var i = 0; i < sent.results.length; i++) {
+          var r = sent.results[i];
+          sentIds = rememberSent(sentIds, r.accepted);
+          var after = afterSend(queue.actions, r);
+          queue.actions = after.actions;
+          dropped += after.dropped;
+          saveQueue();
+          replaced += gotBoard(r);
+          got = true;
+        }
+        if (sent.rejected.length) {
+          queue.actions = afterSend(queue.actions, { accepted: sent.rejected }).actions;
+          rejected += sent.rejected.length;
+          saveQueue();
+        }
       }
       if (!got) replaced += gotBoard(await api("/app/api/board"));
       failures = 0;
@@ -529,7 +539,7 @@ ${SYNC_JS}
     if (!board && me) board = { updated: null, cards: [], pending: 0 };
     if (board && current === "loading") show("board");
     render();
-    note(replacedText(replaced, dropped));
+    note(replacedText(replaced, dropped, rejected));
     if (syncAgain && failures === 0 && me) { syncAgain = false; sync(); }
   }
 

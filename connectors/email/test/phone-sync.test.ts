@@ -94,6 +94,48 @@ describe("phone sync logic", () => {
     expect(L.statusText({ waiting: 0, offline: false, lastSync: new Date(2026, 10, 3, 9, 5).getTime(), now })).toBe("Last synced 3 Nov 09:05");
   });
 
+  it("a_batch_refused_with_400_is_sent_again_one_action_at_a_time_and_a_still_refused_one_is_given_up", async () => {
+    const q = [{ id: "a", made_at: at, card_id: 1, action: "done" }, { id: "bad", made_at: at, card_id: 2, action: "doing" },
+      { id: "c", made_at: at, action: "add", title: "New" }];
+    const sent: any[] = [];
+    const refuse = (status: number) => Object.assign(new Error("refused"), { status });
+    const send = async (body: any) => {
+      sent.push(body);
+      if (body.actions.some((a: any) => a.id === "bad")) throw refuse(400);
+      return { accepted: body.actions.map((a: any) => a.id), dropped: [], cards: [] };
+    };
+    const r = await L.sendBatch(L.takeBatch(q, at), send, () => "2026-11-12T10:00:05.000Z");
+    expect(sent.map((b) => b.actions.map((a: any) => a.id))).toEqual([["a", "bad", "c"], ["a"], ["bad"], ["c"]]);
+    expect(sent.slice(1).every((b) => b.sent_at === "2026-11-12T10:00:05.000Z")).toBe(true);
+    expect(r.rejected).toEqual(["bad"]);
+    expect(r.results.map((x: any) => x.accepted)).toEqual([["a"], ["c"]]);
+    // The rejected one leaves the queue (with the accepted ones) and is counted for the quiet note.
+    let left = q;
+    for (const x of r.results) left = L.afterSend(left, x).actions;
+    expect(L.afterSend(left, { accepted: r.rejected }).actions).toEqual([]);
+    expect(L.replacedText(0, 0, 1)).toBe("1 change couldn't be sent");
+    expect(L.replacedText(0, 0, 3)).toBe("3 changes couldn't be sent");
+  });
+
+  it("a_batch_that_works_is_sent_once_and_other_failures_are_not_split", async () => {
+    const q = [{ id: "a", made_at: at, card_id: 1, action: "done" }, { id: "b", made_at: at, card_id: 2, action: "doing" }];
+    let calls = 0;
+    const ok = await L.sendBatch(L.takeBatch(q, at), async (b: any) => { calls++; return { accepted: b.actions.map((a: any) => a.id), dropped: [] }; }, () => at);
+    expect(calls).toBe(1);
+    expect(ok).toEqual({ results: [{ accepted: ["a", "b"], dropped: [] }], rejected: [] });
+    // 429, 500 and no connection keep the queue: the error goes up to the retry with back-off.
+    for (const err of [Object.assign(new Error("busy"), { status: 429 }), Object.assign(new Error("boom"), { status: 500 }), new TypeError("offline")]) {
+      calls = 0;
+      await expect(L.sendBatch(L.takeBatch(q, at), async () => { calls++; throw err; }, () => at)).rejects.toBe(err);
+      expect(calls).toBe(1);
+    }
+    // A single action that then fails for another reason (offline) stops the split: nothing is given up.
+    let n = 0;
+    const offline = new TypeError("offline");
+    await expect(L.sendBatch(L.takeBatch(q, at), async () => { n++; if (n === 1) throw Object.assign(new Error("bad"), { status: 400 }); throw offline; }, () => at))
+      .rejects.toBe(offline);
+  });
+
   it("replaced_note_is_one_quiet_line", () => {
     expect(L.replacedText(1, 0)).toBe("1 change was replaced by a newer change on your Mac");
     expect(L.replacedText(2, 1)).toBe("2 changes were replaced by newer changes on your Mac. 1 change was for a task no longer on your board");
