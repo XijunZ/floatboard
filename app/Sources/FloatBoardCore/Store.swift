@@ -251,7 +251,7 @@ public final class Store: ObservableObject {
         try performThrowing {
             guard let cur = try currentCard(cardID), !cur.deleted else { throw ReplyDraftRequestError.noCard }
             let card = cur.card
-            guard !card.connector.isEmpty, let key = card.sourceKey else { throw ReplyDraftRequestError.noSource }
+            guard card.canDraftReply, let key = card.sourceKey else { throw ReplyDraftRequestError.noSource }
             let notes = (try db.query("SELECT notes FROM cards WHERE id=?", [cardID]) { DB.text($0, 0) }.first ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !notes.isEmpty else { throw ReplyDraftRequestError.noNotes }

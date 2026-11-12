@@ -396,12 +396,18 @@ struct CardView: View {
                     .font(.system(size: 13, weight: .medium)).lineLimit(3)
                     .strikethrough(card.status == .done, color: .secondary)
                 Spacer(minLength: 4)
-                if let meet = card.meetLink {
+                if let meet = card.meetingLink {
                     Button { NSWorkspace.shared.open(meet) } label: {
                         Label("Join", systemImage: "video.fill").font(.system(size: 10, weight: .semibold))
                     }
                     .buttonStyle(.borderless)
                     .help("Join call: \(meet.absoluteString)")
+                } else if let other = card.otherLink {
+                    Button { NSWorkspace.shared.open(other) } label: {
+                        Label("Open", systemImage: "link").font(.system(size: 10, weight: .semibold))
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Open link: \(other.absoluteString)")
                 }
                 // Importance tag: monochrome "!" marks in an outlined capsule
                 // (groups are filled, coloured pills, so the two don't look alike or clash).
@@ -455,7 +461,7 @@ struct CardView: View {
                         }
                     }
                     .help("Click to change group (right-click to choose)")
-                if !card.connector.isEmpty { ProposalChip(card: card) }
+                if card.showsSourceChip { ProposalChip(card: card) }
                 Text("Added \(Fmt.short(card.created))").fixedSize()
                 if let due = card.due {
                     Text("Due \(Fmt.due(due))")
@@ -522,10 +528,10 @@ struct CardView: View {
             }
             Divider()
             Button("Edit…") { editing = true }
-            if card.connector.isEmpty {
-                Button("Delete") { store.deleteCard(card, verdict: nil) }
-            } else {
+            if card.teachOnDelete {
                 Menu("Delete") { ConnectorDeleteChoices(card: card) }
+            } else {
+                Button("Delete") { store.deleteCard(card, verdict: nil) }
             }
         }
         .popover(isPresented: $editing, arrowEdge: .trailing) {
@@ -700,7 +706,7 @@ struct EditCardView: View {
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
             }
-            TextField("Link: Google Meet call or calendar event (optional)", text: $draft.link)
+            TextField("Link: a call (Meet, Zoom, Teams) or any web page (optional)", text: $draft.link)
                 .textFieldStyle(.roundedBorder)
             HStack(spacing: 8) {
                 Text("Group").foregroundStyle(.secondary)
@@ -721,9 +727,13 @@ struct EditCardView: View {
                         }
                     }
                 }
-                if let meet = pending.meetLink {
+                if let meet = pending.meetingLink {
                     Button { NSWorkspace.shared.open(meet) } label: { Label("Join call", systemImage: "video.fill") }
                         .help(meet.absoluteString)
+                }
+                if let other = pending.otherLink {
+                    Button { NSWorkspace.shared.open(other) } label: { Label("Open link", systemImage: "link") }
+                        .help(other.absoluteString)
                 }
                 if !draft.gcalAccount.isEmpty, let u = URL(string: draft.gcalLink) {
                     Button { NSWorkspace.shared.open(u) } label: { Label("Open event", systemImage: "arrow.up.forward.square") }
@@ -732,7 +742,7 @@ struct EditCardView: View {
             }
             .buttonStyle(.borderless)
             .font(.system(size: 12))
-            if draft.connector.isEmpty == false, draft.sourceKey != nil { replyDraftSection }
+            if draft.canDraftReply { replyDraftSection }
             VStack(alignment: .leading, spacing: 2) {
                 Text("Added \(Fmt.withTime(draft.created))")
                 if let s = draft.started { Text("Started \(Fmt.withTime(s))") }
@@ -933,13 +943,13 @@ struct FlowLayout: Layout {
 }
 
 
-/// Trash button; a connector's card offers "teach" choices so the connector learns from the delete.
+/// Trash button; a card made by the email sorting offers "teach" choices so the sorting learns from the delete.
 struct DeleteControl: View {
     @EnvironmentObject var store: Store
     let card: Card
 
     var body: some View {
-        if card.connector.isEmpty {
+        if !card.teachOnDelete {
             BarButton("trash", "Delete") { store.deleteCard(card, verdict: nil) }
         } else {
             Menu {

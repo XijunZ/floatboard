@@ -105,6 +105,11 @@ public struct Card: Identifiable, Equatable {
     public var meetLink: URL? {
         let l = link.trimmingCharacters(in: .whitespaces)
         if let u = URL(string: l), u.scheme?.hasPrefix("http") == true { return u }
+        return notesMeetLink
+    }
+
+    /// A meet.google.com link found in the notes.
+    var notesMeetLink: URL? {
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil } // try?-ok: optional parsing of untrusted display text
         let ns = notes as NSString
         return detector.matches(in: notes, range: NSRange(location: 0, length: ns.length))
@@ -152,7 +157,8 @@ public struct Card: Identifiable, Equatable {
             return String(s[s.index(after: lt)...]).trimmingCharacters(in: CharacterSet(charactersIn: "> "))
         }
         if !s.isEmpty { return s }
-        return connector.isEmpty ? source : connector
+        let from = connector.isEmpty ? source : connector
+        return from.isEmpty ? "Source" : from
     }
 
     /// Due dates without a time are stored at 00:00; anything else has a time (e.g. a meeting).

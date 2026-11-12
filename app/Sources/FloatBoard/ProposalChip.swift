@@ -2,18 +2,19 @@ import FloatBoardCore
 import AppKit
 import SwiftUI
 
-/// The source chip on a connector's card: "✉ <source label>". Click opens the source (e.g. the message);
-/// hover shows why the connector proposed it. Red when the task is high importance.
+/// The source chip ("✉ <source label>") on a card made by the email sorting or with a source link (`showsSourceChip`).
+/// Click opens the source (e.g. the message); hover shows why the connector proposed it. Red when the task is high importance.
 /// (onTapGesture, like the group pill: a Button inside the draggable card doesn't reliably get the click.)
 struct ProposalChip: View {
     let card: Card
 
     var body: some View {
         let high = card.importance == .high
-        let link = URL(string: card.sourceLink.trimmingCharacters(in: .whitespaces)).flatMap { $0.scheme == nil ? nil : $0 }
+        let link = card.sourceURL
         let why = (card.sourceMeta["why"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let tip = [why.isEmpty ? nil : "Why: \(why)", "From \(card.sourceLabel) (via \(card.connector))",
-                   link == nil ? nil : "Click to open the source"].compactMap { $0 }.joined(separator: "\n")
+        let tip = [why.isEmpty ? nil : "Why: \(why)",
+                   card.connector.isEmpty ? "From \(card.sourceLabel)" : "From \(card.sourceLabel) (via \(card.connector))",
+                   link == nil ? nil : (card.emailLink != nil ? "Click to open the email" : "Click to open the source")].compactMap { $0 }.joined(separator: "\n")
         Text("✉ \(card.sourceLabel)")
             .lineLimit(1)
             .font(.system(size: 10, weight: .medium))
@@ -31,7 +32,7 @@ struct ProposalChip: View {
     }
 }
 
-/// Delete choices for a connector's card. The "teach" ones tell the connector why, so it learns.
+/// Delete choices for a card made by the email sorting (`teachOnDelete`). The "teach" ones tell the connector why, so it learns.
 struct ConnectorDeleteChoices: View {
     @EnvironmentObject var store: Store
     let card: Card
