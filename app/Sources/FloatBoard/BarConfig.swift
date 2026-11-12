@@ -43,15 +43,19 @@ struct BarConfig: Codable, Equatable {
     // Optional so settings saved by earlier versions still load.
     var statusFilter: StatusFilter? = .both
     var dueFilter: DueFilter? = .any
-    /// Counter at the left of the bar: "7 tasks" or "4 doing · 3 to do". Counts every open task that is on you (not Watch).
+    /// Counter at the left of the bar, in the board's column order: "7 tasks · 1 watch" or "3 to do · 4 doing · 1 watch".
+    /// Counts every open task; Watch is named only when there is one.
     var splitCount: Bool? = false
 
-    func countLabel(_ shown: [Card]) -> String {
+    func countLabel(_ open: [Card]) -> String {
+        let watch = open.filter { $0.status == .watch }.count
+        let mine = open.filter(\.status.onBar)
+        let watchPart = watch > 0 ? " · \(watch) watch" : ""
         if splitCount ?? false {
-            let doing = shown.filter { $0.status == .doing }.count
-            return "\(doing) doing · \(shown.count - doing) to do"
+            let doing = mine.filter { $0.status == .doing }.count
+            return "\(mine.count - doing) to do · \(doing) doing" + watchPart
         }
-        return shown.count == 1 ? "1 task" : "\(shown.count) tasks"
+        return (mine.count == 1 ? "1 task" : "\(mine.count) tasks") + watchPart
     }
 
     /// Which open tasks appear on the bar.
@@ -182,7 +186,7 @@ struct BarSettingsView: View {
                         }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                     }
-                    Toggle("Split the count into Doing and To do (e.g. \u{201C}4 doing · 3 to do\u{201D})",
+                    Toggle("Split the count by step (e.g. \u{201C}3 to do · 4 doing · 1 watch\u{201D})",
                            isOn: Binding(get: { ui.bar.splitCount ?? false }, set: { ui.bar.splitCount = $0 }))
                         .toggleStyle(.checkbox)
                         .font(.system(size: 12))

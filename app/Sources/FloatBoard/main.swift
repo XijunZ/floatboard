@@ -400,7 +400,7 @@ extension AppDelegate: NSMenuDelegate {
             : "Push other windows above the bar"
         menu.addItem(item(avoidTitle, #selector(toggleAvoid), state: avoider.enabled && avoider.trusted))
         menu.addItem(item("Start when I log in", #selector(toggleLogin), state: SMAppService.mainApp.status == .enabled))
-        menu.addItem(item("Split count: Doing · To do", #selector(toggleSplitCount), state: ui.bar.splitCount ?? false))
+        menu.addItem(item("Split count: To do · Doing · Watch", #selector(toggleSplitCount), state: ui.bar.splitCount ?? false))
 
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "Your data"))
