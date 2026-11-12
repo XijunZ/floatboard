@@ -719,6 +719,7 @@ await phoneChecks()
 oneTaskChecks()
 phoneLinksChecks()
 await linkEmailChecks()
+dueReminderChecks()
 oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()
 
