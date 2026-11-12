@@ -79,7 +79,7 @@ struct BannerView: View {
     }
 }
 
-/// The count at the left of the bar. Split by step it shows icons in the board's column order (○ to do, ◐ doing,
+/// The count at the left of the bar. Split by step it shows icons in the board's column order (dashed circle to do, ◐ doing,
 /// 👁 watch, the last only when there is one); otherwise "7 tasks". The words are in the tooltip.
 struct BarCount: View {
     @EnvironmentObject var ui: UIState

@@ -66,10 +66,10 @@ enum UrgencyStyle {
 }
 
 extension Status {
-    /// SF Symbol for the step: ○ to do, ◐ doing, 👁 watch, ✓ done.
+    /// SF Symbol for the step: dashed circle to do, ◐ doing, 👁 watch, ✓ done.
     var icon: String {
         switch self {
-        case .todo: "circle"
+        case .todo: "circle.dashed"
         case .doing: "circle.lefthalf.filled"
         case .watch: "eye"
         case .done: "checkmark.circle"
