@@ -192,3 +192,49 @@ describe("phone sync logic", () => {
     expect(L.cardLinks({ link: null, links: [] })).toEqual([]);
   });
 });
+
+describe("link an email on the phone", () => {
+  const hit = { account: "me@example.com", gmail_id: "m1", message_id: "<m1@mail>", subject: "Invoice", from: "Acme <ap@acme.test>",
+    date: "Tue, 10 Nov 2026 09:00:00 +0000", sent_at: "2026-11-10T09:00:00.000Z" };
+
+  it("a_queued_link_never_moves_the_task_and_shows_it_linked", () => {
+    const v = L.viewBoard(board, [L.linkAction(board.cards[1], hit, "link-1", at)]);
+    expect(v.cards.find((c: any) => c.id === 2)).toMatchObject({ status: "doing", email: "user", queued: true });
+    const u = L.viewBoard({ cards: [{ id: 3, status: "todo", email: "user" }] }, [{ id: "x", made_at: at, card_id: 3, action: "unlink_email" }]);
+    expect(u.cards[0].status).toBe("todo");
+    expect(u.cards[0].email).toBeUndefined();
+  });
+
+  it("link_action_carries_only_the_email_ids", () => {
+    expect(L.linkAction({ id: 7 }, { ...hit, extra: "x" }, "link-2", at)).toEqual({ id: "link-2", made_at: at, card_id: 7, action: "link_email",
+      message_id: "<m1@mail>", gmail_id: "m1", account: "me@example.com", sent_at: "2026-11-10T09:00:00.000Z" });
+  });
+
+  it("which_email_button_a_task_shows", () => {
+    expect(L.emailChoice({ id: 1, status: "todo" })).toBe("link");
+    expect(L.emailChoice({ id: 1, status: "todo", email: "user" })).toBe("unlink");
+    expect(L.emailChoice({ id: 1, status: "todo", email: "sorting" })).toBeNull();      // the sorting's own task
+    expect(L.emailChoice({ id: -1, status: "todo", pending: true })).toBeNull();
+    // An older Mac does not say who linked it: a task with an email link gets neither button.
+    expect(L.emailChoice({ id: 1, status: "todo", links: [{ kind: "email", url: "https://mail.google.com/mail/u/0/#all/x" }] })).toBeNull();
+  });
+
+  it("a_queued_link_is_sent_with_its_email_ids", () => {
+    const b = L.takeBatch([L.linkAction({ id: 7 }, hit, "link-3", at), { id: "u-1", made_at: at, card_id: 7, action: "unlink_email" }], at);
+    expect(b.actions).toEqual([
+      { id: "link-3", made_at: at, action: "link_email", card_id: 7, message_id: "<m1@mail>", gmail_id: "m1", account: "me@example.com",
+        sent_at: "2026-11-10T09:00:00.000Z" },
+      { id: "u-1", made_at: at, action: "unlink_email", card_id: 7 },
+    ]);
+  });
+
+  it("a_link_cannot_be_undone_with_the_move_bar", () => {
+    expect(L.undoFor(board.cards[0], { card_id: 1, action: "link_email", made_at: at }, 0)).toBeNull();
+  });
+
+  it("result_lines_show_subject_sender_and_day", () => {
+    expect(L.hitLines(hit, Date.parse("2026-11-12T10:00:00Z"))).toEqual({ subject: "Invoice", detail: "Acme · 10 Nov" });
+    expect(L.hitLines({ ...hit, subject: "", from: "ap@acme.test" }, Date.parse("2026-11-12T10:00:00Z")).subject).toBe("(no subject)");
+    expect(L.hitLines({ ...hit, from: "ap@acme.test" }, Date.parse("2026-11-12T10:00:00Z")).detail).toBe("ap@acme.test · 10 Nov");
+  });
+});
