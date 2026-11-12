@@ -52,6 +52,7 @@ struct BannerView: View {
                 .buttonStyle(.borderless)
                 .help("Needs attention — click to open " + (problems.contains(where: \.isAppWide) ? "Activity" : "Connectors") + "\n" + problems.map(\.message).joined(separator: "\n"))
             }
+            WatchButton()
             // Overview of everything open, regardless of the bar's filters.
             Text(ui.bar.countLabel(store.active.filter { $0.status.onBar }))
                 .font(.system(size: 11, weight: .medium))
@@ -79,6 +80,44 @@ struct BannerView: View {
             BarButton("xmark", "Close (⌃⌥B or menu bar icon to reopen)") { ui.mode = .hidden }
         }
         .padding(.horizontal, 8)
+    }
+}
+
+/// Left end of the bar: 👁 and how many tasks you're waiting on (red when one is overdue); click for the list.
+struct WatchButton: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: UIState
+
+    var body: some View {
+        let watching = store.cards(in: .watch)
+        if !watching.isEmpty {
+            let overdue = watching.contains { $0.isOverdue }
+            Menu {
+                Section("Waiting on someone else") {
+                    ForEach(watching) { c in
+                        Button {
+                            ui.tab = .board; ui.mode = .expanded
+                        } label: {
+                            Text(c.title + (c.due.map { "  ·  " + (c.isOverdue ? "overdue " : "chase ") + Fmt.due($0) } ?? ""))
+                        }
+                    }
+                }
+                Divider()
+                Button("Open the board") { ui.tab = .board; ui.mode = .expanded }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "eye")
+                    Text("\(watching.count)").monospacedDigit()
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(overdue ? Color.red : Color.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Watch: \(watching.count) waiting on someone else" + (overdue ? " (one is overdue to chase)" : "") + ". Click for the list.")
+            Divider().frame(height: 14)
+        }
     }
 }
 
