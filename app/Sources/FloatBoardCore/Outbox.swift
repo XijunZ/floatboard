@@ -163,8 +163,9 @@ extension Store {
     // MARK: Writing the queue (called inside Store.perform, so inside the board change's transaction)
 
     /// Done / deleted for a connector card. A verdict also writes a correction row.
-    func queueOutbox(_ card: Card, kind: OutboxKind, verdict: String?, now: Date) throws {
-        guard !card.connector.isEmpty else { return }
+    @discardableResult
+    func queueOutbox(_ card: Card, kind: OutboxKind, verdict: String?, now: Date) throws -> String? {
+        guard !card.connector.isEmpty else { return nil }
         let uuid = UUID().uuidString
         var payload = basePayload(card, now: now)
         if let verdict { payload["verdict"] = verdict }
@@ -173,6 +174,7 @@ extension Store {
             try insertCorrection(uuid, card, verdict: verdict, detail: "", now: now)
         }
         activity("outbox", .info, reason.map { Self.detachedNote(reason: $0) } ?? "Queued \(kind.rawValue) for \(card.connector)", trace: uuid)
+        return uuid
     }
 
     /// Group / importance / title / due change on a connector card. Changes within 5 s of the pending one

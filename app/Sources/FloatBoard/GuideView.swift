@@ -41,6 +41,7 @@ struct GuideView: View {
                     icon("eye", "Move to Watch: waiting on someone else. Watch tasks stay on the board but off the bar; a due date there is when to chase")
                     icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending. Columns start on Due date (Done on Date finished); ties go by importance, then oldest. Group keeps each group's tasks together, in Groups tab order")
                     icon("plus", "Add row: the first chip picks the step (To do, Doing, Watch or Done) the new task goes into")
+                    icon("arrow.uturn.backward", "Deleted by mistake? Press Undo on the bar that appears, or Edit → Undo Delete (⌥⌘Z) for the last deleted task")
                     icon("pin", "Pin the board so it stays open when you click another app")
                     icon("envelope.fill", "✉ chip on a connector's task (where it came from): click to open the source; red if high importance")
                     icon("magnifyingglass", "Search: highlights matches; Enter jumps to the next")
