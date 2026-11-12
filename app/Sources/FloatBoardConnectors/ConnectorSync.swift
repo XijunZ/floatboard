@@ -16,8 +16,10 @@ public struct SyncReport: Equatable {
 public struct PhoneTickResult: Equatable {
     /// The board copy was sent (it had changed).
     public var pushed = false
-    /// Phone action ids acknowledged to the engine.
+    /// Phone action ids acknowledged to the engine (applied and skipped).
     public var acked = 0
+    /// Of those, how many were not applied (a newer change on this Mac, a task no longer on the board, unreadable).
+    public var skipped = 0
     /// False when the engine has no phone app (404): nothing was logged.
     public var supported = true
     public var error: String?
@@ -230,16 +232,17 @@ public enum ConnectorSync {
         var result = PhoneTickResult()
         var step = "read the phone's changes"
         do {
-            let actions = try await client.phoneActions()
+            let (actions, engineAhead) = try await client.phoneActions()
             phoneSupport[id] = true
             if !actions.isEmpty {
                 let before = store.pendingOutbox(connector: id, limit: 500, now: .distantFuture).count
-                let ids = store.applyPhoneActions(actions, connector: id, now: now)
+                let done = store.applyPhoneActions(actions, connector: id, now: now, engineAhead: engineAhead)
                 result.queuedEvents = store.pendingOutbox(connector: id, limit: 500, now: .distantFuture).count > before
-                if !ids.isEmpty {
+                if done.count > 0 {
                     step = "confirm the phone's changes"
-                    try await client.ackPhoneActions(ids)
-                    result.acked = ids.count
+                    try await client.ackPhoneActions(done.applied, skipped: done.skipped)
+                    result.acked = done.count
+                    result.skipped = done.skipped.count
                 }
             }
             step = "send the board to the phone"
