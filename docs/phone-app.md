@@ -294,6 +294,36 @@ Every task is the same kind; features appear when the task has what they need, w
 
 Phone: the board payload carries every link (`links: [{kind: "email"|"meeting"|"link", url}]`); the task sheet shows a button per link; moves show "Moved to Done · Undo" for 8 seconds (undo is a new queued action with its own id and time).
 
+### Built: one kind of task on the Mac, links and Undo on the phone
+
+- **Mac rules** (`FloatBoardCore/CardFeatures.swift`, checked in `OneTaskChecks.swift`). The UI asks small helpers on
+  `Card`, never `connector` / `source` / `externalID` directly:
+  - `showsSourceChip` (the ✉ chip that opens the source): a source link (`sourceURL`), or a card from the email sorting.
+    `emailLink` is the source link when it is web mail (Gmail, Outlook).
+  - `canDraftReply` (Draft reply): a connector and a source key with a message id (unchanged for connector cards).
+  - `meetingLink` (Join): the Link field when its host is Meet, Zoom, Teams, Whereby or Webex, else a Meet link in the
+    notes. `otherLink` (Open link): any other web address in the Link field (it used to show Join too).
+    `meetLink` is unchanged and still feeds calendar events.
+  - `isFromEmailSorting` / `teachOnDelete` (teach choices on delete): a connector **and** an external id (only the
+    sorting's own cards have one).
+  - Seam for "Link an email": set `connector`, `sourceKey` (message id, sent time) and `sourceLink`, but **not**
+    `externalID`; Draft reply and the chip then appear and the teach choices do not. Removing the link clears them.
+- **Payload.** Each card gains `links: [{kind, url, label?}]`: source link (`email` for web mail, else `link`), Link
+  field (`meeting` for call hosts), Google Calendar event (`link`, `label: "calendar"`), then up to 3 http(s) links
+  written in the AI summary (trailing punctuation dropped). http(s) only, each at most 2,000 characters, no repeats,
+  at most 6. `link` stays and is the first link (older phones and engines).
+- **Engine.** `PUT /v2/board` accepts optional `links` per card: a list of at most 6 objects with only `kind`
+  (`email` | `meeting` | `link`), `url` (http or https, at most 2,000 characters) and optional `label` (`calendar`);
+  anything else is 400. Stored with the copy and returned by `GET /app/api/board`. A push without `links` stores none.
+- **Phone.** The task sheet shows one button per link: "Join meeting", "Open email", "Open calendar", "Open link"
+  (`target=_blank`, `rel=noopener noreferrer`, web links only; a card with only `link` shows "Open link"). After a
+  move (including Done) a bar says "Moved to Done · Undo" for 8 seconds; Undo queues a new move back to the previous
+  step (new id, made after the move even if the phone clock went back) and says "Moved back to To do". Adds can't be
+  undone. Logic in `sync-logic.ts` (`undoFor`, `undoLive`, `undoText`, `undoAction`, `cardLinks`, `linkLabel`).
+
+Deploy order: engine first (an older engine ignores `links`, so the order is not critical), then the Mac app. An older
+Mac sends no `links`; the phone falls back to `link`.
+
 Link an email: in the task (Mac and phone) "Link an email" opens a search box; the engine searches the user's connected Gmail (Gmail `q=` search, newest 10, subject / sender / date only); picking one attaches it (message id, sent time, Gmail link) so the email features switch on; removing the link switches them off.
 
 Alerts for every task: the engine checks the board copy every 15 minutes (cron) and sends due alerts through the same channels; Mac notifications (UserNotifications) for the same alerts, optional, on by default.
