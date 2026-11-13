@@ -6,6 +6,9 @@ import SwiftUI
 extension Notification.Name {
     /// Ask the connector runner to sync now (after adding a connector, saving settings, or "Sync now").
     static let floatBoardSyncConnectors = Notification.Name("FloatBoardSyncConnectors")
+    /// Read WhatsApp now (after turning screening on); `floatBoardWhatsAppRead` follows each read.
+    static let floatBoardWhatsAppNow = Notification.Name("FloatBoardWhatsAppNow")
+    static let floatBoardWhatsAppRead = Notification.Name("FloatBoardWhatsAppRead")
 }
 
 /// What the Connectors tab and the bar say about a connector's health.
@@ -261,6 +264,7 @@ struct ConnectorCard: View {
                         .foregroundStyle(EngineArchive.isLarge(size) ? Color.orange : Color.secondary)
                 }
             }
+            WhatsAppRow(info: info)
             ForEach(status?.needsAttention ?? [], id: \.self) { m in
                 Label(m, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11)).foregroundStyle(.orange)
@@ -316,5 +320,61 @@ struct WithdrawnList: View {
             }
             .font(.system(size: 12))
         }
+    }
+}
+
+/// "Screen WhatsApp" for one connection: the switch, and what the last read did.
+struct WhatsAppRow: View {
+    @EnvironmentObject var store: Store
+    let info: ConnectorInfo
+    @State private var on = false
+    @State private var st: WhatsAppSync.Status?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Toggle(isOn: Binding(get: { on }, set: { v in
+                if v, !confirmOn() { return }
+                on = v
+                WhatsAppSync.setOn(v, connector: info.id, store: store)
+                if v { NotificationCenter.default.post(name: .floatBoardWhatsAppNow, object: nil) }
+                st = WhatsAppSync.status[info.id]
+            })) { Text("Screen WhatsApp for tasks").font(.system(size: 11)) }
+            .toggleStyle(.checkbox)
+            if on {
+                Text(line).font(.system(size: 11)).foregroundStyle(st?.error == nil ? Color.secondary : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                if st?.needsAccess == true {
+                    Button("Open Full Disk Access settings") {
+                        if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(u) }
+                    }
+                    .font(.system(size: 11))
+                }
+            }
+        }
+        .onAppear { on = WhatsAppSync.isOn(connector: info.id, store: store); st = WhatsAppSync.status[info.id] }
+        .onReceive(NotificationCenter.default.publisher(for: .floatBoardWhatsAppRead)) { _ in st = WhatsAppSync.status[info.id] }
+    }
+
+    private var line: String {
+        if let e = st?.error { return e }
+        guard let read = st?.lastRead else { return "Reads WhatsApp Desktop's copy on this Mac every 5 minutes. Unread chats only; muted and archived chats are never read." }
+        return "Last read \(ConnectorHealth.time(read)) · \(st?.lastSent ?? 0) chat\(st?.lastSent == 1 ? "" : "s") sent to screen · muted and archived chats are skipped"
+    }
+
+    private func confirmOn() -> Bool {
+        let a = NSAlert()
+        a.messageText = "Screen WhatsApp for tasks?"
+        a.informativeText = """
+            Every 5 minutes FloatBoard reads WhatsApp Desktop's own copy of your messages on this Mac. It never logs in, \
+            never touches WhatsApp itself and never sends anything on WhatsApp.
+
+            Unread messages from chats that aren't muted or archived go to your engine (\(URL(string: info.baseURL)?.host ?? "your engine")) \
+            and to Claude, which turns the ones that need you into tasks. Your own WhatsApp rules are in Settings below.
+
+            macOS may ask you to allow FloatBoard in Full Disk Access.
+            """
+        a.addButton(withTitle: "Turn on"); a.addButton(withTitle: "Cancel")
+        NSApp.activate()
+        return a.runModal() == .alertFirstButtonReturn
     }
 }

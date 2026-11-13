@@ -31,6 +31,8 @@ final class ConnectorRunner {
     private let monitor = NWPathMonitor()
     private var wasSatisfied = false
     private var phoneTimer: Timer?
+    private var whatsappTimer: Timer?
+    private var whatsappRunning = Set<String>()
     private var boardWatch: AnyCancellable?
     /// Connectors whose phone step is running (a full sync may still start: it does the phone step too, and actions apply once).
     private var phoneRunning = Set<String>()
@@ -86,6 +88,13 @@ final class ConnectorRunner {
         }
         RunLoop.main.add(p, forMode: .common)
         phoneTimer = p
+        // WhatsApp screening (only connections where it is turned on): every 5 minutes.
+        let w = Timer(timeInterval: WhatsAppSync.interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.whatsappTick() }
+        }
+        RunLoop.main.add(w, forMode: .common)
+        whatsappTimer = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.whatsappTick() }
         boardWatch = Publishers.Merge(store.$cards.map { _ in () }, store.$areas.map { _ in () })
             .debounce(for: .seconds(ConnectorSync.phonePushDebounce), scheduler: RunLoop.main)
             .sink { [weak self] in MainActor.assumeIsolated { self?.phoneTick(skipUnknown: true) } }
@@ -104,6 +113,20 @@ final class ConnectorRunner {
                 let r = await ConnectorSync.phoneTick(connector: id, store: store, client: client, now: Date())
                 phoneRunning.remove(id)
                 if r.queuedEvents { trigger("phone", only: [id]) }
+            }
+        }
+    }
+
+    /// Reads unread WhatsApp chats for each connection that has screening on, and sends new ones to its engine.
+    func whatsappTick() {
+        for info in store.connectors where WhatsAppSync.isOn(connector: info.id, store: store) && !whatsappRunning.contains(info.id) {
+            guard let client = ConnectorAccounts.client(for: info, store: store) else { continue }
+            let id = info.id
+            whatsappRunning.insert(id)
+            Task { @MainActor in
+                await WhatsAppSync.tick(connector: id, store: store, client: client)
+                whatsappRunning.remove(id)
+                NotificationCenter.default.post(name: .floatBoardWhatsAppRead, object: nil)
             }
         }
     }

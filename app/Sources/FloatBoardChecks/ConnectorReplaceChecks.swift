@@ -121,7 +121,7 @@ import SQLite3
         let st = try JSONDecoder().decode(ConnectorStatus.self, from: Data(contentsOf: fixture))
         schema = st.schema
         let kinds = Set(["text", "longtext", "list", "bool", "int", "choice", "groupNotes"])
-        check(st.settingsVersion == 3 && st.schema.count == 11 && st.schema.allSatisfy { kinds.contains($0.kind) }
+        check(st.settingsVersion == 3 && st.schema.count == 12 && st.schema.allSatisfy { kinds.contains($0.kind) }
               && st.schema.first { $0.key == "learn_at" }?.options == ["50", "100"] && st.needsAttention.count == 1
               && st.lastRunOK == "2026-11-08T10:00:00.000Z" && st.lastRunError == nil, "v2_status_fixture_decodes")
     } catch { check(false, "v2_status_fixture_decodes: \(error)") }

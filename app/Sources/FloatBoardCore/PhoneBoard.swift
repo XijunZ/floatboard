@@ -196,7 +196,11 @@ public enum PhoneBoard {
     }
 
     static func webLink(_ raw: String) -> String? {
-        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A WhatsApp chat (whatsapp://send?phone=N) opens on the phone as wa.me/N.
+        if s.hasPrefix("whatsapp://send?phone="), let n = s.split(separator: "=").last, (5...20).contains(n.count), n.allSatisfy(\.isNumber) {
+            s = "https://wa.me/\(n)"
+        }
         guard !s.isEmpty, s.count <= maxLink, let u = URL(string: s), let scheme = u.scheme?.lowercased(),
               scheme == "http" || scheme == "https", !(u.host ?? "").isEmpty else { return nil }
         return s

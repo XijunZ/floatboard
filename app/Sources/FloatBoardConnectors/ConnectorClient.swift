@@ -98,11 +98,13 @@ public enum ConnectorError: Error, CustomStringConvertible, Equatable {
     case badResponse(String)
     /// The engine answered 404 on a phone app route: it has no phone app (an older engine). Callers skip quietly.
     case noPhoneApp
+    case noChats
     /// The engine answered 404 on the email search: it is older than "Link an email".
     case noEmailSearch
 
     public var description: String {
         switch self {
+        case .noChats: return "This engine can't screen WhatsApp yet. Update the engine."
         case .noPhoneApp: return "This engine doesn't have the phone app yet. Update the engine to pair a phone."
         case .noEmailSearch: return "This engine can't search email yet. Update the engine first."
         case .auth: return "The engine didn't accept this connection's key."
@@ -267,6 +269,20 @@ public struct ConnectorClient {
         let body = try JSONSerialization.data(withJSONObject: ["device_id": id])
         let data = try await call("POST", "/v2/app/phones/remove", body: body)
         return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["name"] as? String ?? "Phone" // try?-ok: name is only for display
+    }
+
+    /// Sends chats to screen (POST /v2/chats). Returns how many were new to the engine. An engine without chat
+    /// screening answers 404: `ConnectorError.noChats`.
+    @discardableResult
+    public func sendChats(app: String, _ chats: [WhatsAppLocal.Chat]) async throws -> Int {
+        let iso = ISO8601DateFormatter()
+        let body = try JSONSerialization.data(withJSONObject: ["app": app, "chats": chats.map { c in
+            ["key": c.key, "name": c.name, "group": c.group, "senders": c.senders, "transcript": c.transcript, "link": c.link,
+             "received": iso.string(from: c.received)] as [String: Any]
+        }])
+        let data: Data
+        do { data = try await call("POST", "/v2/chats", body: body) } catch ConnectorError.http(404, _) { throw ConnectorError.noChats }
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["stored"] as? Int ?? 0 // try?-ok: count is only for the log
     }
 
     static func parseISO(_ s: String) -> Date? {
