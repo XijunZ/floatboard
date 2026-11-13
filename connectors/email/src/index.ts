@@ -143,7 +143,7 @@ export async function runAllUsers(
   }
   let ids: string[];
   try {
-    ids = userIds ?? (await env.DB.prepare("SELECT DISTINCT user_id FROM sources WHERE enabled=1 AND kind IN ('gmail','outlook_web')").all<{ user_id: string }>()).results.map((r) => r.user_id);
+    ids = userIds ?? (await env.DB.prepare("SELECT DISTINCT user_id FROM sources WHERE enabled=1 AND kind IN ('gmail','outlook_web','whatsapp')").all<{ user_id: string }>()).results.map((r) => r.user_id);
   } catch (e) {
     // Without the user list nobody can be read: make that visible (system rows, user_id '') rather than only in the console.
     const msg = `Cron could not list users: ${(e as Error)?.message ?? e}`.slice(0, 500);

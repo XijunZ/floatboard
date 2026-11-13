@@ -53,6 +53,20 @@ public struct SettingField: Codable, Equatable {
     public var options: [String]?
 }
 
+/// One input feeding an engine (a Gmail inbox, Outlook, Fathom, a chat app), as /v2/status lists it.
+public struct EngineSource: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var kind: String
+    public var address: String
+    public var enabled: Bool
+    public var lastRun: String?
+    public var lastError: String?
+    public init(id: String, kind: String, address: String, enabled: Bool, lastRun: String? = nil, lastError: String? = nil) {
+        self.id = id; self.kind = kind; self.address = address; self.enabled = enabled; self.lastRun = lastRun; self.lastError = lastError
+    }
+    enum CodingKeys: String, CodingKey { case id, kind, address, enabled, lastRun = "last_run", lastError = "last_error" }
+}
+
 public struct ConnectorStatus: Codable, Equatable {
     public var settingsVersion: Int
     public var schema: [SettingField]
@@ -63,6 +77,8 @@ public struct ConnectorStatus: Codable, Equatable {
     public var oldestUnprocessedEvent: String?
     /// The engine's whole database size in bytes (all its users); nil when the engine doesn't say (older engines).
     public var dbSizeBytes: Int?
+    /// The engine's inputs; empty from older engines.
+    public var sources: [EngineSource] = []
 
     public init(settingsVersion: Int = 0, schema: [SettingField] = [], needsAttention: [String] = [], waiting: Int = 0,
                 lastRunOK: String? = nil, lastRunError: String? = nil, oldestUnprocessedEvent: String? = nil, dbSizeBytes: Int? = nil) {
@@ -74,7 +90,7 @@ public struct ConnectorStatus: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case settingsVersion = "settings_version", schema, needsAttention = "needs_attention", waiting
         case lastRunOK = "last_run_ok", lastRunError = "last_run_error", oldestUnprocessedEvent = "oldest_unprocessed_event"
-        case dbSizeBytes = "db_size_bytes"
+        case dbSizeBytes = "db_size_bytes", sources
     }
 
     public init(from d: Decoder) throws {
@@ -87,6 +103,7 @@ public struct ConnectorStatus: Codable, Equatable {
         lastRunError = try c.decodeIfPresent(String.self, forKey: .lastRunError)
         oldestUnprocessedEvent = try c.decodeIfPresent(String.self, forKey: .oldestUnprocessedEvent)
         dbSizeBytes = try c.decodeIfPresent(Int.self, forKey: .dbSizeBytes)
+        sources = try c.decodeIfPresent([EngineSource].self, forKey: .sources) ?? []
     }
 }
 
@@ -242,6 +259,12 @@ public struct ConnectorClient {
         return (url, expires)
     }
 
+    /// Turns one of the engine's inputs on or off.
+    public func setSourceEnabled(id: String, _ enabled: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["enabled": enabled])
+        _ = try await call("POST", "/v2/sources/\(id)/enabled", body: body)
+    }
+
     /// A phone paired with this engine (the setup page lists the same ones).
     public struct PairedPhone: Identifiable, Equatable, Sendable {
         public let id: String
@@ -284,6 +307,8 @@ public struct ConnectorClient {
         do { data = try await call("POST", "/v2/chats", body: body) } catch ConnectorError.http(404, _) { throw ConnectorError.noChats }
         return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["stored"] as? Int ?? 0 // try?-ok: count is only for the log
     }
+
+    public static func parseISODate(_ s: String) -> Date? { parseISO(s) }
 
     static func parseISO(_ s: String) -> Date? {
         let f = ISO8601DateFormatter()

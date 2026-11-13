@@ -123,3 +123,21 @@ private func fakeWhatsApp(_ folder: URL, now: Date) throws {
     _ = await WhatsAppSync.tick(connector: "old", store: store, client: old.client(), now: now, folder: folder)
     check(WhatsAppSync.status["old"]?.error?.contains("Update the engine") == true, "whatsapp_old_engine_says_update")
 }
+
+@MainActor func inputsChecks() async {
+    let json = #"{"settings_version":1,"sources":[{"id":"s1","kind":"gmail","address":"a@gmail.com","enabled":true,"last_run":"2026-11-13T07:00:00.000Z","last_error":null},{"id":"s2","kind":"fathom","address":"","enabled":false,"last_run":null,"last_error":"key rejected"}]}"#
+    do {
+        let st = try JSONDecoder().decode(ConnectorStatus.self, from: Data(json.utf8))
+        check(st.sources.map(\.kind) == ["gmail", "fathom"] && st.sources[0].enabled && !st.sources[1].enabled
+              && st.sources[1].lastError == "key rejected" && ConnectorClient.parseISODate(st.sources[0].lastRun ?? "") != nil,
+              "status_lists_the_engines_inputs")
+        let old = try JSONDecoder().decode(ConnectorStatus.self, from: Data(#"{"settings_version":1}"#.utf8))
+        check(old.sources.isEmpty, "older_engine_status_has_no_inputs")
+    } catch { check(false, "status_inputs: \(error)") }
+    var sent: (String, String)?
+    let eng = FakeEngine { m, p, b in sent = (m + " " + p, String(decoding: b, as: UTF8.self)); return (200, #"{"ok":true,"enabled":false}"#) }
+    do {
+        try await eng.client().setSourceEnabled(id: "s1", false)
+        check(sent?.0 == "POST /v2/sources/s1/enabled" && sent?.1 == #"{"enabled":false}"#, "input_switch_posts_enabled")
+    } catch { check(false, "input_switch: \(error)") }
+}

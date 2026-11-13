@@ -1,5 +1,5 @@
 import { SKILL } from "../classify";
-import { json, nowISO } from "../env";
+import { type Env, json, nowISO } from "../env";
 import { HAIKU, SONNET } from "../llm";
 import { route } from "../router";
 import { readJSON } from "../http";
@@ -296,7 +296,30 @@ route("GET", "/v2/status", async (_req, env, user) => {
     last_run_ok: good?.finished ?? null, last_run_error: run?.error ?? null, oldest_unprocessed_event: oldest?.t ?? null,
     // The whole engine database (all users), so the Mac can offer to archive old data before D1's limit.
     db_size_bytes: await dbSizeBytes(env),
+    // The inputs feeding this engine, for the Mac's Connectors tab (one row each, with an on/off switch).
+    sources: await listSources(env, user.id),
   });
+});
+
+const SOURCE_KINDS = ["gmail", "outlook_web", "fathom", "whatsapp"];
+
+/** The user's inputs: Gmail inboxes, Outlook, Fathom and chat apps, oldest first. No secrets. */
+async function listSources(env: Env, userId: string) {
+  const { results } = await env.DB.prepare(`SELECT id, kind, address, enabled, last_run, last_error, created FROM sources
+      WHERE user_id=? AND kind IN (SELECT value FROM json_each(?)) ORDER BY created`)
+    .bind(userId, JSON.stringify(SOURCE_KINDS)).all<{ id: string; kind: string; address: string; enabled: number; last_run: string | null; last_error: string | null; created: string }>();
+  return results.map((r) => ({ id: r.id, kind: r.kind, address: r.address ?? "", enabled: !!r.enabled, last_run: r.last_run, last_error: r.last_error }));
+}
+
+/** Turn one input on or off (a turned-off input is not read or judged; Outlook and Fathom deliveries are refused). */
+route("POST", "/v2/sources/:id/enabled", async (req, env, user, params) => {
+  const b = await readJSON(req);
+  if (!b.ok) return b.res;
+  if (typeof b.body?.enabled !== "boolean") return json({ error: "enabled must be true or false" }, 400);
+  const r = await env.DB.prepare(`UPDATE sources SET enabled=? WHERE id=? AND user_id=? AND kind IN (SELECT value FROM json_each(?))`)
+    .bind(b.body.enabled ? 1 : 0, params.id, user.id, JSON.stringify(SOURCE_KINDS)).run();
+  if (!r.meta.changes) return json({ error: "not found" }, 404);
+  return json({ ok: true, enabled: b.body.enabled });
 });
 
 /** Re-read the last N days: forget what was read (items stay), and restart each inbox's cursor N days back. */
