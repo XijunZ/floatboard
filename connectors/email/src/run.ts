@@ -1,4 +1,3 @@
-import { retryTelegramInbox } from "./missed";
 import Anthropic from "@anthropic-ai/sdk";
 import { type Action, classify, type FeedbackExample } from "./classify";
 import { Budget, BudgetExhausted } from "./budget";
@@ -26,9 +25,9 @@ export type RunOptions = {
   calls?: Budget;                              // outgoing-call budget for this Worker invocation
   sourceFor?: (row: SourceRow) => Source;     // tests inject fake sources
   fetchFn?: typeof fetch;                      // tests inject a fake Claude API
-  alert?: (item: AlertItem) => Promise<void>;  // Telegram
+  alert?: (item: AlertItem) => Promise<void>;  // phone alerts
   lookbackDays?: number;                       // first-run lookback (default 7)
-  /** Only these source kinds, and only the reading part of a run (no app events, no Telegram retries): used to judge
+  /** Only these source kinds, and only the reading part of a run (no app events): used to judge
    *  Outlook rows right after they arrive. Default: every kind the run reads, and everything else a run does. */
   kinds?: string[];
 };
@@ -104,10 +103,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
     log("run_end", { runId, userId, processed, stopped, error, stats, calls: calls.used - callsAtStart, ms: Date.now() - t0 });
   };
 
-  // Telegram "missed:" reports that couldn't be processed when they arrived (needs no Claude key).
   const full = !opts.kinds;
-  const retried = full ? await retryTelegramInbox(env, userId, calls) : 0;
-  if (retried) log("telegram_inbox_retried", { runId, userId, retried });
   const user = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(userId).first<{ anthropic_key_enc: string | null }>();
   if (!user?.anthropic_key_enc) {
     await finish(0, "Add your Claude API key in Connections to start reading email.", "no_key");
@@ -301,7 +297,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
     }
     for (const [index, row] of rows.entries()) {
       // Each message may need 2 calls (fetch + Claude); a page also needs a token + list call, plus one spare
-      // for a Telegram alert. The message cap is shared fairly between the inboxes still to read.
+      // for an alert. The message cap is shared fairly between the inboxes still to read.
       const affordable = Math.floor((calls.remaining - 3) / 2);
       const fairShare = Math.ceil(remaining / (rows.length - index));
       const pageSize = Math.min(fairShare, affordable);

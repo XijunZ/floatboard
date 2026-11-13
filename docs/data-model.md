@@ -90,8 +90,8 @@ All paths come from `LocalData` (`app/Sources/FloatBoardCore/LocalData.swift`). 
 | Item | Where | Holds | Owner / source of truth | Personal? | Created by | Sync (direction) | Backup |
 |---|---|---|---|---|---|---|---|
 | D1 database `floatboard` | Your Cloudflare account | Engine working state per user: inboxes, proposals (`items`), events from the app, a versioned **copy** of your settings, corrections for learning, run logs, setup sessions (section 3). | The engine for its working state; **a copy** for settings and corrections (the app holds the truth). | Yes | `npx wrangler d1 create floatboard`, then `migrations apply`. | Proposals down to the app; events and settings up from it. | Cloudflare D1 point-in-time restore. Nothing user-authored lives only here. |
-| Worker secrets | Worker settings in Cloudflare | `ENC_KEY` (encrypts stored tokens and keys), `ADMIN_KEY`, optional `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME`, `TELEGRAM_WEBHOOK_SECRET`. | You | Yes (secrets) | `npx wrangler secret put NAME`. | None | Your password manager (at least `ADMIN_KEY`). Losing `ENC_KEY` makes stored tokens unreadable: reconnect inboxes. |
-| Per-user secrets in D1 | `users`, `sources`, `google_clients` columns ending `_enc` | Claude key, Gmail refresh tokens, Google client secret, Fathom key and webhook secret, the user's own Telegram bot token, all AES-GCM encrypted with `ENC_KEY` (the own bot's webhook secret is kept only as a SHA-256 hash). | The engine | Yes (secrets) | The engine's `/setup` page. | Never leave the engine. | With the D1 database. |
+| Worker secrets | Worker settings in Cloudflare | `ENC_KEY` (encrypts stored tokens and keys), `ADMIN_KEY`. | You | Yes (secrets) | `npx wrangler secret put NAME`. | None | Your password manager (at least `ADMIN_KEY`). Losing `ENC_KEY` makes stored tokens unreadable: reconnect inboxes. |
+| Per-user secrets in D1 | `users`, `sources`, `google_clients` columns ending `_enc` | Claude key, Gmail refresh tokens, Google client secret, Fathom key and webhook secret, all AES-GCM encrypted with `ENC_KEY`. | The engine | Yes (secrets) | The engine's `/setup` page. | Never leave the engine. | With the D1 database. |
 | Deploy config | `connectors/email/wrangler.local.toml` on the deployer's machine (from the `.example`) | Your real `database_id`, `workers_dev` choice. | You | Yes (account ids) | You, by copying the template. | Used by `wrangler ... --config wrangler.local.toml`. | Your own |
 
 ---
@@ -207,19 +207,17 @@ can serve several people; each person's data is separate). `meeting_tasks` (0001
 
 | Entity | Table | Meaning | Key fields |
 |---|---|---|---|
-| **User** | `users` | One person using this engine. | `id`, `name`, `key_hash` (sha256 of the user key), `anthropic_key_enc`, `telegram_chat_id`, `link_code` (one-time Telegram link, for the bot the user links through), own Telegram bot (optional): `tg_bot_token_enc`, `tg_bot_name` (its @username), `tg_hook_id` (its webhook path `/telegram/webhook/u/<tg_hook_id>`), `tg_hook_secret_hash` (SHA-256 of its webhook secret); `ntfy_topic` (optional: random topic for phone alerts with the ntfy app, alerts POST to `https://ntfy.sh/<ntfy_topic>` with title and due only), `app_origin` (the engine address, saved when ntfy is turned on or a phone pairing link is made; ntfy alerts link to `<app_origin>/app/`); `created`. |
+| **User** | `users` | One person using this engine. | `id`, `name`, `key_hash` (sha256 of the user key), `anthropic_key_enc`, `ntfy_topic` (optional: random topic for phone alerts with the ntfy app, alerts POST to `https://ntfy.sh/<ntfy_topic>` with title and due only), `app_origin` (the engine address, saved when ntfy is turned on or a phone pairing link is made; ntfy alerts link to `<app_origin>/app/`); `created`. |
 | **Source (inbox)** | `sources` | A connected Gmail inbox, Fathom webhook or Outlook on the web (Chrome extension). | `id`, `user_id`, `kind` (gmail / fathom / outlook_web), `address` (for Outlook: the mailbox, empty until the extension's first send), `refresh_enc`, `client_id` + `client_secret_enc` (older Desktop client), `fathom_key_enc`, `hook_id` (Fathom: the webhook path; Outlook: SHA-256 of the ingest token), `hook_secret_enc`, `enabled`, `cursor` (read position), `last_run` (Outlook: when the extension last reported), `last_error`. Unique (`user_id`, `kind`, `address`). |
 | **Outlook row** | `outlook_rows` | An unread email the Outlook Chrome extension read from the user's Outlook tab, stored once until triage judges it; deleted 30 days after it was judged. | (`user_id`, `row_key` = `owa:<rowId>:<receivedISO>`), `source_id`, `from_name`, `from_addr`, `subject`, `preview` (the list preview: the only text Claude sees), `received` (ISO UTC), `processed`, `processed_at`, `created`. |
 | **Recap key** | `recap_keys` | One id a stored meeting recap carried (Fathom share token `fathom:<token>`, or call number `fathom:call:<n>`), so the same meeting arriving by webhook, hourly catch-up or recap email is stored once. | (`user_id`, `key`), `created`. |
-| **Item** | `items` | Something to propose to the app. `kind`: `action` (a task; sent as `task`), `summary` (meeting notes), `withdraw` (a re-checked email is no longer an action), `learned` (new learned preferences), `correction` (a missed email reported via Telegram), `draft` (the answer to a reply-draft request). | `id` (= proposal id), `user_id`, `source_id`, `message_id`, `sent_at` (source key), `kind`, `title`, `why`, `sender`, `subject`, `link`, `snippet`, `due`, `has_time`, `importance`, `group_name`, `task_ref`, `summary`, `critical`, `alerted`, `history_id` (Gmail), `created`. Unique (`user_id`, `message_id`, `kind`). |
+| **Item** | `items` | Something to propose to the app. `kind`: `action` (a task; sent as `task`), `summary` (meeting notes), `withdraw` (a re-checked email is no longer an action), `learned` (new learned preferences), `correction` (a missed email the user reported; no longer created since Telegram was removed), `draft` (the answer to a reply-draft request). | `id` (= proposal id), `user_id`, `source_id`, `message_id`, `sent_at` (source key), `kind`, `title`, `why`, `sender`, `subject`, `link`, `snippet`, `due`, `has_time`, `importance`, `group_name`, `task_ref`, `summary`, `critical`, `alerted`, `history_id` (Gmail), `created`. Unique (`user_id`, `message_id`, `kind`). |
 | **Seen message** | `seen` | Emails already judged (so they are not judged twice). | (`user_id`, `message_id`), `at`. |
 | **Feedback** | `feedback` | A correction the engine learns from (copy of the app's correction, with an email excerpt). | `user_id`, `item_id`, `verdict`, `detail`, `subject`, `sender`, `excerpt` (up to ~1,500 chars), `event_uuid` (unique), `consolidated`, `created`. |
 | **Settings** | `settings` | The engine's **copy** of your connector settings, plus learning state. | `user_id`, `group_notes`, `groups`, `my_rules`, `learned`, `ignore_senders`, `allow_senders`, `unread_only`, `mark_read_on_done`, `ai_footer`, `alerts_on`, `critical_hours`, `learn_at`, `auto_add`, `time_zone` (IANA name sent by the app from the device; unset = UTC), `settings_version`, `learn_paused_at`, `learn_paused_rowid`. |
 | **Run** | `runs` | One processing run (hourly cron or *Check now*). | `id`, `user_id`, `started`, `finished`, `processed`, `error`, `stopped`, `stats`, `calls`, `ms`. |
 | **Run event** | `run_events` | One decision or error inside a run. | `run_id`, `user_id`, `at`, `source`, `sender`, `subject`, `decision`, `detail`, `trace` (item id or event uuid). |
 | **App event** | `app_events` | An event received from the app's outbox, stored once by uuid then processed. | `uuid`, `user_id`, `kind`, `payload`, `received`, `processed` (0 waiting, 1 done, 2 failed), `attempts`, `last_error`. |
-| **Missed report (pending)** | `missed_pending` | A Telegram "missed:" report matching several emails, waiting 30 minutes for the user's number. | `user_id`, `candidates_json`, `created`. |
-| **Telegram message** | `telegram_inbox` | Every "missed:" or number message from a linked chat, stored before processing. | `update_id`, `user_id`, `chat_id`, `text`, `received`, `processed` (0 / 1 / 2 gave up), `attempts`, `last_error`, `last_try`, `pending_created`. |
 | **Judge attempt** | `judge_attempts` | An email or recap whose Claude answer could not be read; retried, given up after 3. | (`user_id`, `message_id`), `attempts`, `last_error`, `subject`, `link`, `gmail_id`, `source_id`, `kind` (email / recap), `updated`. |
 | **Setup session** | `setup_sessions` | A signed-in `/setup` browser session. | `id_hash`, `kind` (user / admin), `user_id`, `csrf`, `key_enc`, `expires`, `created`. |
 | **OAuth state** | `oauth_states` | A Google sign-in in progress. | `state_hash`, `user_id`, `nonce_hash`, `expires`, `created`. |
@@ -253,7 +251,7 @@ Relationships:
 | Item | Feedback | 1 to many | `feedback.item_id` |
 | App event | Feedback | 1 to 0..1 | `feedback.event_uuid` |
 | Run | Run event | 1 to many | `run_events.run_id` |
-| User | Item, Seen message, Feedback, Run, App event, Telegram message, Judge attempt, Draft, Outlook row, Setup session, OAuth state | 1 to many | `user_id` |
+| User | Item, Seen message, Feedback, Run, App event, Judge attempt, Draft, Outlook row, Setup session, OAuth state | 1 to many | `user_id` |
 | User | Missed report (pending) | 1 to 0..1 | `missed_pending.user_id` |
 | Draft | Item (kind `draft`) | 1 to 1 per card | `source_mid` = `items.message_id` |
 | User | Phone, Pairing code, Phone passkey | 1 to many | `app_devices.user_id`, `app_pairings.user_id`, `app_credentials.user_id` |
@@ -280,8 +278,6 @@ erDiagram
   USERS ||--o{ APP_EVENTS : "from the app"
   USERS ||--o{ RUNS : "runs"
   RUNS ||--o{ RUN_EVENTS : "decisions"
-  USERS ||--o{ TELEGRAM_INBOX : "messages"
-  USERS ||--o| MISSED_PENDING : "waiting choice"
   USERS ||--o{ JUDGE_ATTEMPTS : "unreadable answers"
   USERS ||--o{ DRAFTS : "reply drafts"
   USERS ||--o{ SETUP_SESSIONS : "signed in"
@@ -297,9 +293,6 @@ erDiagram
     text name
     text key_hash UK
     text anthropic_key_enc
-    text telegram_chat_id
-    text tg_bot_token_enc
-    text tg_hook_id UK
   }
   SOURCES {
     text id PK
@@ -352,7 +345,7 @@ erDiagram
   }
 ```
 
-`SEEN`, `TELEGRAM_INBOX`, `MISSED_PENDING`, `JUDGE_ATTEMPTS`, `SETUP_SESSIONS`, `OAUTH_STATES`, `GOOGLE_CLIENTS` and
+`SEEN`, `JUDGE_ATTEMPTS`, `SETUP_SESSIONS`, `OAUTH_STATES`, `GOOGLE_CLIENTS` and
 `SETUP_LOG` are shown with their links only; `setup_attempts` (keyed by IP) belongs to no user.
 
 ## 4. The flows between them
@@ -373,7 +366,7 @@ All traffic is HTTPS + JSON under `/v2`, started by the app, authenticated with 
 sequenceDiagram
   participant App as App (board.sqlite)
   participant Eng as Engine (D1)
-  participant Ext as Gmail / Fathom / Claude / Telegram
+  participant Ext as Gmail / Fathom / Claude / push services
   Ext->>Eng: hourly run reads new email and recaps
   Eng->>Eng: judge with Claude, write items
   Note over App: you change a card: outbox row in the same transaction
@@ -386,7 +379,7 @@ sequenceDiagram
   Note over App: apply to cards, corrections, settings; then save cursor
   App->>Eng: GET /v2/status
   Eng-->>App: settings_version, needs_attention, last_run_ok
-  Eng->>Ext: mark read, write reply drafts, Telegram alerts
+  Eng->>Ext: mark read, write reply drafts, phone alerts
 ```
 
 How each proposal kind lands in the board:
@@ -427,7 +420,7 @@ How each proposal kind lands in the board:
 | `Backups/` | Whole board | All of the above | 14 daily, 8 weekly, 12 monthly; special snapshots 90 days. |
 | Credentials file | Engine keys, Google client secret, refresh tokens, account emails (in key names) | Secrets | Until removed in the app. |
 | macOS preferences | `googleAccounts` | Account emails | Until signed out. |
-| Engine `users` | `name`, `telegram_chat_id`, `anthropic_key_enc` | Identity, secret (encrypted) | Kept while the user exists. |
+| Engine `users` | `name`, `anthropic_key_enc` | Identity, secret (encrypted) | Kept while the user exists. |
 | Engine `sources`, `google_clients` | `address`, `*_enc` | Inbox address, secrets (encrypted) | Until the inbox is removed. |
 | Engine `items` | `title`, `why`, `sender`, `subject`, `link`, `snippet`, `summary` | Email content | Kept until archived to the Mac (*Archive old data to this Mac*; only items older than 90 days, and never an open task's). |
 | Engine `archived_items` | `message_id` | Email ids | Kept (the dedupe of archived emails). |
@@ -438,7 +431,6 @@ How each proposal kind lands in the board:
 | Engine `runs` | `error` | Diagnostics | Pruned after 30 days. |
 | Engine `app_events` | `payload` | Email-derived text | Failed rows pruned after 30 days; processed rows kept. |
 | Engine `judge_attempts` | `subject`, `link` | Email metadata | Pruned after 30 days; cleared on re-check. |
-| Engine `telegram_inbox` | `chat_id`, `text` | What you typed | Processed rows pruned after 30 days; given-up rows after 7 days. |
 | Engine `missed_pending` | `candidates_json` (subjects, senders) | Email metadata | Replaced or deleted after 30 minutes. |
 | Engine `drafts` | `body`, `to_addr`, `cc_addrs`, `subject` | Draft email content, addresses | Kept per card (no pruning today). |
 | Engine `setup_sessions`, `oauth_states` | `key_enc` | Secret (encrypted) | Deleted when expired. |

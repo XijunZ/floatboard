@@ -148,7 +148,7 @@ export const SCHEMA: Field[] = [
   { "key": "unread_only", "label": "Only unread emails become tasks", "kind": "bool" },
   { "key": "mark_read_on_done", "label": "Mark the email read when I finish its task", "kind": "bool" },
   { "key": "ai_footer", "label": "End reply drafts with \"Assisted by AI\"", "kind": "bool", "help": "Adds an italic Assisted by AI line at the end of every reply draft." },
-  { "key": "alerts_on", "label": "Send critical tasks to Telegram", "kind": "bool" },
+  { "key": "alerts_on", "label": "Send urgent tasks to your phone", "kind": "bool" },
   { "key": "critical_hours", "label": "Critical means due within (hours)", "kind": "int" },
   { "key": "learn_at", "label": "Learn from my corrections every", "kind": "choice", "options": ["50", "100"], "help": "Number of corrections before your learned preferences are updated." },
 ];
@@ -278,9 +278,6 @@ route("GET", "/v2/status", async (_req, env, user) => {
   if (removed?.n) needs_attention.push(`An inbox was removed \u2014 ${removed.n} finished email${removed.n === 1 ? " wasn't" : "s weren't"} marked read`);
   const { results: stuck } = await env.DB.prepare("SELECT COUNT(*) n FROM app_events WHERE user_id=? AND kind='done' AND processed=0 AND attempts>=5").bind(user.id).all<any>();
   if (stuck[0]?.n) needs_attention.push(`${stuck[0].n} finished task(s) could not be marked read in Gmail after 5 tries; will keep retrying.`);
-  const { results: giveUps } = await env.DB.prepare("SELECT text FROM telegram_inbox WHERE user_id=? AND processed=2 ORDER BY received DESC LIMIT 5").bind(user.id).all<{ text: string }>();
-  // Quoted, so shared diagnostics (which redact quoted text) never carry what the user typed.
-  for (const g of giveUps) needs_attention.push(`A missed-email report couldn't be processed: "${g.text.replace(/"/g, "").slice(0, 40)}"`);
   const paused = await env.DB.prepare("SELECT learn_paused_at FROM settings WHERE user_id=?").bind(user.id).first<{ learn_paused_at: string | null }>();
   if (paused?.learn_paused_at) needs_attention.push(LEARNING_PAUSED);
   const { results: gaveUp } = await env.DB.prepare(`SELECT subject, link, kind FROM judge_attempts WHERE user_id=? AND attempts>=3 AND updated > ?

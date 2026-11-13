@@ -1,27 +1,28 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:test";
 import { form, get, newUser, signIn } from "./helpers";
-import { alertFor, setNtfyFetch } from "../src/alerts";
-import { setTelegramFetch } from "../src/telegram";
+import { CHANNELS, alertFor, setNtfyFetch } from "../src/alerts";
 
 let ntfy: { url: string; headers: Record<string, string>; body: string }[] = [];
-let tg: unknown[] = [];
-let ntfyStatus = 200, tgStatus = 200;
+let other: string[] = [];
+let ntfyStatus = 200, otherOk = true;
+// A second channel the user always has, so fan-out can be tested without a real phone subscription.
+const OTHER = { name: "other", send: async (_e: unknown, _u: string, i: { title: string }) => {
+  if (!otherOk) throw new Error("other failed");
+  other.push(i.title); return true;
+} };
+afterEach(() => { const i = CHANNELS.indexOf(OTHER as any); if (i >= 0) CHANNELS.splice(i, 1); });
 beforeEach(() => {
-  ntfy = []; tg = []; ntfyStatus = 200; tgStatus = 200;
+  ntfy = []; other = []; ntfyStatus = 200; otherOk = true;
   setNtfyFetch((async (url: RequestInfo | URL, init?: RequestInit) => {
     ntfy.push({ url: String(url), headers: init?.headers as Record<string, string>, body: String(init?.body) });
     return new Response("{}", { status: ntfyStatus });
-  }) as typeof fetch);
-  setTelegramFetch((async (_u: RequestInfo | URL, init?: RequestInit) => {
-    tg.push(JSON.parse(String(init?.body)));
-    return tgStatus === 200 ? Response.json({ ok: true, result: {} }) : new Response("{}", { status: tgStatus });
   }) as typeof fetch);
 });
 
 const item = { id: "i1", title: "Pay invoice", why: "Due tomorrow", sender: "Acme <ap@acme.com>", due: "2026-11-08", link: "https://mail/1" };
 const setTopic = (id: string, topic: string | null) => env.DB.prepare("UPDATE users SET ntfy_topic=? WHERE id=?").bind(topic, id).run();
-const link = (id: string) => env.DB.prepare("UPDATE users SET telegram_chat_id='555' WHERE id=?").bind(id).run();
+const link = async (_id: string) => { CHANNELS.push(OTHER as any); };
 
 describe("alerts", () => {
   it("ntfy_alert_sends_title_priority_click", async () => {
@@ -51,10 +52,10 @@ describe("alerts", () => {
     const u = await newUser("N3");
     await setTopic(u.id, "topic-abc"); await link(u.id);
     ntfyStatus = 500;
-    await alertFor(env as any, u.id)(item); // telegram still works, so no throw
-    expect(tg).toHaveLength(1);
+    await alertFor(env as any, u.id)(item); // the other channel still works, so no throw
+    expect(other).toHaveLength(1);
     expect(ntfy).toHaveLength(1);
-    ntfyStatus = 200; tgStatus = 500; ntfy = []; tg = [];
+    ntfyStatus = 200; otherOk = false; ntfy = []; other = [];
     await alertFor(env as any, u.id)(item);
     expect(ntfy).toHaveLength(1);
   });
@@ -62,7 +63,7 @@ describe("alerts", () => {
   it("alert_throws_when_every_channel_fails", async () => {
     const u = await newUser("N4");
     await setTopic(u.id, "topic-abc"); await link(u.id);
-    ntfyStatus = 500; tgStatus = 500;
+    ntfyStatus = 500; otherOk = false;
     await expect(alertFor(env as any, u.id)(item)).rejects.toThrow();
   });
 

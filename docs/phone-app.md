@@ -62,7 +62,7 @@ second channel, so alerts no longer depend on Telegram.
    shows the subscribe address. Alerts POST to `https://ntfy.sh/<topic>` with Title, Priority 5 for urgent, body = due
    date and "Open FloatBoard for details", Click = `<engine>/app/` (never the email link, sender or reason: ntfy.sh is
    public and anyone with the topic name can read the alerts; the setup page says so).
-7. **Alert fan-out:** an urgent item goes to every channel the user has: Web Push devices, ntfy, Telegram (if linked).
+7. **Alert fan-out:** an urgent item goes to every channel the user has: Web Push devices and ntfy. (Telegram was a third channel until 13 Nov 2026, when it was removed: migration 0033.)
    One failing channel never stops the others; failures go to the run log.
 
 ## Tasks
@@ -358,7 +358,7 @@ Mac sends no `links`; the phone falls back to `link`.
   timed from 15 minutes before to 15 minutes after the due time ("Due 14:30" in the user's time zone), date-only on
   that day from 09:00 in the user's zone ("Due today"). Once per user, task and due value (`due_alerts_sent`,
   migration 0031, purged after 30 days); claimed before sending and given back when no channel delivered it, so it is
-  tried again. Same channels as urgent emails (Web Push, ntfy with the due text, Telegram with a clock); nothing while
+  tried again. Same channels as urgent emails (Web Push, ntfy with the due text); nothing while
   alerts are off. An email task already alerted as urgent still gets its "Due soon" reminder.
 - **Mac** (`FloatBoardCore/DueReminders.swift`, `FloatBoard/Reminders.swift`). Local notifications from the Mac's own
   board: 15 minutes before a due time, 09:00 on a due date, at once when that moment has passed but the due has not.

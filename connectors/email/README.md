@@ -3,13 +3,13 @@
 An **optional** connector for the FloatBoard app. It is a small Cloudflare Worker (with a D1 database) that you run
 on your own free Cloudflare account. Every hour, even when your Mac is off, it reads your Gmail, uses Claude to turn
 emails that need *your* action into task suggestions, adds meeting-note summaries to your meeting tasks, and can
-send critical actions to your phone through Telegram. The FloatBoard app stays the source of truth: it pulls
+send urgent actions and due reminders to your phone. The FloatBoard app stays the source of truth: it pulls
 suggestions from the engine and sends your changes back.
 
 Each person runs **their own** engine, so nobody else holds your email data. Setup takes about 20 minutes. You need
 a Mac with FloatBoard installed, a terminal, and Node.js 20 or newer (`node --version`).
 
-Tests: `npm test` (runs locally in the Workers runtime with fake Google/Claude/Telegram).
+Tests: `npm test` (runs locally in the Workers runtime with fake Google/Claude/push services).
 
 ---
 
@@ -48,13 +48,6 @@ openssl rand -hex 32 | tee >(pbcopy) | npx wrangler secret put ADMIN_KEY      # 
 ```
 
 Paste the admin key into your password manager now. You need it to create your user and to invite other people.
-
-Optional, for phone alerts (step 7):
-
-```bash
-npx wrangler secret put TELEGRAM_BOT_TOKEN      # paste the bot token when asked
-npx wrangler secret put TELEGRAM_BOT_NAME       # the bot's username, without @
-```
 
 ## 4. Deploy
 
@@ -100,37 +93,17 @@ sign out of the setup page and sign in again to get the link.
 Recap emails from Fathom are matched to your meeting tasks automatically. For faster notes, create the webhook address
 under "Fathom meeting recaps" on the setup page and paste it into Fathom's webhook settings.
 
-## 7. Telegram alerts (optional)
+## 7. Phone alerts with the ntfy app (optional)
 
-1. In Telegram, open **@BotFather**, send `/newbot`, pick a name and a username ending in `bot`. Set the two secrets from step 3, then deploy again.
-2. Point Telegram at the engine (replace `<your-engine>`):
-   ```bash
-   SECRET=$(openssl rand -hex 24)
-   echo "$SECRET" | npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-   read -s "TOKEN?Bot token: "; echo          # zsh; in bash: read -s -p "Bot token: " TOKEN
-   curl -s "https://api.telegram.org/bot$TOKEN/setWebhook" -d "url=<your-engine>/telegram/webhook" -d "secret_token=$SECRET"
-   ```
-   It should answer `{"ok":true,...}`.
-3. On the setup page press **Get Telegram link**, then **Open Telegram and press Start**. Critical actions (urgent, or due
-   within 24 hours) now arrive on your phone.
+The phone app in step 8 shows notifications by itself. ntfy is a second way, useful where Google's push service is blocked.
 
-**Your own bot (optional, per user).** Anyone can use their own bot instead of the shared one: create a bot with
-@BotFather (`/newbot`), paste its token under **Telegram alerts** on the setup page and press **Save**, then press
-**Get Telegram link** again. The engine checks the token, stores it encrypted, and points that bot's webhook at
-`<your-engine>/telegram/webhook/u/<random id>` with its own secret, so no command line is needed. Alerts and replies for
-that user then come from their bot. **Remove my bot** goes back to the shared bot (link the chat again).
-
-**Phone alerts with the ntfy app (optional, no bot needed).** On the setup page, under **Phone alerts (ntfy app)**, press
+On the setup page, under **Phone alerts (ntfy app)**, press
 **Turn on**. The engine makes a private random topic and shows its address. Install the free ntfy app (Android or iPhone),
 tap +, paste the topic name (on iPhone allow notifications), then press **Send a test alert**. Urgent items go to every
-channel you have (ntfy and Telegram); one failing never stops the other. ntfy.sh is a public server where anyone who knows
+channel you have (the phone app and ntfy); one failing never stops the other. ntfy.sh is a public server where anyone who knows
 the topic name can read the alerts, so ntfy alerts carry only the task title and due date, and tapping one opens the
 phone app; never the sender, the reason or the email text. **New topic** replaces a leaked topic; **Turn off** stops them. `alerts_on = false` in
 settings silences all channels.
-
-**Reporting a miss.** If an email needed action but the engine did not turn it into a task, send the bot
-`missed: <a few words from the email>`. No task is created. The engine only *learns* from it, so similar emails are
-caught next time.
 
 ## 8. Phone app (optional)
 
@@ -207,6 +180,5 @@ Start in the app: **Help, Activity...** (select a row, **Show trace**) and the *
 | Google sign-in shows `redirect_uri_mismatch` (after **Connect a Gmail account**) | Saving the client doesn't check the redirect; Google does at sign-in. In the Google client, the redirect URI must be exactly `<your-engine>/setup/google/callback`, and the client type must be **Web application**. Fix it there, then connect again. |
 | "Learning paused: ..." | A learning update would have removed most of your learned preferences, so it was refused. Review them in the app (Connectors, settings); learning tries again after new corrections or a day later. |
 | "Add your Claude API key..." / "Claude API key was rejected." | Save a key on the setup page. A rejected key was revoked or mistyped. |
-| No Telegram messages | Re-run the `setWebhook` command (step 7), then press **Get Telegram link** again. |
 | `wrangler` asks to log in again | Run `npx wrangler login`. |
 | Errors mentioning daily limits | The free Cloudflare database allows 100,000 writes a day; normal use is about 1%. It resets at midnight UTC. |

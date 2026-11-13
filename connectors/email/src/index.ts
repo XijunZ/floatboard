@@ -16,7 +16,6 @@ import { log, recordCrash, runRounds, type RunOptions } from "./run";
 import { Budget } from "./budget";
 import { alertFor } from "./alerts";
 import { purgeDueAlerts, runDueAlerts } from "./due";
-import { telegramWebhook, userBotWebhook } from "./telegram";
 import { ingestOutlook, judgeOutlookNow } from "./outlook";
 import { appJSON, handleAppAuth, purgeExpiredApp } from "./app/auth";
 import { handleBoard, purgeBoardLog, purgePhoneActions } from "./app/board";
@@ -39,9 +38,6 @@ export default {
       return isAdmin(req, env) ? createUser(req, env) : json({ error: "unauthorized" }, 401);
     }
     if (url.pathname === "/setup" || url.pathname.startsWith("/setup/")) return handleSetup(req, env);
-    if (url.pathname === "/telegram/webhook" && req.method === "POST") return telegramWebhook(req, env);
-    const ownBot = /^\/telegram\/webhook\/u\/([A-Za-z0-9_-]{1,64})$/.exec(url.pathname);
-    if (ownBot && req.method === "POST") return userBotWebhook(req, env, ownBot[1]);
     if (url.pathname === "/ingest/outlook" && req.method === "POST") {
       return ingestOutlook(req, env, (userId) => ctx.waitUntil(judgeOutlookNow(env, userId)));
     }

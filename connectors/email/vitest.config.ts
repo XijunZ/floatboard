@@ -16,9 +16,6 @@ export default defineConfig(async () => {
             // Test-only secrets.
             ENC_KEY: "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktMzJieXQ=",
             ADMIN_KEY: "admin-test-key",
-            TELEGRAM_BOT_TOKEN: "123:test-token",
-            TELEGRAM_BOT_NAME: "FloatBoardTestBot",
-            TELEGRAM_WEBHOOK_SECRET: "tg-secret",
           },
         },
       }),

@@ -2,7 +2,7 @@
 #   npx wrangler d1 migrations apply floatboard --remote --config wrangler.local.toml
 #   npx wrangler deploy --config wrangler.local.toml
 # It mirrors wrangler.toml; only the values marked below are yours. Placeholders only: never commit the real file.
-# Secrets (ENC_KEY, ADMIN_KEY, TELEGRAM_*) never go here: set them with `npx wrangler secret put NAME`.
+# Secrets (ENC_KEY, ADMIN_KEY) never go here: set them with `npx wrangler secret put NAME`.
 
 name = "floatboard"
 main = "src/index.ts"

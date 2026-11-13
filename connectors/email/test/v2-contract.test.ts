@@ -7,7 +7,6 @@ import { processEvents } from "../src/events";
 import { processRecap } from "../src/recap";
 import { Budget } from "../src/budget";
 import { HAIKU } from "../src/llm";
-import { newTelegramLink, setTelegramFetch } from "../src/telegram";
 import type { Message, Source } from "../src/sources/types";
 
 const llm = (obj: unknown, seen?: any[]) => (async (_u: RequestInfo | URL, init?: RequestInit) => {
@@ -104,14 +103,6 @@ describe("v2 contract", () => {
 });
 
 describe("needs attention can be cleared", () => {
-  it("missed_report_text_is_quoted_in_status", async () => {
-    const u = await newUser("I10");
-    await env.DB.prepare("INSERT INTO telegram_inbox(update_id,user_id,chat_id,text,received,processed,attempts) VALUES(?,?,?,?,?,2,5)")
-      .bind(990001, u.id, "1", 'missed: the "board" email from Sam', new Date().toISOString()).run();
-    const s = await status(u.key);
-    expect(s.needs_attention).toContain(`A missed-email report couldn't be processed: "missed: the board email from Sam"`);
-  });
-
   it("rejected_events_count_only_last_7_days_and_old_ones_are_pruned", async () => {
     const u = await keyedUser("I9a");
     const old = new Date(Date.now() - 8 * 86400e3).toISOString(), ancient = new Date(Date.now() - 31 * 86400e3).toISOString();
@@ -189,14 +180,16 @@ describe("learning back-off", () => {
   });
 });
 
-describe("telegram hardening", () => {
-  beforeEach(() => setTelegramFetch((async () => Response.json({ ok: true, result: {} })) as unknown as typeof fetch));
-  it("start_links_only_from_private_chats", async () => {
-    const u = await newUser("TG");
-    const code = new URL((await newTelegramLink(env as any, u.id))!).searchParams.get("start")!;
-    await call("/telegram/webhook", { method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": "tg-secret" },
-      body: JSON.stringify({ update_id: 7, message: { message_id: 1, chat: { id: -100, type: "group" }, text: `/start ${code}` } }) });
-    const row = await env.DB.prepare("SELECT telegram_chat_id, link_code FROM users WHERE id=?").bind(u.id).first<any>();
-    expect(row).toEqual({ telegram_chat_id: null, link_code: code });
+
+describe("telegram is removed", () => {
+  it("old_webhook_addresses_are_gone", async () => {
+    expect((await call("/telegram/webhook", { method: "POST", body: "{}" })).status).toBe(404);
+    expect((await call("/telegram/webhook/u/abc", { method: "POST", body: "{}" })).status).toBe(404);
+  });
+  it("users_table_has_no_telegram_columns", async () => {
+    const cols = (await env.DB.prepare("PRAGMA table_info(users)").all<{ name: string }>()).results.map((c) => c.name);
+    expect(cols.filter((c) => /telegram|tg_|link_code/.test(c))).toEqual([]);
+    const t = await env.DB.prepare("SELECT name FROM sqlite_master WHERE name IN ('telegram_inbox','missed_pending')").all();
+    expect(t.results).toEqual([]);
   });
 });
