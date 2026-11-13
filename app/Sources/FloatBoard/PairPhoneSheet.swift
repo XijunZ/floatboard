@@ -57,7 +57,7 @@ struct PairPhoneSheet: View {
                 Text(code.expires > Date() ? "Works until \(ConnectorHealth.time(code.expires))." : "This code has expired. Make a new one.")
                     .font(.system(size: 11)).foregroundStyle(code.expires > Date() ? Color.secondary : Color.orange)
             }
-            Text("Phones you've paired are listed on the setup page, where you can remove one.")
+            Text("To disconnect a phone, use ⋯ › Paired phones on this connection.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             HStack {
                 Button("New code") { Task { await load() } }.disabled(loading)

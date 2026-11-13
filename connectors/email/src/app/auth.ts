@@ -217,6 +217,17 @@ route("POST", "/v2/app/pair", async (req, env, user) => {
   return json({ url: `${new URL(req.url).origin}/app/#pair=${code}`, expires });
 });
 
+/** The Mac's list of paired phones (user key), and its "Disconnect" for one of them (same as Remove on the setup page). */
+route("GET", "/v2/app/phones", async (_req, env, user) => json({ phones: await listDevices(env, user.id) }));
+
+route("POST", "/v2/app/phones/remove", async (req, env, user) => {
+  const rb = await readCappedJSON(req, 2_000);
+  const id = rb.ok ? str(rb.body.device_id, 100) : null;
+  if (!id) return json({ error: "device_id needed" }, 400);
+  const name = await removeDevice(env, user.id, id);
+  return name ? json({ ok: true, name }) : json({ error: "That phone isn't paired." }, 404);
+});
+
 const badCode = () => appJSON({ error: "This pairing link isn't valid any more. Make a new one on your Mac." }, 400);
 
 async function livePairing(env: Env, code: unknown) {
