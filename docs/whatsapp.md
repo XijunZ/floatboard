@@ -1,7 +1,7 @@
 # WhatsApp screening
 
 FloatBoard can turn WhatsApp messages that need you into tasks. It is off until you turn it on (Connectors › your
-email engine › **Screen WhatsApp for tasks**).
+engine › Inputs › **WhatsApp** switch).
 
 ## How it works
 
@@ -21,7 +21,7 @@ email engine › **Screen WhatsApp for tasks**).
 4. A task links back to the chat: one-to-one chats open in WhatsApp (on the phone as `wa.me/<number>`); groups open
    WhatsApp. Deleting a wrong task teaches FloatBoard like an email task does.
 
-macOS may ask you to allow FloatBoard in **Full Disk Access**; the Connectors tab shows a button when it is needed.
+macOS may ask you to allow FloatBoard in **Full Disk Access**; the WhatsApp row's ⋯ menu opens that setting.
 
 ## Will this get my account banned?
 
