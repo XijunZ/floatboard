@@ -24,6 +24,7 @@ const matches = (addr: string, list: string[]) =>
 
 /** Free, rule-based triage before any AI call. Order matters: allow → recap → ignore → bulk signals. */
 export function prefilter(m: Message, rules: { ignore: string[]; allow: string[]; recapSenders: string[]; unreadOnly?: boolean }): Route {
+  if (m.chat) return "classify"; // the Mac already applied the chat rules (muted, archived, answered, no words)
   const addr = senderAddress(m.from);
   // Outlook may give only a display name, or both: a list entry matches either.
   const name = m.fromName?.trim().toLowerCase() ?? "";

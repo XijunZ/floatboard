@@ -10,6 +10,7 @@ import { catchUpFathom } from "./sources/fathomCatchup";
 import "./routes/sources";
 import "./routes/v2";
 import "./archive";
+import "./chats";
 import { handleEmailSearch } from "./emails";
 import { handleSetup, purgeExpiredSetup } from "./routes/setup";
 import { log, recordCrash, runRounds, type RunOptions } from "./run";

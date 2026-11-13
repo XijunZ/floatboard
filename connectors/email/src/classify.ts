@@ -30,6 +30,7 @@ const Verdict = z.object({
 });
 
 import SKILL_TEXT from "./skills/email-triage.md";
+import CHAT_SKILL_TEXT from "./skills/chat-triage.md";
 
 /** The shared email-triage skill (src/skills/email-triage.md): how to judge any email, for every user. */
 export const SKILL: string = SKILL_TEXT;
@@ -56,11 +57,24 @@ links: up to 3 web addresses from the email that the person needs to do the task
 sign-up page), copied exactly; [] when none. Never unsubscribe, tracking, logo, social-profile or plain homepage links.
 If not an action, set action_required false and leave the other fields empty/neutral.`;
 
+/** The shared chat rulebook (src/skills/chat-triage.md): how to judge one chat's unread messages. */
+export const CHAT_SKILL: string = CHAT_SKILL_TEXT;
+export const CHAT_RULES: string[] = CHAT_SKILL.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim());
+
+const CHAT_SYSTEM = `${CHAT_SKILL.trim()}
+
+## Output
+If action_required: title and why as above; due as "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm" (24h) or null; has_time true only when a
+time is given; importance 2 = high, 1 = normal, 0 = low; group exactly as one of the person's group names, or null;
+links: []. If not an action, set action_required false and leave the other fields empty/neutral.`;
+
 /** Put before the text of an email the source only shows in part (Outlook's list preview). */
 export const PREVIEW_NOTE = "(This is the preview Outlook shows, not the full email.)";
 
 /** `timeZone`: the user's IANA zone; relative dates and times in the email are read in it. */
-export type ClassifyContext = { groupNotes?: Record<string, string>; myRules?: string; inbox?: string; learned?: string; timeZone?: string };
+export type ClassifyContext = { groupNotes?: Record<string, string>; myRules?: string; inbox?: string; learned?: string; timeZone?: string;
+  /** Chats only: the person's own chat rules, and their name (to spot messages addressed to them in groups). */
+  chatRules?: string; userName?: string };
 
 export async function classify(
   m: Message, me: string[], examples: FeedbackExample[], client: Anthropic, groups: string[] = [], ctx: ClassifyContext = {},
@@ -87,13 +101,21 @@ ${m.preview ? `${PREVIEW_NOTE}\n` : ""}${m.text}${linkList(m)}${m.thread?.myRepl
 
 --- The user already replied after this email (${m.thread.myReply.date}): ---
 ${m.thread.myReply.text}` : ""}`;
-  const r = await askStructured(client, { system: SYSTEM, user, schema: Verdict });
+  const chatUser = m.chat ? `${ctx.userName?.trim() ? `The person: ${ctx.userName.trim()}\n` : ""}User's groups:
+${groupList}
+Now (${zone}): ${nowIn(zone)}${mine}${ctx.chatRules?.trim() ? `\n\nThe person's own chat rules (these override the rulebook):\n${ctx.chatRules.trim()}` : ""}${learned}${lessons}
+
+App: ${m.chat.app}
+Chat: ${m.chat.name} (${m.chat.group ? "group chat" : "one-to-one chat"})
+Unread messages, oldest first (lines marked "earlier" were already read and are only context):
+${m.text}` : "";
+  const r = await askStructured(client, { system: m.chat ? CHAT_SYSTEM : SYSTEM, user: m.chat ? chatUser : user, schema: Verdict });
   if (!r.ok) return r;
   const v = r.value;
   if (!v.action_required || !v.title.trim()) return { ok: true, action: null };
   const importance = (Math.min(2, Math.max(0, v.importance)) as 0 | 1 | 2);
   return { ok: true, action: { title: shortTitle(v.title), why: v.why.trim(), due: v.due, hasTime: v.has_time,
-    importance, group: v.group && groups.includes(v.group) ? v.group : null, urgent: v.urgent, links: realLinks(v.links ?? [], m) } };
+    importance, group: v.group && groups.includes(v.group) ? v.group : null, urgent: v.urgent, links: m.chat ? [] : realLinks(v.links ?? [], m) } };
 }
 
 const UNWANTED_LINK = /unsubscribe|optout|opt-out|preferences|list-manage/i;
