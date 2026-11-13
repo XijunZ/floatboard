@@ -168,7 +168,10 @@ struct ConnectorsView: View {
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(.bottom, 20)
+            // Fill the window's width so the scroll bar sits at its right edge, not after the 760-wide content.
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -197,11 +200,11 @@ struct ConnectorCard: View {
             Button("Archive old data to this Mac…") { archiving = true }
                 .disabled(info.baseURL.isEmpty)
             Divider()
-            Button("Remove this connection…", role: .destructive) { remove() }
+            Button("Disconnect \(info.name) from this Mac…", role: .destructive) { remove() }
         } label: { Image(systemName: "ellipsis.circle") }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("More: archive old data, remove this connection")
+        .help("More: archive old data, disconnect \(info.name) from this Mac")
     }
 
     private func confirmRecheck(days: Int) {
@@ -273,14 +276,14 @@ struct ConnectorCard: View {
 
     private func remove() {
         let a = NSAlert()
-        a.messageText = "Remove \(info.name)?"
-        a.informativeText = "FloatBoard stops syncing with it and forgets its key. Its tasks and their history stay on your board, and your settings for it (rules, group descriptions, lists and learned preferences) are kept: they come back if you connect it again."
-        a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Remove…")
+        a.messageText = "Disconnect \(info.name) from this Mac?"
+        a.informativeText = "This Mac stops syncing with the \(info.name) engine (\(URL(string: info.baseURL)?.host ?? info.baseURL)) and forgets its key. The engine itself, its setup page and your paired phones are not deleted. Its tasks and their history stay on your board, and your settings for it (rules, group descriptions, lists and learned preferences) are kept: they come back if you connect it again."
+        a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Disconnect…")
         a.buttons[1].hasDestructiveAction = true
         NSApp.activate()
         guard a.runModal() == .alertSecondButtonReturn else { return }
-        guard ConnectFlow.confirmTwice("Remove \(info.name) now?",
-            "Email tasks stop arriving and changes on your phone stop reaching this Mac until you connect it again.", action: "Remove") else { return }
+        guard ConnectFlow.confirmTwice("Disconnect \(info.name) now?",
+            "New tasks from it stop arriving, and changes made on your phone stop reaching this Mac, until you connect it again.", action: "Disconnect") else { return }
         do { try ConnectorAccounts.remove(id: info.id, store: store) } catch {
             store.activity("connector:\(info.id)", .error, "Could not remove \(info.name)", detail: "\(error)")
             ConnectFlow.alert("Couldn't remove \(info.name)", "\(error)")
