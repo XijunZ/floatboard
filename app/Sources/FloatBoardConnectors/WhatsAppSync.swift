@@ -74,7 +74,7 @@ public enum WhatsAppSync {
             }
             st.lastRead = now; st.lastSent = sent; st.error = nil; st.needsAccess = false
             if reported.removeValue(forKey: id) != nil { store.activity("connector:\(id)", .info, "WhatsApp screening works again") }
-            if sent > 0 { store.activity("connector:\(id)", .info, "Sent \(sent) WhatsApp chat\(sent == 1 ? "" : "s") to screen") }
+            if sent > 0 { store.activity("connector:\(id)", .info, "Checking \(sent) WhatsApp chat\(sent == 1 ? "" : "s") for tasks (unread messages passed to the engine; nothing is sent on WhatsApp)") }
         } catch {
             let why = (error as? WhatsAppLocal.ReadError)?.description ?? (error as? ConnectorError)?.description ?? "\(error)"
             st.error = why

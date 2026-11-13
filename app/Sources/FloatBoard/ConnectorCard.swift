@@ -274,7 +274,8 @@ struct WhatsAppInputRow: View {
         guard on else { return "Off" }
         if let e = st?.error { return e }
         guard let read = st?.lastRead else { return "Reading…" }
-        return "Read \(ConnectorHealth.time(read)) · \(st?.lastSent ?? 0) chat\(st?.lastSent == 1 ? "" : "s") sent"
+        return (st?.lastSent ?? 0) == 0 ? "Read \(ConnectorHealth.time(read)) · no new messages to check"
+            : "Read \(ConnectorHealth.time(read)) · \(st!.lastSent) chat\(st!.lastSent == 1 ? "" : "s") checked for tasks"
     }
 
     private func confirmOn() -> Bool {
