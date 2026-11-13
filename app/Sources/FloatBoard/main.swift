@@ -120,6 +120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: .floatBoardSyncConnectors, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.connectors.trigger("asked") }
         }
+        NotificationCenter.default.addObserver(forName: .floatBoardWhatsAppNow, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.connectors.whatsappTick() }
+        }
         startDueReminders()
         modeWatch = ui.$mode.removeDuplicates().sink { [weak self] m in
             guard m == .expanded else { return }
