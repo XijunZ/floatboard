@@ -21,7 +21,7 @@ export const CHAT_APPS = { whatsapp: "WhatsApp" } as const;
 export type ChatApp = keyof typeof CHAT_APPS;
 export const CHAT_KINDS: string[] = Object.keys(CHAT_APPS);
 const MAX_CHATS = 100, MAX_BODY = 1_200_000, MAX_TRANSCRIPT = 8000;
-/** Chats judged right after they arrive; the rest by the hourly run. */
+/** Chats judged right after they arrive; the rest by the next scheduled run (every 5 minutes). */
 export const JUDGE_CHATS_NOW = 10;
 const KEEP_PROCESSED_MS = 30 * 86400e3;
 

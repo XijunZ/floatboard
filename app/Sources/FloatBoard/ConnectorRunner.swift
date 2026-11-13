@@ -5,7 +5,7 @@ import FloatBoardCore
 import Foundation
 import Network
 
-/// When connectors sync: launch, wake, board open (at least 2 minutes apart), every 15 minutes, every 15 seconds while a
+/// When connectors sync: launch, wake, board open (at least 2 minutes apart), every 5 minutes, every 15 seconds while a
 /// delivered reply draft waits for its answer (that connector only), and when the
 /// network comes back. The phone step alone runs every 2 minutes and 10 seconds after local board changes.
 /// One sync at a time per connector. The sync itself is `ConnectorSync` (Connectors target).
@@ -48,7 +48,8 @@ final class ConnectorRunner {
         }
         RunLoop.main.add(t, forMode: .common)   // keeps firing while a menu is open or the window is being dragged
         healthTimer = t
-        timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
+        // Every 5 minutes, matching the engine's schedule, so new tasks reach the board soon after the engine finds them.
+        timer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.trigger("timer") }
         }
         // While a delivered reply draft waits for its answer, sync its connector every 15 seconds (each such sync asks the
