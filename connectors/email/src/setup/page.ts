@@ -86,12 +86,9 @@ export type Dashboard = {
   googleClientId: string | null;
   gmail: GmailRow[];
   hasClaudeKey: boolean;
-  telegramLinked: boolean;
-  telegramURL?: string | null;
   /** The user's ntfy topic when phone alerts with the ntfy app are on. */
   ntfyTopic?: string | null;
   /** The @username (without @) of the user's own bot, when they saved one. */
-  telegramBot?: string | null;
   fathomURL: string | null;
   fathomSecretSaved?: boolean;
   fathomKeySaved?: boolean;
@@ -180,20 +177,6 @@ ${d.googleClientId ? `<a class="button" href="${esc(startHref())}">Connect a Gma
 <label for="anthropic_key">${d.hasClaudeKey ? "Replace key" : "Key"}</label>
 <input type="password" id="anthropic_key" name="anthropic_key" autocomplete="off" required>
 <button type="submit">Save key</button></form></section>
-
-<section><h2>4. Telegram alerts</h2>
-<p>Status: ${d.telegramLinked ? `<span class="ok">linked ✓</span>` : `<span class="muted">not linked</span>`}</p>
-${d.telegramURL ? `<p><a class="button" href="${esc(d.telegramURL)}">Open Telegram and press Start</a></p><p class="muted">This link works once.</p>` : ""}
-<form method="post" action="/setup/telegram">${csrfField(d.csrf)}<button class="secondary" type="submit">${d.telegramLinked ? "Link a different chat" : "Get Telegram link"}</button></form>
-${d.telegramLinked ? `<form method="post" action="/setup/telegram/unlink">${csrfField(d.csrf)}<button class="secondary" type="submit">Unlink</button></form>` : ""}
-<p class="muted">Create a bot with @BotFather (/newbot) and paste its token here; alerts then come from your bot instead of the shared one.</p>
-${d.telegramBot ? `<p>Your bot: <strong>@${esc(d.telegramBot)}</strong> <span class="ok">saved ✓</span></p>
-<form method="post" action="/setup/telegram/bot/remove">${csrfField(d.csrf)}<button class="danger" type="submit">Remove my bot</button></form>` : ""}
-<form method="post" action="/setup/telegram/bot">${csrfField(d.csrf)}
-<label for="bot_token">${d.telegramBot ? "Replace with another bot token" : "Your own bot token (optional)"}</label>
-<input type="password" id="bot_token" name="bot_token" autocomplete="off" required>
-<button type="submit">Save</button></form>
-</section>
 
 <section><h2>Phone alerts (ntfy app)</h2>
 <p>Status: ${d.ntfyTopic ? `<span class="ok">on ✓</span>` : `<span class="muted">off</span>`}</p>

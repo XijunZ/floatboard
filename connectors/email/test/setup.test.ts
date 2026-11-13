@@ -322,29 +322,17 @@ describe("setup page", () => {
     expect((await env.DB.prepare("SELECT id FROM sources WHERE user_id=?").bind(u.id).all()).results).toEqual([]);
   });
 
-  it("telegram_and_fathom_sections", async () => {
+  it("fathom_section_and_no_telegram", async () => {
     const u = await newUser("X");
     const s = await signIn(u.key);
-    const t = await form("/setup/telegram", { csrf: s.csrf }, { cookie: s.cookie });
-    expect(t.status).toBe(200);
-    const code = /https:\/\/t\.me\/FloatBoardTestBot\?start=([A-Za-z0-9_-]+)/.exec(await t.text())![1];
-    expect((await env.DB.prepare("SELECT link_code FROM users WHERE id=?").bind(u.id).first<any>()).link_code).toBe(code);
+    expect(await (await get("/setup", s.cookie)).text()).not.toMatch(/telegram/i);
+    expect((await form("/setup/telegram", { csrf: s.csrf }, { cookie: s.cookie })).status).toBe(404);
     const f = await form("/setup/fathom", { csrf: s.csrf }, { cookie: s.cookie });
     expect(f.status).toBe(200);
     const hook = /https:\/\/engine\.test\/hooks\/fathom\/[A-Za-z0-9_-]+/.exec(await f.text())![0];
     const stored = await env.DB.prepare("SELECT hook_id FROM sources WHERE user_id=? AND kind='fathom'").bind(u.id).first<{ hook_id: string }>();
     expect(hook).toBe(`${BASE}/hooks/fathom/${stored!.hook_id}`);
     expect(await (await get("/setup", s.cookie)).text()).toContain(hook);
-  });
-
-  it("telegram_can_be_unlinked", async () => {
-    const u = await newUser("TU");
-    await env.DB.prepare("UPDATE users SET telegram_chat_id='555' WHERE id=?").bind(u.id).run();
-    const s = await signIn(u.key);
-    expect(await (await get("/setup", s.cookie)).text()).toContain('action="/setup/telegram/unlink"');
-    expect((await form("/setup/telegram/unlink", { csrf: s.csrf }, { cookie: s.cookie })).status).toBe(200);
-    expect((await env.DB.prepare("SELECT telegram_chat_id c FROM users WHERE id=?").bind(u.id).first<any>()).c).toBeNull();
-    expect(await (await get("/setup", s.cookie)).text()).toContain("not linked");
   });
 
   it("admin_creates_invite_link", async () => {

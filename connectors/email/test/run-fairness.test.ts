@@ -5,8 +5,7 @@ import { runUser, runRounds } from "../src/run";
 import { classify } from "../src/classify";
 import { encrypt } from "../src/crypto";
 import { HAIKU, makeClient } from "../src/llm";
-import { setTelegramFetch } from "../src/telegram";
-import { alertFor } from "../src/alerts";
+import { alertFor, setNtfyFetch } from "../src/alerts";
 import { newUser } from "./helpers";
 import type { Message, Source } from "../src/sources/types";
 
@@ -38,7 +37,7 @@ const endless = (prefix: string, budget?: Budget): Source => ({
 });
 
 describe("run fairness, budget and alerts", () => {
-  beforeEach(() => setTelegramFetch((async () => Response.json({ ok: true })) as typeof fetch));
+  beforeEach(() => setNtfyFetch((async () => new Response("{}")) as typeof fetch));
 
   it("second_inbox_not_starved_by_first_backlog", async () => {
     const { u, ids } = await userWithSources(["a@gmail.com", "b@gmail.com"]);
@@ -72,10 +71,10 @@ describe("run fairness, budget and alerts", () => {
     expect(sent.system).not.toMatch(/due within 24 hours/i);
   });
 
-  it("failed_telegram_alert_is_retried_and_does_not_blame_gmail", async () => {
-    setTelegramFetch((async () => new Response(JSON.stringify({ ok: false, description: "Forbidden: bot was blocked" }), { status: 403 })) as typeof fetch);
+  it("failed_alert_is_retried_and_does_not_blame_gmail", async () => {
+    setNtfyFetch((async () => new Response("{}", { status: 500 })) as typeof fetch);
     const { u, ids } = await userWithSources(["a@gmail.com"]);
-    await env.DB.prepare("UPDATE users SET telegram_chat_id='42' WHERE id=?").bind(u.id).run();
+    await env.DB.prepare("UPDATE users SET ntfy_topic='topic-42' WHERE id=?").bind(u.id).run();
     await runUser(env as any, u.id, { sourceFor: () => ({ fetchBatch: async () => ({ messages: [mail("u1")], cursor: "1", done: true }) }),
       fetchFn: claudeReply(true), alert: alertFor(env as any, u.id) });
     const it = await env.DB.prepare("SELECT critical, alerted FROM items WHERE user_id=?").bind(u.id).first<any>();

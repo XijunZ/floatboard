@@ -63,7 +63,7 @@ describe("database size", () => {
 
   it("setup_page_shows_the_size_and_warns_above_250_mb", async () => {
     const base = { name: "X", csrf: "c", origin: "https://e", connectLink: null, googleClientId: null, gmail: [], hasClaudeKey: true,
-      telegramLinked: false, fathomURL: null };
+      fathomURL: null };
     const small = dashboardPage({ ...base, dbSizeBytes: 1_400_000 });
     expect(small).toContain("Database: 1.4 MB of 500 MB");
     expect(small).not.toContain("Archive old data to this Mac");

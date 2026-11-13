@@ -3,7 +3,6 @@ import { env } from "cloudflare:test";
 import { call, newUser } from "./helpers";
 import { api, count, pairPhone } from "./app-helpers";
 import { setNtfyFetch } from "../src/alerts";
-import { setTelegramFetch } from "../src/telegram";
 import { dueAlertText, purgeDueAlerts, runDueAlerts } from "../src/due";
 import worker from "../src/index";
 
@@ -15,7 +14,6 @@ beforeEach(() => {
     ntfy.push({ headers: init?.headers as Record<string, string>, body: String(init?.body) });
     return new Response("{}");
   }) as typeof fetch);
-  setTelegramFetch((async () => Response.json({ ok: true, result: {} })) as typeof fetch);
 });
 
 const NY = "America/New_York";

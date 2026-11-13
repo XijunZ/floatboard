@@ -1,6 +1,5 @@
 import type { Env } from "./env";
 import type { AlertItem } from "./run";
-import { telegramAlert } from "./telegram";
 import { pushToUser } from "./app/webpush";
 
 let ntfyFetch: typeof fetch = (...a) => fetch(...a);
@@ -42,7 +41,6 @@ export async function sendNtfy(topic: string, item: AlertItem, appOrigin?: strin
 
 /** Add new channels (Web Push, ...) here; each is tried for every alert. */
 export const CHANNELS: AlertChannel[] = [
-  { name: "telegram", send: (env, userId, item) => telegramAlert(env, userId)(item) },
   {
     name: "webpush",
     send: (env, userId, item) => pushToUser(env, userId, { title: item.title, body: alertBody(item), url: item.link || "/app/" }),

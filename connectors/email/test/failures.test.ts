@@ -5,7 +5,6 @@ import { runUser } from "../src/run";
 import { runAllUsers } from "../src/index";
 import { encrypt } from "../src/crypto";
 import { LEARN_AT, maybeConsolidate } from "../src/learn";
-import { newTelegramLink, setTelegramFetch } from "../src/telegram";
 import { GmailSource } from "../src/sources/gmail";
 import { HAIKU, makeClient } from "../src/llm";
 import type { Message, Source } from "../src/sources/types";
@@ -176,18 +175,6 @@ describe("no silent failures", () => {
     expect(r.error).toContain("boom");
   });
 
-  it("telegram_reply_failure_in_run_log", async () => {
-    const u = await newUser("T");
-    const code = new URL((await newTelegramLink(env as any, u.id))!).searchParams.get("start")!;
-    setTelegramFetch((async () => new Response(JSON.stringify({ description: "bot was blocked" }), { status: 403 })) as typeof fetch);
-    const r = await call("/telegram/webhook", { method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": "tg-secret" },
-      body: JSON.stringify({ update_id: 42, message: { message_id: 1, chat: { id: 555, type: "private" }, text: `/start ${code}` } }) });
-    expect(r.status).toBe(200);
-    const e = (await events(u.id)).find((x) => x.decision === "telegram reply failed");
-    expect(e?.detail).toContain("bot was blocked");
-    expect(e?.trace).toBe("42");
-  });
-
   it("recap_give_up_says_what_happened", async () => {
     const recap = mail(2, { from: "Fathom <no-reply@fathom.video>", subject: "Recap: sync", text: "notes about the sync", labels: [] });
     const { u, sourceFor } = await setup({ msgs: [recap] });
@@ -222,16 +209,6 @@ describe("no silent failures", () => {
     await add();
     expect((await call("/v2/recheck?days=3", { key: u.key, method: "POST" })).status).toBe(200);
     expect(await n()).toBe(0);
-  });
-
-  it("telegram_failures_carry_the_user_id", async () => {
-    const u = await newUser("T2");
-    const code = new URL((await newTelegramLink(env as any, u.id))!).searchParams.get("start")!;
-    setTelegramFetch((async () => new Response("{}", { status: 500 })) as typeof fetch);
-    await call("/telegram/webhook", { method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": "tg-secret" },
-      body: JSON.stringify({ update_id: 7, message: { message_id: 1, chat: { id: 556, type: "private" }, text: `/start ${code}` } }) });
-    const e = (await events(u.id)).find((x) => x.decision === "telegram reply failed");
-    expect(e).toBeTruthy();
   });
 
   it("crashed_run_finishes_its_own_row", async () => {
