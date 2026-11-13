@@ -27,6 +27,11 @@ private final class PhoneEngine {
                 e.pending.removeAll { ids.contains($0["id"] as? String ?? "") }
                 return (200, #"{"ok":true}"#)
             case "/v2/board": return (200, #"{"ok":true,"count":0}"#)
+            case "/v2/app/phones":
+                return (200, #"{"phones":[{"id":"d1","name":"Pixel","created":"2026-11-10T08:00:00.000Z","last_seen":"2026-11-13T06:00:00.000Z","shares_passkey":0},{"id":"d2","name":"Old phone","created":"2026-11-11T08:00:00.000Z","last_seen":null,"shares_passkey":1}]}"#)
+            case "/v2/app/phones/remove":
+                let obj = try JSONSerialization.jsonObject(with: b) as? [String: Any]
+                return obj?["device_id"] as? String == "d1" ? (200, #"{"ok":true,"name":"Pixel"}"#) : (404, #"{"error":"That phone isn't paired."}"#)
             case "/v2/app/pair": return (200, #"{"url":"https://engine.test/app/#pair=abc123","expires":"2026-11-12T10:10:00.000Z"}"#)
             default: return try good(m, p, b)
             }
@@ -321,6 +326,20 @@ private final class PhoneEngine {
         check(p.url.absoluteString == "https://engine.test/app/#pair=abc123" && p.expires == ISO8601DateFormatter().date(from: "2026-11-12T10:10:00Z")
               && e.fake.requests.last?.method == "POST", "phone_pairing_returns_url")
     } catch { check(false, "phone_pairing_returns_url: \(error)") }
+    // Paired phones: list and disconnect.
+    do {
+        let e = PhoneEngine()
+        let phones = try await e.fake.client().phones()
+        check(phones.map(\.name) == ["Pixel", "Old phone"] && phones[0].lastSeen != nil && phones[1].lastSeen == nil
+              && phones[1].sharesPasskey == 1, "paired_phones_are_listed")
+        let name = try await e.fake.client().removePhone(id: "d1")
+        let sent = e.fake.requests.last
+        check(name == "Pixel" && sent?.method == "POST" && sent?.path == "/v2/app/phones/remove", "disconnect_phone_sends_its_id")
+    } catch { check(false, "paired_phones: \(error)") }
+    do {
+        _ = try await PhoneEngine().fake.client().removePhone(id: "gone")
+        check(false, "disconnect_unknown_phone_fails")
+    } catch { check(true, "disconnect_unknown_phone_fails") }
     do {
         _ = try await goodEngine().client().pairPhone()
         check(false, "phone_pairing_on_old_engine_says_no_phone_app")

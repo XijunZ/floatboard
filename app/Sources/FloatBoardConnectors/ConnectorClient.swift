@@ -240,6 +240,35 @@ public struct ConnectorClient {
         return (url, expires)
     }
 
+    /// A phone paired with this engine (the setup page lists the same ones).
+    public struct PairedPhone: Identifiable, Equatable, Sendable {
+        public let id: String
+        public let name: String
+        public let created: Date?
+        public let lastSeen: Date?
+        /// Other paired devices that use the same passkey.
+        public let sharesPasskey: Int
+    }
+
+    public func phones() async throws -> [PairedPhone] {
+        let data = try await phoneCall("GET", "/v2/app/phones")
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], // try?-ok: reported as badResponse below
+              let rows = obj["phones"] as? [[String: Any]] else { throw ConnectorError.badResponse("phone list needs phones") }
+        return rows.compactMap { r in
+            guard let id = r["id"] as? String else { return nil }
+            return PairedPhone(id: id, name: r["name"] as? String ?? "Phone", created: (r["created"] as? String).flatMap(Self.parseISO),
+                               lastSeen: (r["last_seen"] as? String).flatMap(Self.parseISO), sharesPasskey: r["shares_passkey"] as? Int ?? 0)
+        }
+    }
+
+    /// Signs one phone out and stops its notifications. Returns its name.
+    @discardableResult
+    public func removePhone(id: String) async throws -> String {
+        let body = try JSONSerialization.data(withJSONObject: ["device_id": id])
+        let data = try await call("POST", "/v2/app/phones/remove", body: body)
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["name"] as? String ?? "Phone" // try?-ok: name is only for display
+    }
+
     static func parseISO(_ s: String) -> Date? {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

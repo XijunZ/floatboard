@@ -182,6 +182,7 @@ struct ConnectorCard: View {
     @State private var settingsOpen = false
     @State private var pairing = false
     @State private var archiving = false
+    @State private var phonesOpen = false
     @ObservedObject private var rechecks = RecheckState.shared
 
     private var recheckMenu: some View {
@@ -197,6 +198,8 @@ struct ConnectorCard: View {
     /// Rarely used actions that remove data, kept out of sight behind "⋯" so they aren't clicked by accident.
     private var moreMenu: some View {
         Menu {
+            Button("Paired phones…") { phonesOpen = true }
+                .disabled(info.baseURL.isEmpty)
             Button("Archive old data to this Mac…") { archiving = true }
                 .disabled(info.baseURL.isEmpty)
             Divider()
@@ -204,7 +207,7 @@ struct ConnectorCard: View {
         } label: { Image(systemName: "ellipsis.circle") }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("More: archive old data, disconnect \(info.name) from this Mac")
+        .help("More: paired phones, archive old data, disconnect \(info.name) from this Mac")
     }
 
     private func confirmRecheck(days: Int) {
@@ -272,6 +275,7 @@ struct ConnectorCard: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
         .sheet(isPresented: $pairing) { PairPhoneSheet(info: info).environmentObject(store) }
         .sheet(isPresented: $archiving) { ArchiveSheet(info: info).environmentObject(store) }
+        .sheet(isPresented: $phonesOpen) { PhonesSheet(info: info).environmentObject(store) }
     }
 
     private func remove() {
