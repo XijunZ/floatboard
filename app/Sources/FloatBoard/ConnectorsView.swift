@@ -142,7 +142,10 @@ struct ConnectorsView: View {
                     if store.connectors.isEmpty {
                         Text("No connectors yet.").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
-                    ForEach(store.connectors) { ConnectorCard(info: $0) }
+                    ForEach(store.connectors) { c in
+                        ConnectorCard(info: c)
+                        PhoneAppCard(info: c)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Add a connector").font(.system(size: 13, weight: .semibold))
