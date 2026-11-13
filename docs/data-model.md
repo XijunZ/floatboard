@@ -215,7 +215,7 @@ can serve several people; each person's data is separate). `meeting_tasks` (0001
 | **Seen message** | `seen` | Emails already judged (so they are not judged twice). | (`user_id`, `message_id`), `at`. |
 | **Feedback** | `feedback` | A correction the engine learns from (copy of the app's correction, with an email excerpt). | `user_id`, `item_id`, `verdict`, `detail`, `subject`, `sender`, `excerpt` (up to ~1,500 chars), `event_uuid` (unique), `consolidated`, `created`. |
 | **Settings** | `settings` | The engine's **copy** of your connector settings, plus learning state. | `user_id`, `group_notes`, `groups`, `my_rules`, `learned`, `ignore_senders`, `allow_senders`, `unread_only`, `mark_read_on_done`, `ai_footer`, `alerts_on`, `critical_hours`, `learn_at`, `auto_add`, `time_zone` (IANA name sent by the app from the device; unset = UTC), `settings_version`, `learn_paused_at`, `learn_paused_rowid`. |
-| **Run** | `runs` | One processing run (hourly cron or *Check now*). | `id`, `user_id`, `started`, `finished`, `processed`, `error`, `stopped`, `stats`, `calls`, `ms`. |
+| **Run** | `runs` | One processing run (the 5-minute cron or *Check now*). | `id`, `user_id`, `started`, `finished`, `processed`, `error`, `stopped`, `stats`, `calls`, `ms`. |
 | **Run event** | `run_events` | One decision or error inside a run. | `run_id`, `user_id`, `at`, `source`, `sender`, `subject`, `decision`, `detail`, `trace` (item id or event uuid). |
 | **App event** | `app_events` | An event received from the app's outbox, stored once by uuid then processed. | `uuid`, `user_id`, `kind`, `payload`, `received`, `processed` (0 waiting, 1 done, 2 failed), `attempts`, `last_error`. |
 | **Chat row** | `chat_rows` | One chat's unread messages the Mac sent for screening (WhatsApp, read from WhatsApp Desktop's own copy on the Mac), waiting for or done by the triage run. | `user_id`, `source_id`, `row_key` (`wa:<chat id>:<newest message id>`), `app`, `chat_name`, `is_group`, `muted` (judged under the stricter muted-chat rule), `senders`, `transcript`, `link`, `received`, `processed`, `processed_at`, `created`. Pruned 30 days after judging. |
@@ -368,7 +368,7 @@ sequenceDiagram
   participant App as App (board.sqlite)
   participant Eng as Engine (D1)
   participant Ext as Gmail / Fathom / Claude / push services
-  Ext->>Eng: hourly run reads new email and recaps
+  Ext->>Eng: run every 5 minutes reads new email and recaps
   Eng->>Eng: judge with Claude, write items
   Note over App: you change a card: outbox row in the same transaction
   App->>Eng: POST /v2/events (outbox, oldest first)

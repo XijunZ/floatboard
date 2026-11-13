@@ -352,8 +352,9 @@ Mac sends no `links`; the phone falls back to `link`.
 
 ### Built: due reminders for every task
 
-- **Engine.** One cron, `*/15 * * * *` (free Cloudflare accounts allow only 5 cron triggers in total), sends the due
-  reminders every run and does the hourly work on the run that falls on the hour (`cronJobs` in src/index.ts). It
+- **Engine.** One cron, `*/5 * * * *` since 13 Nov 2026 (free Cloudflare accounts allow only 5 cron triggers in total),
+  reads email and chats and sends the due reminders every run, and does the hourly work (cleanup, Fathom catch-up) on
+  the run that falls on the hour (`cronJobs` in src/index.ts). It
   reads each user's board copy with phone moves not yet applied and reminds of open tasks (To do, Doing, Watch):
   timed from 15 minutes before to 15 minutes after the due time ("Due 14:30" in the user's time zone), date-only on
   that day from 09:00 in the user's zone ("Due today"). Once per user, task and due value (`due_alerts_sent`,

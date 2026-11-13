@@ -131,7 +131,7 @@ export async function ingestOutlook(req: Request, env: Env, afterStore?: (userId
   return json({ ok: true, stored, duplicates: good.length - stored, skipped });
 }
 
-/** New rows judged right after they arrive (in the background of the ingest request): at most this many, the rest by the hourly run. */
+/** New rows judged right after they arrive (in the background of the ingest request): at most this many, the rest by the next scheduled run. */
 export const JUDGE_NOW = 5;
 
 /** Judge up to JUDGE_NOW waiting Outlook rows now. Never throws: a crash is recorded as a run like any other. */

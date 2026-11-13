@@ -94,24 +94,29 @@ export default {
     return json({ error: "not found" }, 404);
   },
 
-  /** Every 15 minutes: due reminders. On the hour: every user with an enabled source gets a few passes; backlogs continue next hour. */
+  /** Every 5 minutes: due reminders, and every user with an enabled source gets a few passes (backlogs continue on the
+   *  next run). On the hour also: cleanup and the Fathom catch-up. */
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const jobs = cronJobs(event.cron, event.scheduledTime);
     if (jobs.due) ctx.waitUntil(runDueAlerts(env));
-    if (jobs.hourly) ctx.waitUntil(runAllUsers(env));
+    if (jobs.read) ctx.waitUntil(runAllUsers(env, runRounds, undefined, { hourly: jobs.hourly }));
   },
 } satisfies ExportedHandler<Env>;
 
-/** The one schedule (wrangler.toml): every 15 minutes. One trigger only, because free accounts allow 5 for all Workers. */
-export const DUE_CRON = "*/15 * * * *";
+/** The one schedule (wrangler.toml): every 5 minutes. One trigger only, because free accounts allow 5 for all Workers. */
+export const CRON = "*/5 * * * *";
+/** The schedule before 13 Nov 2026 (a config not yet updated): reminders and reading every 15 minutes. */
+export const OLD_CRON = "*/15 * * * *";
 
 /**
- * What a cron run does. The 15-minute schedule always sends due reminders and also does the hourly work on the run
- * whose time is on the hour (UTC). Any other schedule (an older config with an hourly cron) is the hourly work only.
+ * What a cron run does: due reminders and reading email/chats on every run; the hourly work (cleanup, Fathom catch-up)
+ * on the run whose time falls in the first minutes of the hour (UTC). Any other schedule (an old hourly cron) does it all.
  */
-export function cronJobs(cron: string, scheduledTime: number): { due: boolean; hourly: boolean } {
-  if (cron !== DUE_CRON) return { due: false, hourly: true };
-  return { due: true, hourly: new Date(scheduledTime).getUTCMinutes() < 15 };
+export function cronJobs(cron: string, scheduledTime: number): { due: boolean; read: boolean; hourly: boolean } {
+  const minute = new Date(scheduledTime).getUTCMinutes();
+  if (cron === CRON) return { due: true, read: true, hourly: minute < 5 };
+  if (cron === OLD_CRON) return { due: true, read: true, hourly: minute < 15 };
+  return { due: false, read: true, hourly: true };
 }
 
 const cronProblem = (env: Env, decision: string, detail: string) =>
@@ -125,10 +130,12 @@ export async function runAllUsers(
   env: Env,
   runner: (env: Env, userId: string, opts: RunOptions) => Promise<unknown> = runRounds,
   userIds?: string[],
+  opts: { hourly?: boolean } = {},
 ): Promise<void> {
   const cronStart = nowISO();
-  // Setup-page hygiene rides on the hourly cron (no extra cron): expired sessions (with their encrypted keys) and states go.
-  try {
+  const hourly = opts.hourly ?? true;
+  // Setup-page hygiene rides on the hourly run (no extra cron): expired sessions (with their encrypted keys) and states go.
+  if (hourly) try {
     await purgeExpiredSetup(env);
     await purgeExpiredApp(env);
     await purgePhoneActions(env);
@@ -166,7 +173,7 @@ export async function runAllUsers(
     } catch (e) {
       await recordCrash(env, user_id, cronStart, e, share.used);
     }
-    await catchUpFathom(env, user_id, share); // never throws; problems show in needs attention
+    if (hourly) await catchUpFathom(env, user_id, share); // never throws; problems show in needs attention
     calls.used += share.used;
   }
 }

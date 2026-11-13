@@ -1,7 +1,7 @@
 # FloatBoard email connector
 
 An **optional** connector for the FloatBoard app. It is a small Cloudflare Worker (with a D1 database) that you run
-on your own free Cloudflare account. Every hour, even when your Mac is off, it reads your Gmail, uses Claude to turn
+on your own free Cloudflare account. Every 5 minutes, even when your Mac is off, it reads your Gmail, uses Claude to turn
 emails that need *your* action into task suggestions, adds meeting-note summaries to your meeting tasks, and can
 send urgent actions and due reminders to your phone. The FloatBoard app stays the source of truth: it pulls
 suggestions from the engine and sends your changes back.
