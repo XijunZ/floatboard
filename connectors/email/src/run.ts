@@ -11,6 +11,7 @@ import { pendingCorrections } from "./learn";
 import { processRecap } from "./recap";
 import { GmailSource } from "./sources/gmail";
 import { OutlookSource } from "./sources/outlook";
+import { ChatSource } from "./sources/chat";
 import { pruneOutlookRows } from "./outlook";
 import { DEFAULT_TIME_ZONE, zonedParts, zoneOrDefault } from "./time";
 import { type Message, type Source, SourceAuthError, type SourceRow } from "./sources/types";
@@ -33,7 +34,7 @@ export type RunOptions = {
 };
 
 /** Source kinds the triage run reads. */
-export const TRIAGE_KINDS = ["gmail", "outlook_web"];
+export const TRIAGE_KINDS = ["gmail", "outlook_web", "whatsapp"];
 
 export type RunStats = { fetched: number; skippedSeen: number; dropped: number; classified: number; actions: number;
   recaps: number; noAction: number; alerts: number; errors: number };
@@ -104,7 +105,8 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   };
 
   const full = !opts.kinds;
-  const user = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(userId).first<{ anthropic_key_enc: string | null }>();
+  const user = await env.DB.prepare("SELECT anthropic_key_enc, name FROM users WHERE id=?").bind(userId).first<{ anthropic_key_enc: string | null; name: string | null }>();
+  const userName = user?.name ?? "";
   if (!user?.anthropic_key_enc) {
     await finish(0, "Add your Claude API key in Connections to start reading email.", "no_key");
     return { processed: 0, done: true };
@@ -117,6 +119,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   const groups: string[] = JSON.parse(s?.groups ?? "[]");
   const groupNotes: Record<string, string> = JSON.parse(s?.group_notes ?? "{}");
   const myRules: string = s?.my_rules ?? "";
+  const chatRules: string = s?.chat_rules ?? "";
   const alertsOn = !!(s?.alerts_on ?? 1);
   const timeZone = zoneOrDefault(s?.time_zone);
   // Least recently read first, so one inbox's backlog can't starve another.
@@ -124,7 +127,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   const { results: rows } = await env.DB.prepare(`SELECT * FROM sources WHERE user_id=? AND kind IN (SELECT value FROM json_each(?)) AND enabled=1
       ORDER BY COALESCE(last_run, '') ASC, created ASC`)
     .bind(userId, JSON.stringify(kinds)).all<SourceRow>();
-  const me = rows.map((r) => r.address.toLowerCase()).filter(Boolean);
+  const me = rows.filter((r) => r.kind === "gmail" || r.kind === "outlook_web").map((r) => r.address.toLowerCase()).filter(Boolean);
   /** How a source is named in the run log and to Claude ("Received in:"); an Outlook mailbox is unknown until its first send. */
   const labelOf = (r: SourceRow) => r.address || (r.kind === "outlook_web" ? "Outlook" : "");
   // App events first (mark read, corrections); learning runs at the end of processEvents, at most once per run.
@@ -210,7 +213,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
     }
     if (route === "classify") {
       stats.classified++;
-      const res = await classify(m, me, fb, client, groups, { groupNotes, myRules, inbox: source, learned, timeZone });
+      const res = await classify(m, me, fb, client, groups, { groupNotes, myRules, inbox: source, learned, timeZone, chatRules, userName });
       const a = res.ok ? res.action : null;
       if (!res.ok) {
         stats.classified--; // not judged
@@ -267,6 +270,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   const sourceOf = (row: SourceRow) => {
     if (!sources.has(row.id)) sources.set(row.id, opts.sourceFor ? opts.sourceFor(row)
       : row.kind === "outlook_web" ? new OutlookSource(env, row)
+      : row.kind === "whatsapp" ? new ChatSource(env, row)
       : new GmailSource(env, row, calls.wrap(), opts.lookbackDays ?? 7, [...DEFAULT_RECAP_SENDERS, ...rules.allow], unreadOnly));
     return sources.get(row.id)!;
   };

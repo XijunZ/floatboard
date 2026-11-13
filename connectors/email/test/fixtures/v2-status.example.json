@@ -4,6 +4,7 @@
     { "key": "group_notes", "label": "What each group means", "kind": "groupNotes", "help": "Claude uses these to put new tasks in the right group." },
     { "key": "my_rules", "label": "Your own rules", "kind": "longtext", "help": "Plain words, one per line. These override the shared email skill." },
     { "key": "learned", "label": "What FloatBoard has learned about you", "kind": "longtext", "help": "Built from your corrections. You can edit it." },
+    { "key": "chat_rules", "label": "Your own WhatsApp rules", "kind": "longtext", "help": "What becomes a task from WhatsApp, in plain words, one per line. These override the shared chat rulebook." },
     { "key": "ignore_senders", "label": "Always ignore", "kind": "list", "help": "Addresses or @domains, one per line." },
     { "key": "allow_senders", "label": "Always include", "kind": "list", "help": "Addresses or @domains that are always read, even from tabs that are normally skipped." },
     { "key": "unread_only", "label": "Only unread emails become tasks", "kind": "bool" },
