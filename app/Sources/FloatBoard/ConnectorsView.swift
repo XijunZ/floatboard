@@ -112,6 +112,16 @@ enum ConnectFlow {
         NSApp.activate()
         a.runModal()
     }
+
+    /// A confirmation for actions that remove data: Cancel is the default (Return cancels), the action is marked
+    /// destructive. True only when the person chose the action.
+    static func confirmTwice(_ title: String, _ text: String, action: String) -> Bool {
+        let a = NSAlert(); a.messageText = title; a.informativeText = text; a.alertStyle = .warning
+        a.addButton(withTitle: "Cancel"); a.addButton(withTitle: action)
+        a.buttons[1].hasDestructiveAction = true
+        NSApp.activate()
+        return a.runModal() == .alertSecondButtonReturn
+    }
 }
 
 /// Connectors tab: the online services that suggest tasks, plus Google Calendar.
@@ -181,6 +191,19 @@ struct ConnectorCard: View {
         .fixedSize()
     }
 
+    /// Rarely used actions that remove data, kept out of sight behind "⋯" so they aren't clicked by accident.
+    private var moreMenu: some View {
+        Menu {
+            Button("Archive old data to this Mac…") { archiving = true }
+                .disabled(info.baseURL.isEmpty)
+            Divider()
+            Button("Remove this connection…", role: .destructive) { remove() }
+        } label: { Image(systemName: "ellipsis.circle") }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More: archive old data, remove this connection")
+    }
+
     private func confirmRecheck(days: Int) {
         let a = NSAlert()
         a.messageText = "Re-check the last \(days) days of email?"
@@ -216,7 +239,7 @@ struct ConnectorCard: View {
                     .disabled(info.baseURL.isEmpty)
                 Button("Sync now") { NotificationCenter.default.post(name: .floatBoardSyncConnectors, object: nil) }
                 recheckMenu
-                Button("Remove…", role: .destructive) { remove() }
+                moreMenu
             }
             Text(ConnectorHealth.statusLine(info, waiting: store.waitingCount(connector: info.id)))
                 .font(.system(size: 11))
@@ -231,9 +254,6 @@ struct ConnectorCard: View {
                         .font(.system(size: 11))
                         .foregroundStyle(EngineArchive.isLarge(size) ? Color.orange : Color.secondary)
                 }
-                Button("Archive old data to this Mac…") { archiving = true }
-                    .font(.system(size: 11))
-                    .disabled(info.baseURL.isEmpty)
             }
             ForEach(status?.needsAttention ?? [], id: \.self) { m in
                 Label(m, systemImage: "exclamationmark.triangle.fill")
@@ -255,9 +275,12 @@ struct ConnectorCard: View {
         let a = NSAlert()
         a.messageText = "Remove \(info.name)?"
         a.informativeText = "FloatBoard stops syncing with it and forgets its key. Its tasks and their history stay on your board, and your settings for it (rules, group descriptions, lists and learned preferences) are kept: they come back if you connect it again."
-        a.addButton(withTitle: "Remove"); a.addButton(withTitle: "Cancel")
+        a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Remove…")
+        a.buttons[1].hasDestructiveAction = true
         NSApp.activate()
-        guard a.runModal() == .alertFirstButtonReturn else { return }
+        guard a.runModal() == .alertSecondButtonReturn else { return }
+        guard ConnectFlow.confirmTwice("Remove \(info.name) now?",
+            "Email tasks stop arriving and changes on your phone stop reaching this Mac until you connect it again.", action: "Remove") else { return }
         do { try ConnectorAccounts.remove(id: info.id, store: store) } catch {
             store.activity("connector:\(info.id)", .error, "Could not remove \(info.name)", detail: "\(error)")
             ConnectFlow.alert("Couldn't remove \(info.name)", "\(error)")

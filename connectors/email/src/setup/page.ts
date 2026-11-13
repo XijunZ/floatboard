@@ -35,6 +35,7 @@ input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:8
 button,.button{display:inline-block;margin-top:10px;padding:7px 14px;border-radius:6px;border:1px solid #0a64d8;background:#0a64d8;color:#fff;font:inherit;text-decoration:none;cursor:pointer}
 button.secondary,.button.secondary{background:#fff;color:#0a64d8}
 button.danger{background:#fff;color:#c4271b;border-color:#c4271b}
+label.sure{display:inline;font-weight:normal;margin:0 4px 0 8px}
 code{background:#f2f2f5;padding:2px 5px;border-radius:4px;word-break:break-all}
 .muted{color:#6e6e73}.ok{color:#1a7f37;font-weight:600}.bad{color:#c4271b;font-weight:600}
 .notice{background:#eaf6ec;border:1px solid #b7dfc0;padding:10px;border-radius:8px}
@@ -116,7 +117,7 @@ function phonesSection(d: Dashboard): string {
   const list = phones.length
     ? `<ul>${phones.map((p) => `<li><strong>${esc(p.name)}</strong> <span class="muted">added ${esc(utc(p.created))}${p.last_seen ? `, last used ${esc(utc(p.last_seen))}` : ""}${p.shares_passkey ? `, shares its passkey with ${p.shares_passkey} other device${p.shares_passkey === 1 ? "" : "s"}` : ""}</span>
 <form class="inline" method="post" action="/setup/phones/remove">${csrfField(d.csrf)}<input type="hidden" name="device_id" value="${esc(p.id)}">
-<button class="danger" type="submit">Remove</button></form></li>`).join("")}</ul>`
+<label class="sure"><input type="checkbox" required> Yes, remove</label> <button class="danger" type="submit">Remove</button></form></li>`).join("")}</ul>`
     : `<p class="muted">No phones paired yet.</p>`;
   return `${list}
 <p class="muted">To add a phone, open the FloatBoard app on your Mac, go to the Connectors tab and choose Pair a phone. A passkey synced to another device (iCloud Keychain, Google Password Manager) can sign that device in too; it then shows here as its own device.</p>
@@ -143,7 +144,7 @@ export function dashboardPage(d: Dashboard): string {
     ? `<ul>${d.gmail.map((g) => `<li><strong>${esc(g.address)}</strong> — ${gmailStatus(g)}<br>
 <a class="button secondary" href="${esc(startHref(g.address))}">Reconnect</a>
 <form class="inline" method="post" action="/setup/gmail/remove">${csrfField(d.csrf)}<input type="hidden" name="source_id" value="${esc(g.id)}">
-<button class="danger" type="submit">Remove</button></form></li>`).join("")}</ul>`
+<label class="sure"><input type="checkbox" required> Yes, remove</label> <button class="danger" type="submit">Remove</button></form></li>`).join("")}</ul>`
     : `<p class="muted">No Gmail accounts connected yet.</p>`;
   return layout("FloatBoard engine setup", `
 <h1>FloatBoard engine setup</h1>
