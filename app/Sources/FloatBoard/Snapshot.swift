@@ -125,7 +125,7 @@ enum Snapshot {
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so the connector cards and their settings forms are drawn directly.
         let connectorList = VStack(alignment: .leading, spacing: 12) {
-            ForEach(store.connectors) { c in ConnectorCard(info: c) }
+            ForEach(store.connectors) { c in ConnectorCard(info: c); PhoneAppCard(info: c) }
             Spacer(minLength: 0)
         }.padding(12).frame(width: 900, alignment: .topLeading).fixedSize(horizontal: false, vertical: true)
         save(connectorList, "connectors.png", CGSize(width: 900, height: 520))

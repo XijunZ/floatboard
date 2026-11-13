@@ -3,16 +3,15 @@ import FloatBoardConnectors
 import FloatBoardCore
 import SwiftUI
 
-/// One engine on the Connectors tab, in four parts with one row style throughout:
+/// One engine on the Connectors tab, in three parts with one row style throughout:
 /// - header: the engine, its health, and actions on the whole engine (Sync now, ⋯);
 /// - Inputs: every source feeding it (Gmail inboxes, Outlook, Fathom, WhatsApp on this Mac), each with a switch and ⋯;
-/// - Phones: paired phones, each with ⋯, and Pair a phone;
 /// - Rules and settings: the engine's settings form.
+/// The phone app is not part of the engine's inputs: it has its own card (`PhoneAppCard`).
 struct ConnectorCard: View {
     @EnvironmentObject var store: Store
     let info: ConnectorInfo
     @State private var settingsOpen = false
-    @State private var pairing = false
     @State private var archiving = false
     /// Switch positions the engine hasn't confirmed yet (shown at once; the next status replaces them).
     @State private var pendingInputs: [String: Bool] = [:]
@@ -33,12 +32,6 @@ struct ConnectorCard: View {
                 addInputMenu
             }
             Divider()
-            CardSection(title: "Phones", help: "Your board and urgent alerts on your phone.") {
-                PhonesList(info: info)
-                Button("Pair a phone…") { pairing = true }
-                    .buttonStyle(.link).font(.system(size: 11)).disabled(info.baseURL.isEmpty)
-            }
-            Divider()
             DisclosureGroup(isExpanded: $settingsOpen) {
                 ConnectorSettingsForm(info: info, schema: status?.schema ?? []).padding(.top, 6)
             } label: {
@@ -47,7 +40,6 @@ struct ConnectorCard: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
-        .sheet(isPresented: $pairing) { PairPhoneSheet(info: info).environmentObject(store) }
         .sheet(isPresented: $archiving) { ArchiveSheet(info: info).environmentObject(store) }
     }
 
@@ -296,7 +288,49 @@ struct WhatsAppInputRow: View {
     }
 }
 
-// MARK: - Phones
+// MARK: - Phone app
+
+/// The phone app: where the board goes (not a source of tasks), so a card of its own. Served by `info`'s engine at
+/// `<engine>/app`; lists the paired phones (each ⋯ › Disconnect) and pairs new ones. Hidden for engines without it.
+struct PhoneAppCard: View {
+    @EnvironmentObject var store: Store
+    let info: ConnectorInfo
+    @State private var pairing = false
+    @State private var copied = false
+
+    var body: some View {
+        if ConnectorSync.phoneSupport[info.id] != false, !info.baseURL.isEmpty {
+            let address = (URL(string: info.baseURL)?.host).map { "\($0)/app" } ?? "\(info.baseURL)/app"
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "iphone").font(.system(size: 16)).foregroundStyle(.blue)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Phone app").font(.system(size: 13, weight: .semibold))
+                        Text("\(address) · served by the \(info.name) engine").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Pair a phone…") { pairing = true }
+                    Menu {
+                        Button(copied ? "Address copied" : "Copy the phone app's address") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("https://\(address)/", forType: .string)
+                            copied = true
+                        }
+                        Button("Open it in the browser") { if let u = URL(string: "https://\(address)/") { NSWorkspace.shared.open(u) } }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .menuIndicator(.hidden).fixedSize()
+                }
+                Text("Your board on your phone: move, finish and add tasks, open links, and get urgent alerts and due reminders.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                Divider()
+                CardSection(title: "Paired phones", help: "Signed in to the phone app.") { PhonesList(info: info) }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.06)))
+            .sheet(isPresented: $pairing) { PairPhoneSheet(info: info).environmentObject(store) }
+        }
+    }
+}
 
 /// Paired phones, each with ⋯ › Disconnect (signs it out and stops its notifications).
 struct PhonesList: View {
@@ -312,7 +346,8 @@ struct PhonesList: View {
                 Text("No phones paired.").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             ForEach(phones) { p in
-                SourceRow(icon: "iphone", name: p.name, detail: p.sharesPasskey > 0 ? "Shares a passkey" : "Phone app",
+                SourceRow(icon: "iphone", name: p.name, detail: (p.created.map { "Paired \($0.formatted(.dateTime.day().month(.abbreviated)))" } ?? "Paired")
+                            + (p.sharesPasskey > 0 ? " · shares a passkey" : ""),
                           state: p.lastSeen.map { "Last used \(ConnectorHealth.time($0))" } ?? "Not used yet") {
                     Button("Disconnect \(p.name)…", role: .destructive) { disconnect(p) }
                 }
