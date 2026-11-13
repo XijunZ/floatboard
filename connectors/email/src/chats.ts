@@ -1,6 +1,7 @@
 /**
  * Chats screened for tasks. The Mac reads WhatsApp Desktop's own copy of the person's messages on the Mac (nothing
- * talks to WhatsApp), applies the free rules (muted, archived, status, channels, already answered, no words) and sends
+ * talks to WhatsApp), applies the free rules (archived, status, channels, already answered, no words; muted chats are
+ * sent marked `muted` and judged more strictly) and sends
  * each chat's new unread messages here with the user key: POST /v2/chats. Rows are stored once by their key and judged
  * by the triage run (src/sources/chat.ts, rulebook src/skills/chat-triage.md); new rows are judged right away in the
  * background.
@@ -24,7 +25,7 @@ const MAX_CHATS = 100, MAX_BODY = 1_200_000, MAX_TRANSCRIPT = 8000;
 export const JUDGE_CHATS_NOW = 10;
 const KEEP_PROCESSED_MS = 30 * 86400e3;
 
-export type ChatRow = { key: string; name: string; group: boolean; senders: string; transcript: string; link: string; received: string };
+export type ChatRow = { key: string; name: string; group: boolean; muted: boolean; senders: string; transcript: string; link: string; received: string };
 
 const clean = (v: unknown, max: number): string | null =>
   typeof v === "string" ? v.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").trim().slice(0, max) : null;
@@ -44,7 +45,7 @@ export function readChat(x: unknown): ChatRow | null {
   const t = typeof r.received === "string" ? Date.parse(r.received) : NaN;
   if (!Number.isFinite(t)) return null;
   const senders = Array.isArray(r.senders) ? r.senders.map((s) => clean(s, 100)).filter(Boolean).slice(0, 20).join(", ") : "";
-  return { key, name: name || "(no name)", group: r.group === true, senders, transcript, link: chatLink(r.link), received: new Date(t).toISOString() };
+  return { key, name: name || "(no name)", group: r.group === true, muted: r.muted === true, senders, transcript, link: chatLink(r.link), received: new Date(t).toISOString() };
 }
 
 async function chatSource(env: Env, userId: string, app: ChatApp): Promise<string> {
@@ -74,8 +75,8 @@ route("POST", "/v2/chats", async (req, env, user, _p, ctx) => {
   const rows = chats.map(readChat);
   const good = rows.filter((r): r is ChatRow => r !== null);
   const results = good.length ? await env.DB.batch(good.map((r) => env.DB.prepare(`INSERT OR IGNORE INTO chat_rows
-      (user_id,source_id,row_key,app,chat_name,is_group,senders,transcript,link,received,created) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(user.id, sourceId, r.key, app, r.name, r.group ? 1 : 0, r.senders, r.transcript, r.link, r.received, now))) : [];
+      (user_id,source_id,row_key,app,chat_name,is_group,muted,senders,transcript,link,received,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(user.id, sourceId, r.key, app, r.name, r.group ? 1 : 0, r.muted ? 1 : 0, r.senders, r.transcript, r.link, r.received, now))) : [];
   const stored = results.filter((r) => r.meta.changes > 0).length;
   const skipped = rows.length - good.length;
   const stmts = [env.DB.prepare("UPDATE sources SET last_run=?, last_error=NULL WHERE id=?").bind(now, sourceId), pruneChatRows(env, user.id)];

@@ -357,8 +357,8 @@ struct WhatsAppRow: View {
 
     private var line: String {
         if let e = st?.error { return e }
-        guard let read = st?.lastRead else { return "Reads WhatsApp Desktop's copy on this Mac every 5 minutes. Unread chats only; muted and archived chats are never read." }
-        return "Last read \(ConnectorHealth.time(read)) · \(st?.lastSent ?? 0) chat\(st?.lastSent == 1 ? "" : "s") sent to screen · muted and archived chats are skipped"
+        guard let read = st?.lastRead else { return "Reads WhatsApp Desktop's copy on this Mac every 5 minutes. Unread chats only; archived chats are skipped, muted chats are held to a stricter rule." }
+        return "Last read \(ConnectorHealth.time(read)) · \(st?.lastSent ?? 0) chat\(st?.lastSent == 1 ? "" : "s") sent to screen · muted chats judged more strictly"
     }
 
     private func confirmOn() -> Bool {
@@ -368,7 +368,7 @@ struct WhatsAppRow: View {
             Every 5 minutes FloatBoard reads WhatsApp Desktop's own copy of your messages on this Mac. It never logs in, \
             never touches WhatsApp itself and never sends anything on WhatsApp.
 
-            Unread messages from chats that aren't muted or archived go to your engine (\(URL(string: info.baseURL)?.host ?? "your engine")) \
+            Unread messages from chats that aren't archived (muted ones too, judged more strictly) go to your engine (\(URL(string: info.baseURL)?.host ?? "your engine")) \
             and to Claude, which turns the ones that need you into tasks. Your own WhatsApp rules are in Settings below.
 
             macOS may ask you to allow FloatBoard in Full Disk Access.

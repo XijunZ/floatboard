@@ -6,7 +6,8 @@ import SQLite3
 /// read there, so WhatsApp's own database is never opened or locked.
 ///
 /// The free rules (no Claude, nothing leaves the Mac) are applied here:
-/// - only one-to-one and group chats with unread messages; muted, archived, hidden or removed chats are never read;
+/// - only one-to-one and group chats with unread messages; archived, hidden or removed chats are never read; muted
+///   chats are read but marked `muted`, and the engine holds them to a stricter rule;
 ///   status updates, broadcast lists and channels are never read;
 /// - only messages newer than the last send for that chat (`cursors`), from the last 7 days, at most 30 per chat;
 /// - messages with no words (stickers, reactions, emoji only, "ok", "thanks") are dropped, and a chat with nothing
@@ -31,6 +32,8 @@ public enum WhatsAppLocal {
         public let chatID: String
         public let name: String
         public let group: Bool
+        /// The person muted this chat: only something clearly for them personally becomes a task.
+        public let muted: Bool
         public let senders: [String]
         /// "[2026-11-13 09:12] Anna: text" lines, oldest first; context lines start with "(earlier)".
         public let transcript: String
@@ -88,18 +91,18 @@ public enum WhatsAppLocal {
     private static func read(_ db: OpaquePointer, cursors: [String: Double], now: Date, zone: TimeZone) throws -> [Chat] {
         let nowApple = now.timeIntervalSince1970 - appleEpoch
         let chats = try rows(db, """
-            SELECT s.Z_PK, s.ZCONTACTJID, COALESCE(s.ZPARTNERNAME,''), s.ZSESSIONTYPE, s.ZUNREADCOUNT
+            SELECT s.Z_PK, s.ZCONTACTJID, COALESCE(s.ZPARTNERNAME,''), s.ZSESSIONTYPE, s.ZUNREADCOUNT,
+                   CASE WHEN COALESCE(p.ZMUTEDUNTIL,0) > ? THEN 1 ELSE 0 END
             FROM ZWACHATSESSION s LEFT JOIN ZWACHATPUSHCONFIG p ON p.ZJID = s.ZCONTACTJID
             WHERE s.ZUNREADCOUNT > 0 AND s.ZSESSIONTYPE IN (0,1)
               AND COALESCE(s.ZARCHIVED,0)=0 AND COALESCE(s.ZREMOVED,0)=0 AND COALESCE(s.ZHIDDEN,0)=0
-              AND COALESCE(p.ZMUTEDUNTIL,0) <= ?
               AND s.ZCONTACTJID IS NOT NULL AND s.ZCONTACTJID NOT LIKE '%status' AND s.ZCONTACTJID NOT LIKE '%@broadcast'
               AND s.ZCONTACTJID NOT LIKE '%@newsletter'
             """, [.double(nowApple)])
         var out: [Chat] = []
         for c in chats {
             guard let pk = c[0].int, let jid = c[1].text else { continue }
-            let partner = c[2].text ?? "", group = c[3].int == 1, unread = max(0, c[4].int ?? 0)
+            let partner = c[2].text ?? "", group = c[3].int == 1, unread = max(0, c[4].int ?? 0), muted = c[5].int == 1
             let msgs = try rows(db, """
                 SELECT m.ZISFROMME, m.ZMESSAGETYPE, COALESCE(m.ZTEXT,''), m.ZMESSAGEDATE, COALESCE(m.ZSTANZAID,''),
                        COALESCE(NULLIF(gm.ZCONTACTNAME,''), NULLIF(gm.ZFIRSTNAME,''), NULLIF(CAST(m.ZPUSHNAME AS TEXT),''), ''),
@@ -126,7 +129,7 @@ public enum WhatsAppLocal {
             for (m, _) in worded where !senders.contains(nameOf(m)) { senders.append(nameOf(m)) }
             out.append(Chat(key: "wa:\(jid):\(last.stanza.isEmpty ? String(Int(last.date)) : last.stanza)", chatID: jid,
                             name: group ? (partner.isEmpty ? "Group" : partner) : (partner.isEmpty ? phoneOf(jid) ?? "Unknown" : partner),
-                            group: group, senders: senders, transcript: transcript, link: link(jid),
+                            group: group, muted: muted, senders: senders, transcript: transcript, link: link(jid),
                             received: Date(timeIntervalSince1970: last.date + appleEpoch), newest: last.date))
         }
         return out.sorted { $0.newest < $1.newest }

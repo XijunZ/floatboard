@@ -1,7 +1,7 @@
 import { type Env, nowISO } from "../env";
 import type { Message, Source, SourceRow } from "./types";
 
-type Stored = { row_key: string; app: string; chat_name: string; is_group: number; senders: string; transcript: string; link: string; received: string };
+type Stored = { row_key: string; app: string; chat_name: string; is_group: number; muted: number; senders: string; transcript: string; link: string; received: string };
 type Cursor = { received: string; key: string };
 
 const APP_NAMES: Record<string, string> = { whatsapp: "WhatsApp" };
@@ -15,7 +15,7 @@ export class ChatSource implements Source {
 
   async fetchBatch(cursor: string | null, limit: number) {
     const c: Cursor | null = cursor ? JSON.parse(cursor) : null;
-    const { results } = await this.env.DB.prepare(`SELECT row_key, app, chat_name, is_group, senders, transcript, link, received FROM chat_rows
+    const { results } = await this.env.DB.prepare(`SELECT row_key, app, chat_name, is_group, muted, senders, transcript, link, received FROM chat_rows
         WHERE user_id=? AND source_id=? AND processed=0 AND (received > ?3 OR (received = ?3 AND row_key > ?4))
         ORDER BY received, row_key LIMIT ?5`)
       .bind(this.row.user_id, this.row.id, c?.received ?? "", c?.key ?? "", limit).all<Stored>();
@@ -48,7 +48,7 @@ export class ChatSource implements Source {
       headers: {},
       text: r.transcript,
       link: r.link,
-      chat: { app, group: !!r.is_group, name: r.chat_name, senders: r.senders },
+      chat: { app, group: !!r.is_group, muted: !!r.muted, name: r.chat_name, senders: r.senders },
     };
   }
 }
