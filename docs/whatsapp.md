@@ -9,7 +9,9 @@ email engine › **Screen WhatsApp for tasks**).
    (`~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite`). It copies the files to a private
    temporary folder and reads the copy, so WhatsApp's database is never opened or locked, and deletes the copy at once.
 2. The free rules run on the Mac (nothing leaves it for chats they drop):
-   - only chats with unread messages; **muted, archived, hidden chats, status updates, broadcast lists and channels are never read**;
+   - only chats with unread messages; **archived and hidden chats, status updates, broadcast lists and channels are never read**;
+   - **muted chats are read but marked muted**: Claude then applies a stricter rule (only something for you by name,
+     money you personally owe, or your own family, booking or safety becomes a task; never urgent);
    - a chat where your message is the newest one (you answered) is not sent;
    - only messages from the last 7 days, at most 30 per chat, and never the same message twice;
    - messages with no words (stickers, reactions, emoji only, "ok", "thanks", a bare photo) are dropped.

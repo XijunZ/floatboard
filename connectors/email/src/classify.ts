@@ -106,7 +106,7 @@ ${groupList}
 Now (${zone}): ${nowIn(zone)}${mine}${ctx.chatRules?.trim() ? `\n\nThe person's own chat rules (these override the rulebook):\n${ctx.chatRules.trim()}` : ""}${learned}${lessons}
 
 App: ${m.chat.app}
-Chat: ${m.chat.name} (${m.chat.group ? "group chat" : "one-to-one chat"})
+Chat: ${m.chat.name} (${m.chat.group ? "group chat" : "one-to-one chat"}${m.chat.muted ? ", MUTED by the person: apply the muted-chat rule" : ""})
 Unread messages, oldest first (lines marked "earlier" were already read and are only context):
 ${m.text}` : "";
   const r = await askStructured(client, { system: m.chat ? CHAT_SYSTEM : SYSTEM, user: m.chat ? chatUser : user, schema: Verdict });

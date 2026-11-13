@@ -92,4 +92,14 @@ describe("chats from the Mac", () => {
     expect(r.status).toBeLessThan(300);
     expect((await env.DB.prepare("SELECT chat_rules FROM settings WHERE user_id=?").bind(u.id).first<any>()).chat_rules).toBe("Ignore the school group");
   });
+
+  it("muted_chats_are_judged_with_the_stricter_rule", async () => {
+    const u = await keyed("C6");
+    await send(u.key, [chat({ key: "wa:g2@g.us:M1", name: "School parents", group: true, muted: true, transcript: "[09:00] Kim: RSVP for the fair by Friday" })]);
+    const seen: any[] = [];
+    await runUser(env as any, u.id, { kinds: ["whatsapp"], fetchFn: claude({}, seen) });
+    expect(seen[0].messages[0].content).toContain("Chat: School parents (group chat, MUTED by the person: apply the muted-chat rule)");
+    expect(seen[0].system).toContain("## Muted chats (stricter)");
+    expect((await env.DB.prepare("SELECT muted FROM chat_rows WHERE user_id=?").bind(u.id).first<any>()).muted).toBe(1);
+  });
 });

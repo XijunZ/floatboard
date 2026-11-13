@@ -277,7 +277,7 @@ public struct ConnectorClient {
     public func sendChats(app: String, _ chats: [WhatsAppLocal.Chat]) async throws -> Int {
         let iso = ISO8601DateFormatter()
         let body = try JSONSerialization.data(withJSONObject: ["app": app, "chats": chats.map { c in
-            ["key": c.key, "name": c.name, "group": c.group, "senders": c.senders, "transcript": c.transcript, "link": c.link,
+            ["key": c.key, "name": c.name, "group": c.group, "muted": c.muted, "senders": c.senders, "transcript": c.transcript, "link": c.link,
              "received": iso.string(from: c.received)] as [String: Any]
         }])
         let data: Data

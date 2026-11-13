@@ -21,7 +21,7 @@ private func fakeWhatsApp(_ folder: URL, now: Date) throws {
     INSERT INTO ZWAMESSAGE VALUES (1,1,1,0,'See you soon',\(a - 7200),'S1',NULL,NULL,NULL);
     INSERT INTO ZWAMESSAGE VALUES (2,1,0,0,'Can you send me the flat contract by tonight?',\(a - 3600),'S2',NULL,NULL,NULL);
     INSERT INTO ZWAMESSAGE VALUES (3,1,0,0,'thanks!',\(a - 3500),'S3',NULL,NULL,NULL);
-    -- 2 muted group with unread: never read
+    -- 2 muted group with unread: read, marked muted
     INSERT INTO ZWACHATSESSION VALUES (2,'120363@g.us','Muted club',1,5,0,0,0);
     INSERT INTO ZWACHATPUSHCONFIG VALUES (1,'120363@g.us',\(far));
     INSERT INTO ZWAMESSAGE VALUES (4,2,0,0,'Please everyone pay £10 today',\(a - 100),'S4',NULL,NULL,NULL);
@@ -65,7 +65,9 @@ private func fakeWhatsApp(_ folder: URL, now: Date) throws {
 
     do {
         let chats = try WhatsAppLocal.unreadChats(folder: folder, cursors: [:], now: now, zone: utc)
-        check(chats.map(\.name) == ["Anna", "Family"], "whatsapp_reads_only_unread_unmuted_unarchived_unanswered_worded_recent_chats")
+        check(chats.map(\.name) == ["Anna", "Family", "Muted club"], "whatsapp_reads_only_unread_unarchived_unanswered_worded_recent_chats")
+        check(chats.first { $0.name == "Muted club" }?.muted == true && chats.filter(\.muted).count == 1,
+              "whatsapp_muted_chats_are_read_and_marked_muted")
         let anna = chats.first { $0.name == "Anna" }
         check(anna?.transcript.contains("(earlier)") == true && anna?.transcript.contains("You: See you soon") == true
               && anna?.transcript.contains("Anna: Can you send me the flat contract by tonight?") == true
@@ -100,8 +102,9 @@ private func fakeWhatsApp(_ folder: URL, now: Date) throws {
     let n1 = await WhatsAppSync.tick(connector: "wa", store: store, client: eng.client(), now: now, folder: folder)
     let n2 = await WhatsAppSync.tick(connector: "wa", store: store, client: eng.client(), now: now, folder: folder)
     let sent = (bodies.first?["chats"] as? [[String: Any]]) ?? []
-    check(n1 == 2 && n2 == 0 && bodies.count == 1 && bodies[0]["app"] as? String == "whatsapp"
-          && sent.map { $0["name"] as? String ?? "" } == ["Anna", "Family"] && sent[0]["received"] is String,
+    check(n1 == 3 && n2 == 0 && bodies.count == 1 && bodies[0]["app"] as? String == "whatsapp"
+          && sent.map { $0["name"] as? String ?? "" } == ["Anna", "Family", "Muted club"] && sent[0]["received"] is String
+          && sent[2]["muted"] as? Bool == true && sent[0]["muted"] as? Bool == false,
           "whatsapp_sync_sends_new_chats_once")
     WhatsAppSync.setOn(false, connector: "wa", store: store)
     WhatsAppSync.setOn(true, connector: "wa", store: store)

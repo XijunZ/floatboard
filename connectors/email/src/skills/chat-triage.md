@@ -7,7 +7,7 @@ override it.
 
 ## Already filtered out before you see anything
 
-- Muted chats, archived chats, status updates, channels and broadcast lists are never read.
+- Archived chats, status updates, channels and broadcast lists are never read.
 - Chats where the person sent the last message (they answered) are not sent.
 - Messages with no words (stickers, reactions, emoji only, "ok", "thanks", "👍") are removed.
 
@@ -28,6 +28,16 @@ override it.
   when it names or @mentions the person, replies to them, or asks every member to do something with a deadline
   (RSVP, pay a share, fill in a form, vote).
 - When unsure, ask: would they be worse off if this was not on their to-do list? If not, it is not an action.
+
+## Muted chats (stricter)
+
+The person muted the chat because most of it doesn't concern them. In a muted chat, only these are actions:
+- a message that names, @mentions or replies to the person and asks them to do something;
+- money the person personally owes or must pay, or a deadline that applies to them by name;
+- something about their own family member, booking, order or safety that needs them.
+Everything else in a muted chat is not an action, including questions to the whole group, RSVPs, polls, sign-up lists,
+shared bills not addressed to them, reminders to everyone, and anything they could miss without consequence.
+A task from a muted chat is never urgent, and is high importance only for money or safety.
 
 ## Importance and urgency
 

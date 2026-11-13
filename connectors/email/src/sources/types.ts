@@ -27,7 +27,7 @@ export type Message = {
   /** Web links in the email's HTML part (its plain text often has none); Claude may pick ones the task needs. */
   links?: string[];
   /** A chat (WhatsApp) rather than an email: `text` is the unread messages as "[time] Name: text" lines. */
-  chat?: { app: string; group: boolean; name: string; senders: string };
+  chat?: { app: string; group: boolean; muted?: boolean; name: string; senders: string };
 };
 
 /** Something odd the source worked around; the run records it in the run log (trace = messageId). */
