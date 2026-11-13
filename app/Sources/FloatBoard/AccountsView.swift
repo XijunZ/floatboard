@@ -94,7 +94,11 @@ struct AccountsView: View {
                         Image(systemName: "person.crop.circle").foregroundStyle(.secondary)
                         Text(email).font(.system(size: 12))
                         Spacer()
-                        Button("Remove") { google.remove(email) }
+                        Button("Remove…") {
+                            if ConnectFlow.confirmTwice("Remove \(email)?",
+                                "FloatBoard stops adding tasks to this calendar and making Meet links with it. Events already made stay.",
+                                action: "Remove") { google.remove(email) }
+                        }
                     }
                     .frame(maxWidth: 520)
                 }

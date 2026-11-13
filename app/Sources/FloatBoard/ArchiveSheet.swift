@@ -44,9 +44,14 @@ struct ArchiveSheet: View {
                 }
                 Spacer()
                 Button(outcome == nil ? "Cancel" : "Done") { dismiss() }.disabled(running)
-                Button("Archive") { Task { await archive() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(running)
+                Button("Archive…") {
+                    let span = months == 12 ? "1 year" : "\(months) months"
+                    guard ConnectFlow.confirmTwice("Remove data older than \(span) from the engine?",
+                        "It is saved to a file on this Mac first, and only removed from the engine once the file checks out. This can't be undone from FloatBoard.",
+                        action: "Archive") else { return }
+                    Task { await archive() }
+                }
+                .disabled(running)
             }
         }
         .padding(20)

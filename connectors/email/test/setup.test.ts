@@ -460,3 +460,13 @@ describe("setup page: guidance and safety", () => {
     expect(logs[0].detail).toContain("browser");
   });
 });
+
+describe("remove needs a tick", () => {
+  it("gmail_and_phone_remove_buttons_need_a_tick_first", async () => {
+    const { dashboardPage } = await import("../src/setup/page");
+    const html = dashboardPage({ name: "X", csrf: "c", origin: "https://e", connectLink: null, googleClientId: "cid", hasClaudeKey: true,
+      fathomURL: null, gmail: [{ id: "g1", address: "a@b.c", enabled: 1, last_error: null, last_run: null }],
+      phones: [{ id: "d1", name: "Phone", created: "2026-11-10T00:00:00Z", last_seen: null, shares_passkey: 0 }] } as any);
+    expect(html.match(/<input type="checkbox" required> Yes, remove<\/label> <button class="danger" type="submit">Remove<\/button>/g)).toHaveLength(2);
+  });
+});
