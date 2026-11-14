@@ -66,6 +66,7 @@ min-height:56px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .card .t{font-size:17px;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .card .meta{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px;font-size:14px;color:var(--muted)}
 .card .due.late{color:var(--danger);font-weight:600}
+.card .wait-fresh{color:#1e9e4a}.card .wait-chase{color:#e8830c}.card .wait-late{color:var(--danger)}
 .marks{font-weight:800;letter-spacing:-.05em;color:var(--muted);flex:none;margin-top:1px}
 .marks.m1{color:var(--text)}
 .marks.m2{color:var(--danger)}
