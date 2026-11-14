@@ -339,7 +339,7 @@ ${SYNC_JS}
     return { label: label, late: late, t: d.getTime() };
   }
 
-  /** Watch: "Waiting on Anna · 3d" (late from 3 days, when a chase reminder goes out). */
+  /** Watch: "⏳ Anna · 3d 4h", or "⏳ 3d 4h" with no name (late from 3 days, when a chase reminder goes out). */
   function waitInfo(c) {
     if (c.status !== "watch" || !c.watch) return null;
     var since = Date.parse(c.watch.since);
@@ -348,7 +348,7 @@ ${SYNC_JS}
     var d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60);
     var span = d > 0 ? d + "d " + h + "h" : h > 0 ? h + "h " + (mins % 60) + "m" : (mins % 60) + "m";
     var who = (c.watch.person || "").trim();
-    return { label: (who ? "Waiting on " + who : "Waiting") + " · " + span, late: d >= 3 };
+    return { label: "⏳ " + (who ? who + " · " : "") + span, late: d >= 3 };
   }
 
   function doneToday(c) {

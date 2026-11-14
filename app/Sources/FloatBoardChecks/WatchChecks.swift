@@ -18,7 +18,7 @@ import FloatBoardCore
     store.move(card("Contract from Anna")!, to: .watch, now: t0)
     var c = card("Contract from Anna")!
     check(c.watchSince == t0 && c.watchPerson == "Anna Lee" && c.watchContact == "email:anna@acme.com", "watch_starts_timer_and_suggests_the_sender")
-    check(Watch.line(c, now: t0.addingTimeInterval(3 * 86_400 + 4 * 3600)) == "Waiting on Anna Lee · 3d 4h"
+    check(Watch.line(c, now: t0.addingTimeInterval(3 * 86_400 + 4 * 3600)) == "Anna Lee · 3d 4h"
           && Watch.isLate(c, now: t0.addingTimeInterval(3 * 86_400)) && !Watch.isLate(c, now: t0.addingTimeInterval(2 * 86_400)),
           "watch_line_counts_and_turns_late_at_3_days")
     let payload = PhoneBoard.card(for: c, color: nil, calendar: .current)
