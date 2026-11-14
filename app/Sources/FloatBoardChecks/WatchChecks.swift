@@ -52,6 +52,17 @@ import FloatBoardCore
     check(card("Contract from Anna")!.watchSince == t0.addingTimeInterval(5 * 86_400) && card("Contract from Anna")!.watchPerson == "Anna",
           "watch_again_restarts_the_timer_and_keeps_the_person")
 
+    // A task already on Watch before timers existed gets one at launch, from its last move to Watch.
+    _ = store.seedCard(title: "Old watched", source: "email", externalID: "email:<o1@x>", meta: ["sender": "Olu <olu@x.io>"])
+    let old = card("Old watched")!
+    let movedAt = Date(timeIntervalSince1970: 1_790_000_000)
+    _ = try? store.db.run("UPDATE cards SET status='watch', watch_since=NULL WHERE id=?", [old.id]) // try?-ok: failure fails the check
+    _ = try? store.db.run("INSERT INTO events(card_id,at,kind,from_status,to_status,actor,uuid) VALUES(?,?, 'moved','todo','watch','user',?)", // try?-ok: same
+                          [old.id, movedAt, UUID().uuidString])
+    store.fillWatchStarts(); store.reload()
+    check(card("Old watched")!.watchSince == movedAt && card("Old watched")!.watchPerson == "Olu" && card("Old watched")!.watchContact == "email:olu@x.io",
+          "older_watch_tasks_get_a_timer_from_their_history")
+
     // A typed task: no suggestion.
     store.add(title: "Wait for plumber", area: "Personal", importance: .low, due: nil)
     store.move(card("Wait for plumber")!, to: .watch)

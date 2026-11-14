@@ -29,6 +29,7 @@ public final class Store: ObservableObject {
         pruneActivity()
         detachUnreadableOutbox()
         seedAreas()
+        fillWatchStarts()
         reload()
     }
 
