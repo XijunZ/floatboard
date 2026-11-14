@@ -137,12 +137,14 @@ private func draftProposal(id: String, mid: String, sent: String = "2026-11-07T1
         let backup = Backups(dbURL: v7, dir: bk).list().first
         let backupVersion = backup.map { rows($0.url, "PRAGMA user_version") } ?? []
         check(opened.store != nil && opened.backedUp && backupVersion == [["7"]] && boardFacts(v7) == before
-              && integrity(v7) == "ok" && rows(v7, "PRAGMA user_version") == [["8"]]
-              && Array(cols.suffix(5)) == draftColumns
+              && integrity(v7) == "ok" && rows(v7, "PRAGMA user_version") == [[String(DB.schemaVersion)]]
+              && Array(cols.suffix(8).prefix(5)) == draftColumns
+              && Array(cols.suffix(3)) == ["watch_person", "watch_contact", "watch_since"]
+              && rows(v7, "SELECT watch_person, watch_contact, watch_since FROM cards WHERE id=2") == [["", "", nil]]
               && rows(v7, "SELECT reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at FROM cards WHERE id=2")
                 == [[nil, "", "", "", nil]]
               && opened.store?.card(2)?.replyDraftState == nil,
-              "v7_board_upgrades_to_v8_keeping_everything" + (opened.error.map { ": \($0)" } ?? ""))
+              "v7_board_upgrades_to_current_keeping_everything" + (opened.error.map { ": \($0)" } ?? ""))
         // Reopening the upgraded board changes nothing and needs no further backup.
         let schemaAfter = rows(v7, masterSQL)
         do { _ = try DB(url: v7) } catch { check(false, "upgraded_board_reopens: \(error)") }
@@ -155,7 +157,7 @@ private func draftProposal(id: String, mid: String, sent: String = "2026-11-07T1
     do {
         let fresh = root.appendingPathComponent("fresh8.sqlite")
         _ = try DB(url: fresh)
-        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("schema-v8.json"))) as? [[Any]] ?? []
+        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("schema-v9.json"))) as? [[Any]] ?? []
         let expected = raw.map { $0.map { $0 as? String } }
         let freshRows = norm(rows(fresh, masterSQL))
         check(!expected.isEmpty && freshRows == norm(rows(v7, masterSQL)) && freshRows == norm(expected),

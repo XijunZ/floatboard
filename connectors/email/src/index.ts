@@ -17,6 +17,7 @@ import { log, recordCrash, runRounds, type RunOptions } from "./run";
 import { Budget } from "./budget";
 import { alertFor } from "./alerts";
 import { purgeDueAlerts, runDueAlerts } from "./due";
+import { checkWatchReplies } from "./watch";
 import { ingestOutlook, judgeOutlookNow } from "./outlook";
 import { appJSON, handleAppAuth, purgeExpiredApp } from "./app/auth";
 import { handleBoard, purgeBoardLog, purgePhoneActions } from "./app/board";
@@ -99,7 +100,7 @@ export default {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const jobs = cronJobs(event.cron, event.scheduledTime);
     if (jobs.due) ctx.waitUntil(runDueAlerts(env));
-    if (jobs.read) ctx.waitUntil(runAllUsers(env, runRounds, undefined, { hourly: jobs.hourly }));
+    if (jobs.read) ctx.waitUntil(runAllUsers(env, runRounds, undefined, { hourly: jobs.hourly, watch: jobs.watch }));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -112,11 +113,12 @@ export const OLD_CRON = "*/15 * * * *";
  * What a cron run does: due reminders and reading email/chats on every run; the hourly work (cleanup, Fathom catch-up)
  * on the run whose time falls in the first minutes of the hour (UTC). Any other schedule (an old hourly cron) does it all.
  */
-export function cronJobs(cron: string, scheduledTime: number): { due: boolean; read: boolean; hourly: boolean } {
+export function cronJobs(cron: string, scheduledTime: number): { due: boolean; read: boolean; hourly: boolean; watch: boolean } {
   const minute = new Date(scheduledTime).getUTCMinutes();
-  if (cron === CRON) return { due: true, read: true, hourly: minute < 5 };
-  if (cron === OLD_CRON) return { due: true, read: true, hourly: minute < 15 };
-  return { due: false, read: true, hourly: true };
+  // Replies to Watch tasks are looked for every 15 minutes (each costs a Gmail search per inbox).
+  if (cron === CRON) return { due: true, read: true, hourly: minute < 5, watch: minute % 15 < 5 };
+  if (cron === OLD_CRON) return { due: true, read: true, hourly: minute < 15, watch: true };
+  return { due: false, read: true, hourly: true, watch: true };
 }
 
 const cronProblem = (env: Env, decision: string, detail: string) =>
@@ -130,10 +132,11 @@ export async function runAllUsers(
   env: Env,
   runner: (env: Env, userId: string, opts: RunOptions) => Promise<unknown> = runRounds,
   userIds?: string[],
-  opts: { hourly?: boolean } = {},
+  opts: { hourly?: boolean; watch?: boolean } = {},
 ): Promise<void> {
   const cronStart = nowISO();
   const hourly = opts.hourly ?? true;
+  const watch = opts.watch ?? true;
   // Setup-page hygiene rides on the hourly run (no extra cron): expired sessions (with their encrypted keys) and states go.
   if (hourly) try {
     await purgeExpiredSetup(env);
@@ -173,6 +176,7 @@ export async function runAllUsers(
     } catch (e) {
       await recordCrash(env, user_id, cronStart, e, share.used);
     }
+    if (watch) await checkWatchReplies(env, user_id, share); // never throws
     if (hourly) await catchUpFathom(env, user_id, share); // never throws; problems show in needs attention
     calls.used += share.used;
   }

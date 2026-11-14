@@ -13,6 +13,7 @@ import { logEvent } from "./runlog";
 import type { AlertItem } from "./run";
 import { zonedParts, zoneOrDefault } from "./time";
 import { type Card, currentBoard } from "./app/board";
+import { chaseFor } from "./watch";
 
 export const DUE_WINDOW_MS = 15 * 60_000;
 export const DAY_REMINDER_HOUR = 9;
@@ -51,6 +52,22 @@ export async function runDueAlerts(env: Env, nowMs = Date.now(),
       const zone = zoneOrDefault(u.time_zone);
       const send = sender(env, u.user_id);
       for (const c of await currentBoard(env, u.user_id)) {
+        // Watch tasks with no reply: one chase every 3 days (claimed like a due reminder, keyed by when Watch began).
+        const chase = c.id > 0 ? chaseFor(c, nowMs) : null;
+        if (chase) {
+          const claim = await env.DB.prepare("INSERT OR IGNORE INTO due_alerts_sent(user_id,card_id,due,sent_at) VALUES(?,?,?,?)")
+            .bind(u.user_id, c.id, chase.key, new Date(nowMs).toISOString()).run();
+          if (claim.meta.changes) {
+            try {
+              await send({ id: `chase:${c.id}`, title: c.title, why: chase.text, sender: "", due: null, link: emailLink(c), reminder: true });
+              sent++;
+            } catch (e) {
+              await env.DB.prepare("DELETE FROM due_alerts_sent WHERE user_id=? AND card_id=? AND due=?").bind(u.user_id, c.id, chase.key).run();
+              await logEvent(env, { run_id: "due", user_id: u.user_id, decision: "chase reminder not sent; will try again",
+                detail: String((e as Error)?.message ?? e).slice(0, 300), trace: `card ${c.id}` }).run();
+            }
+          }
+        }
         const text = dueAlertText(c, nowMs, zone);
         if (!text || c.id < 0) continue;
         // Claim first, so two runs at once never remind twice; given back when no channel got it through.

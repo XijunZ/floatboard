@@ -339,6 +339,18 @@ ${SYNC_JS}
     return { label: label, late: late, t: d.getTime() };
   }
 
+  /** Watch: "Waiting on Anna · 3d" (late from 3 days, when a chase reminder goes out). */
+  function waitInfo(c) {
+    if (c.status !== "watch" || !c.watch) return null;
+    var since = Date.parse(c.watch.since);
+    if (isNaN(since)) return null;
+    var mins = Math.max(0, Math.floor((Date.now() - since) / 60000));
+    var d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60);
+    var span = d > 0 ? d + "d " + h + "h" : h > 0 ? h + "h " + (mins % 60) + "m" : (mins % 60) + "m";
+    var who = (c.watch.person || "").trim();
+    return { label: (who ? "Waiting on " + who : "Waiting") + " · " + span, late: d >= 3 };
+  }
+
   function doneToday(c) {
     if (c.status !== "done") return false;
     var d = parseDate(c.done_at);
@@ -394,6 +406,8 @@ ${SYNC_JS}
     var due = dueInfo(c);
     if (due) meta.appendChild(el("span", "due" + (due.late ? " late" : ""), due.label));
     if (c.group) meta.appendChild(el("span", null, c.group));
+    var w = waitInfo(c);
+    if (w) meta.appendChild(el("span", "due" + (w.late ? " late" : ""), w.label));
     if (c.queued) meta.appendChild(el("span", "wait", "Not synced yet"));
     else if (c.pending) meta.appendChild(el("span", null, "Waiting for your Mac"));
     body.appendChild(meta);

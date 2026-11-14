@@ -54,6 +54,25 @@ public enum WhatsAppSync {
         try store.db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", [cursorKey(id), s])
     }
 
+    /// Watch tasks waiting on a WhatsApp chat: a message from that chat after the task went to Watch moves it back to
+    /// To do. Problems are only logged (the next read tries again).
+    @MainActor public static func replies(connector id: String, store: Store, folder: URL) {
+        let watched = store.cards.filter { $0.status == .watch && $0.watchSince != nil && $0.watchContact.hasPrefix("wa:") }
+        guard !watched.isEmpty else { return }
+        do {
+            let latest = try WhatsAppLocal.latestIncoming(folder: folder, chatIDs: watched.map { String($0.watchContact.dropFirst(3)) })
+            for c in watched {
+                guard let at = latest[String(c.watchContact.dropFirst(3))], let since = c.watchSince, at > since else { continue }
+                let who = c.watchPerson.trimmingCharacters(in: .whitespaces)
+                if store.watchReply(c, reason: "\(who.isEmpty ? "They" : who) replied on WhatsApp", at: min(at, Date())) {
+                    store.activity("connector:\(id)", .info, "\(who.isEmpty ? "A watched chat" : who) replied on WhatsApp: back to To do", detail: c.title)
+                }
+            }
+        } catch {
+            store.activity("connector:\(id)", .warning, "Could not check WhatsApp replies for Watch tasks", detail: "\(error)")
+        }
+    }
+
     /// One pass: read, send in batches, move each sent chat's cursor. Problems are logged once per distinct message.
     /// Returns how many chats were sent.
     @MainActor @discardableResult
@@ -72,6 +91,7 @@ public enum WhatsAppSync {
                 try saveCursors(cur, connector: id, store: store)
                 sent += part.count
             }
+            replies(connector: id, store: store, folder: folder)
             st.lastRead = now; st.lastSent = sent; st.error = nil; st.needsAccess = false
             if reported.removeValue(forKey: id) != nil { store.activity("connector:\(id)", .info, "WhatsApp screening works again") }
             if sent > 0 { store.activity("connector:\(id)", .info, "Checking \(sent) WhatsApp chat\(sent == 1 ? "" : "s") for tasks (unread messages passed to the engine; nothing is sent on WhatsApp)") }

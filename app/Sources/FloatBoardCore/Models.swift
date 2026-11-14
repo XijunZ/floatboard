@@ -84,6 +84,11 @@ public struct Card: Identifiable, Equatable {
     public var replyDraftRequest: String = ""
     /// When the request reached the engine; the 10-minute timeout counts from here. Nil while it waits to be sent.
     public var replyDraftSentAt: Date? = nil
+    /// Watch: whom the task waits on (a name), how their reply is recognised ("email:<address>", "wa:<chat id>" or
+    /// empty), and when it went to Watch (nil when not on Watch).
+    public var watchPerson: String = ""
+    public var watchContact: String = ""
+    public var watchSince: Date? = nil
 
     public init(id: Int64, title: String, notes: String, area: String, importance: Importance, due: Date?, status: Status,
                 created: Date, started: Date?, done: Date?, link: String = "", gcalAccount: String = "",

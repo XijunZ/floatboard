@@ -37,6 +37,9 @@ public struct Proposal: Codable, Equatable {
     public var taskRef: String?
     public var learned: String?
     public var provenance: Provenance
+    /// Who it came from (tasks only): the address or chat id, and the name as a person would say it.
+    public var sender: String?
+    public var senderName: String?
 
     public init(id: String, kind: ProposalKind, sourceKey: SourceKey?, title: String, why: String, due: String?,
                 hasTime: Bool, group: String?, importance: Int, sourceLabel: String, link: String, summary: String?,
@@ -45,11 +48,13 @@ public struct Proposal: Codable, Equatable {
         self.hasTime = hasTime; self.group = group; self.importance = importance; self.sourceLabel = sourceLabel
         self.link = link; self.summary = summary; self.taskRef = taskRef; self.learned = learned
         self.provenance = provenance
+        self.sender = nil; self.senderName = nil
     }
 
     enum CodingKeys: String, CodingKey {
         case id, kind, sourceKey = "source_key", title, why, due, hasTime = "has_time", group, importance
         case sourceLabel = "source_label", link, summary, taskRef = "task_ref", learned, provenance
+        case sender, senderName = "sender_name"
     }
 
     /// id, kind, provenance (model, skill_version, created) are required, and source_key for task / withdraw /
@@ -75,6 +80,9 @@ public struct Proposal: Codable, Equatable {
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         taskRef = try c.decodeIfPresent(String.self, forKey: .taskRef)
         learned = try c.decodeIfPresent(String.self, forKey: .learned)
+        // Only for display and Watch suggestions: an unreadable value is left out, never a broken proposal.
+        sender = (try? c.decodeIfPresent(String.self, forKey: .sender)).flatMap { $0 } // try?-ok: optional extra
+        senderName = (try? c.decodeIfPresent(String.self, forKey: .senderName)).flatMap { $0 } // try?-ok: optional extra
     }
 
     /// "provenance.skill_version" / "source_key" etc.: which field made decoding fail.

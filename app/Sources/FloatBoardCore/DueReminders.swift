@@ -19,7 +19,7 @@ public struct DueReminder: Equatable {
     func cancel(_ ids: [String])
 }
 
-/// Due reminders on this Mac, from its own board (no engine needed): an open task (To do, Doing, Watch) with a due
+/// Due reminders on this Mac, from its own board (no engine needed), and Watch chase reminders: an open task (To do, Doing, Watch) with a due
 /// time is reminded 15 minutes before it, one with a due date only at 09:00 that day. A reminder whose time has passed
 /// while its due is still ahead (a task due in 10 minutes, the app started after 09:00) is shown at once.
 public enum DueReminders {
@@ -38,6 +38,11 @@ public enum DueReminders {
         let clock = DateFormatter()
         clock.locale = Locale(identifier: "en_US_POSIX"); clock.timeZone = calendar.timeZone; clock.dateFormat = "HH:mm"
         for c in cards where c.status != .done && !c.withdrawn {
+            // A Watch task with no reply: the next chase ("Still waiting on Anna · 3 days"), every 3 days.
+            if c.status == .watch, let since = c.watchSince, let next = Watch.nextChases(since: since, now: now, count: 1).first {
+                out.append(DueReminder(id: "chase-\(c.id)-\(Int(since.timeIntervalSince1970))-\(Int(next.timeIntervalSince1970))", cardID: c.id,
+                                       title: c.title, body: Watch.chaseText(person: c.watchPerson, at: next, since: since), fireAt: next))
+            }
             guard let due = c.due else { continue }
             let t = calendar.dateComponents([.hour, .minute], from: due)
             let timed = (t.hour ?? 0) != 0 || (t.minute ?? 0) != 0   // as Due.hasTime, in this calendar
