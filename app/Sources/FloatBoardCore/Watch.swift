@@ -96,6 +96,32 @@ extension Store {
         }
     }
 
+    /// Tasks already on Watch from before Watch had a timer: the timer starts at their last move to Watch (from their
+    /// history, else their last update), and whom they wait on is suggested as for a new move. Runs at launch; a task
+    /// that has a start time is never touched.
+    public func fillWatchStarts() {
+        do {
+            let ids = try db.query("SELECT id FROM cards WHERE status='watch' AND deleted=0 AND watch_since IS NULL") { DB.int($0, 0) }
+            guard !ids.isEmpty else { return }
+            perform {
+                for id in ids {
+                    try db.run("""
+                        UPDATE cards SET watch_since = COALESCE((SELECT MAX(at) FROM events WHERE card_id=cards.id AND to_status='watch'),
+                                                              updated, created) WHERE id=?
+                        """, [id])
+                    let set = try db.query("SELECT watch_person <> '' OR watch_contact <> '' FROM cards WHERE id=?", [id]) { DB.int($0, 0) }.first ?? 0
+                    if set == 0, let c = try currentCard(id)?.card {
+                        let s = Watch.suggest(c)
+                        try db.run("UPDATE cards SET watch_person=?, watch_contact=? WHERE id=?", [s.person, s.contact, id])
+                    }
+                }
+            }
+            activity("board", .info, "Watch timers started for \(ids.count) task\(ids.count == 1 ? "" : "s") already on Watch")
+        } catch {
+            activity("board", .warning, "Could not start Watch timers for older tasks", detail: "\(error)")
+        }
+    }
+
     /// Sets whom a task waits on. `contact` is kept only when it is "email:<address>" or "wa:<chat id>".
     public func setWatch(_ card: Card, person: String, contact: String, now: Date = Date()) {
         let p = String(person.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
