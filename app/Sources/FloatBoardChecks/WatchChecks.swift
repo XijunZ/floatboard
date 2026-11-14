@@ -21,6 +21,9 @@ import FloatBoardCore
     check(Watch.line(c, now: t0.addingTimeInterval(3 * 86_400 + 4 * 3600)) == "Anna Lee · 3d 4h"
           && Watch.isLate(c, now: t0.addingTimeInterval(3 * 86_400)) && !Watch.isLate(c, now: t0.addingTimeInterval(2 * 86_400)),
           "watch_line_counts_and_turns_late_at_3_days")
+    check(Watch.wait(c, now: t0.addingTimeInterval(2.9 * 86_400)) == .fresh && Watch.wait(c, now: t0.addingTimeInterval(3 * 86_400)) == .chase
+          && Watch.wait(c, now: t0.addingTimeInterval(6.9 * 86_400)) == .chase && Watch.wait(c, now: t0.addingTimeInterval(7 * 86_400)) == .late,
+          "watch_colour_green_then_orange_at_3_days_red_at_7")
     let payload = PhoneBoard.card(for: c, color: nil, calendar: .current)
     check(payload.watch == BoardWatch(person: "Anna Lee", contact: "email:anna@acme.com", since: PhoneBoard.isoUTC(t0)),
           "watch_goes_to_the_phone_and_engine")

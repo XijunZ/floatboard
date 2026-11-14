@@ -463,12 +463,11 @@ struct CardView: View {
                     .help("Click to change group (right-click to choose)")
                 if card.showsSourceChip { ProposalChip(card: card) }
                 if card.status == .watch, card.watchSince != nil {
-                    // Time on Watch, updated every minute; amber from 3 days (when a chase reminder goes out).
+                    // Time on Watch, updated every minute: green under 3 days, orange from 3 (chase reminders start), red from 7.
                     TimelineView(.periodic(from: .now, by: 60)) { ctx in
-                        let late = Watch.isLate(card, now: ctx.date)
+                        let wait = Watch.wait(card, now: ctx.date)
                         Label(Watch.line(card, now: ctx.date) ?? "", systemImage: "hourglass")
-                            .fontWeight(late ? .semibold : .regular)
-                            .foregroundStyle(late ? Color.orange : Color.secondary)
+                            .foregroundStyle(wait == .late ? Color.red : wait == .chase ? Color.orange : Color.green)
                             .fixedSize()
                             .help((card.watchPerson.isEmpty ? "Waiting" : "Waiting on \(card.watchPerson)") + " since it went to Watch. "
                                   + (card.watchContact.isEmpty ? "No contact: it won't move back by itself when they reply. Add one in the task (double-click)."

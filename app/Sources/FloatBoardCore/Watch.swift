@@ -52,6 +52,16 @@ public enum Watch {
         return (who.isEmpty ? "" : "\(who) · ") + elapsed(since: since, now: now)
     }
 
+    public static let redDays = 7
+
+    /// How long it has waited: under 3 days fresh (green), from 3 days chase (orange, reminders start), from 7 late (red).
+    public enum Wait { case fresh, chase, late }
+    public static func wait(_ c: Card, now: Date = Date()) -> Wait? {
+        guard c.status == .watch, let since = c.watchSince else { return nil }
+        let days = now.timeIntervalSince(since) / day
+        return days >= Double(redDays) ? .late : days >= Double(chaseDays) ? .chase : .fresh
+    }
+
     /// True from `chaseDays` days on Watch.
     public static func isLate(_ c: Card, now: Date = Date()) -> Bool {
         guard c.status == .watch, let since = c.watchSince else { return false }
