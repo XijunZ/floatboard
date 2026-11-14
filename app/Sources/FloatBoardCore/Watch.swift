@@ -45,11 +45,11 @@ public enum Watch {
         return "\(m)m"
     }
 
-    /// The card line: "Waiting on Anna · 3d 4h" (or "Waiting · 3d 4h" with no person).
+    /// The card's Watch label: "Anna · 3d 4h", or "3d 4h" with no person.
     public static func line(_ c: Card, now: Date = Date()) -> String? {
         guard c.status == .watch, let since = c.watchSince else { return nil }
         let who = c.watchPerson.trimmingCharacters(in: .whitespaces)
-        return (who.isEmpty ? "Waiting" : "Waiting on \(who)") + " · " + elapsed(since: since, now: now)
+        return (who.isEmpty ? "" : "\(who) · ") + elapsed(since: since, now: now)
     }
 
     /// True from `chaseDays` days on Watch.

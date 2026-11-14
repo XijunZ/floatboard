@@ -433,17 +433,6 @@ struct CardView: View {
                     }
                     .help("\(card.importance.title) importance: click to change, right-click to choose")
             }
-            if card.status == .watch, card.watchSince != nil {
-                // Updates every minute; amber once it has waited 3 days (a chase reminder is sent then).
-                TimelineView(.periodic(from: .now, by: 60)) { ctx in
-                    let late = Watch.isLate(card, now: ctx.date)
-                    Label(Watch.line(card, now: ctx.date) ?? "", systemImage: late ? "hourglass.bottomhalf.filled" : "hourglass")
-                        .font(.system(size: 11, weight: late ? .semibold : .regular))
-                        .foregroundStyle(late ? Color.orange : Color.secondary)
-                        .help(card.watchContact.isEmpty ? "No contact: it won't move back by itself when they reply. Set one in the task (double-click)."
-                              : "Moves back to To do when they reply (\(card.watchContact.hasPrefix("wa:") ? "on WhatsApp" : "by email")). A reminder every 3 days until then.")
-                }
-            }
             if !card.notes.isEmpty {
                 Text(card.notes).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(3)
             }
@@ -473,6 +462,19 @@ struct CardView: View {
                     }
                     .help("Click to change group (right-click to choose)")
                 if card.showsSourceChip { ProposalChip(card: card) }
+                if card.status == .watch, card.watchSince != nil {
+                    // Time on Watch, updated every minute; amber from 3 days (when a chase reminder goes out).
+                    TimelineView(.periodic(from: .now, by: 60)) { ctx in
+                        let late = Watch.isLate(card, now: ctx.date)
+                        Label(Watch.line(card, now: ctx.date) ?? "", systemImage: "hourglass")
+                            .fontWeight(late ? .semibold : .regular)
+                            .foregroundStyle(late ? Color.orange : Color.secondary)
+                            .fixedSize()
+                            .help((card.watchPerson.isEmpty ? "Waiting" : "Waiting on \(card.watchPerson)") + " since it went to Watch. "
+                                  + (card.watchContact.isEmpty ? "No contact: it won't move back by itself when they reply. Add one in the task (double-click)."
+                                     : "Moves back to To do when they reply (\(card.watchContact.hasPrefix("wa:") ? "on WhatsApp" : "by email")). A reminder every 3 days until then."))
+                    }
+                }
                 Text("Added \(Fmt.short(card.created))").fixedSize()
                 if let due = card.due {
                     Text("Due \(Fmt.due(due))")
