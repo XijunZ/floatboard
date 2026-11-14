@@ -69,6 +69,8 @@ route("GET", "/v2/proposals", async (req, env, user) => {
     source_key: r.sent_at || (r.kind === "action" || r.kind === "withdraw" || r.kind === "draft") ? { message_id: r.message_id, sent_at: r.sent_at ?? null } : null,
     title: r.title, why: r.why ?? null, due: r.due ?? null, has_time: !!r.has_time, group: r.group_name ?? null,
     importance: r.importance, source_label: r.source_address ?? null, link: r.link ?? null, summary: r.summary ?? null,
+    // Who it came from, so the app can suggest whom a Watch task waits on: name and address (or chat id) as known.
+    sender: r.kind === "action" ? (r.sender ?? null) : null, sender_name: r.kind === "action" ? (r.sender_name ?? null) : null,
     task_ref: r.task_ref ?? null, learned: r.kind === "learned" ? r.summary : null,
     provenance: { model: r.kind === "draft" ? SONNET : HAIKU, skill_version, created: r.created },
   }));

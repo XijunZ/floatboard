@@ -60,6 +60,29 @@ public enum WhatsAppLocal {
     /// Unread chats to screen, oldest newest-message first. `cursors`: chat id -> newest message date already sent.
     public static func unreadChats(folder: URL = folder, cursors: [String: Double], now: Date = Date(),
                                    zone: TimeZone = .current) throws -> [Chat] {
+        try withCopy(folder) { try read($0, cursors: cursors, now: now, zone: zone) }
+    }
+
+    /// For each chat id, when its newest message from someone else arrived (read or not). For Watch: a reply after
+    /// the task went to Watch moves it back to To do.
+    public static func latestIncoming(folder: URL = folder, chatIDs: [String]) throws -> [String: Date] {
+        guard !chatIDs.isEmpty else { return [:] }
+        return try withCopy(folder) { db in
+            var out: [String: Date] = [:]
+            for id in Set(chatIDs) {
+                let r = try rows(db, """
+                    SELECT MAX(m.ZMESSAGEDATE) FROM ZWAMESSAGE m JOIN ZWACHATSESSION s ON s.Z_PK = m.ZCHATSESSION
+                    WHERE s.ZCONTACTJID = ? AND m.ZISFROMME = 0 AND m.ZMESSAGETYPE NOT IN (6, 10, 14)
+                    """, [.text(id)])
+                if let d = r.first?.first?.double { out[id] = Date(timeIntervalSince1970: d + appleEpoch) }
+            }
+            return out
+        }
+    }
+
+    /// Copies WhatsApp's database to a private temporary folder, opens the copy and runs `body` on it; the copy is
+    /// deleted afterwards. WhatsApp's own files are only read.
+    static func withCopy<T>(_ folder: URL, _ body: (OpaquePointer) throws -> T) throws -> T {
         let fm = FileManager.default
         let src = folder.appendingPathComponent(file)
         guard fm.fileExists(atPath: folder.path) else { throw ReadError.notInstalled }
@@ -85,7 +108,7 @@ public enum WhatsAppLocal {
             throw ReadError.unreadable("can't open the copy")
         }
         defer { sqlite3_close(db) }
-        return try read(db, cursors: cursors, now: now, zone: zone)
+        return try body(db)
     }
 
     private static func read(_ db: OpaquePointer, cursors: [String: Double], now: Date, zone: TimeZone) throws -> [Chat] {

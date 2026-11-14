@@ -433,6 +433,17 @@ struct CardView: View {
                     }
                     .help("\(card.importance.title) importance: click to change, right-click to choose")
             }
+            if card.status == .watch, card.watchSince != nil {
+                // Updates every minute; amber once it has waited 3 days (a chase reminder is sent then).
+                TimelineView(.periodic(from: .now, by: 60)) { ctx in
+                    let late = Watch.isLate(card, now: ctx.date)
+                    Label(Watch.line(card, now: ctx.date) ?? "", systemImage: late ? "hourglass.bottomhalf.filled" : "hourglass")
+                        .font(.system(size: 11, weight: late ? .semibold : .regular))
+                        .foregroundStyle(late ? Color.orange : Color.secondary)
+                        .help(card.watchContact.isEmpty ? "No contact: it won't move back by itself when they reply. Set one in the task (double-click)."
+                              : "Moves back to To do when they reply (\(card.watchContact.hasPrefix("wa:") ? "on WhatsApp" : "by email")). A reminder every 3 days until then.")
+                }
+            }
             if !card.notes.isEmpty {
                 Text(card.notes).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(3)
             }
@@ -615,6 +626,12 @@ struct EditCardView: View {
             draft.replyDraftState = saved.replyDraftState; draft.replyDraftLink = saved.replyDraftLink
             draft.replyDraftError = saved.replyDraftError; draft.replyDraftRequest = saved.replyDraftRequest
             draft.replyDraftSentAt = saved.replyDraftSentAt
+            draft.watchSince = saved.watchSince
+            if saved.watchPerson != draft.watchPerson || saved.watchContact != draft.watchContact {
+                store.setWatch(saved, person: draft.watchPerson, contact: draft.watchContact)
+                guard let fresh = store.card(draft.id) else { return }
+                draft.watchPerson = fresh.watchPerson; draft.watchContact = fresh.watchContact
+            }
         }
         guard store.card(draft.id).map({ $0 != draft }) ?? false else { return }
         store.update(draft)
@@ -739,6 +756,29 @@ struct EditCardView: View {
             .help("Drag to resize")
     }
 
+    /// Watch: whom it waits on, and the email address whose reply moves it back (a WhatsApp chat is shown, not typed).
+    private var waitingOn: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("Waiting on").foregroundStyle(.secondary)
+                TextField("Name", text: $draft.watchPerson).textFieldStyle(.roundedBorder).frame(maxWidth: 180)
+                if draft.watchContact.hasPrefix("wa:") {
+                    Label("WhatsApp chat", systemImage: "bubble.left.and.bubble.right").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Button("Clear") { draft.watchContact = "" }.buttonStyle(.link).font(.system(size: 11))
+                } else {
+                    TextField("Their email, to notice the reply (optional)", text: Binding(
+                        get: { draft.watchContact.hasPrefix("email:") ? String(draft.watchContact.dropFirst(6)) : "" },
+                        set: { v in let t = v.trimmingCharacters(in: .whitespaces); draft.watchContact = t.isEmpty ? "" : "email:\(t)" }))
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            if let line = Watch.line(draft) {
+                Text(line + " · back to To do when they reply; a reminder every \(Watch.chaseDays) days until then")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("Title", text: $draft.title).textFieldStyle(.roundedBorder)
@@ -758,6 +798,7 @@ struct EditCardView: View {
             }
             TextField("Link: a call (Meet, Zoom, Teams) or any web page (optional)", text: $draft.link)
                 .textFieldStyle(.roundedBorder)
+            if draft.status == .watch { waitingOn }
             HStack(spacing: 8) {
                 Text("Group").foregroundStyle(.secondary)
                 Dropdown(options: store.areas.map(\.name), selection: $draft.area, dot: store.color)

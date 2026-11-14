@@ -30,9 +30,11 @@ public struct BoardCard: Codable, Equatable {
     public var doneAt: String?
     /// When this card's step last changed on this Mac (Mac clock, ISO 8601 UTC with milliseconds).
     public var statusAt: String?
+    /// Watch only: whom it waits on, how to recognise their reply, and since when (ISO 8601 UTC).
+    public var watch: BoardWatch?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, group, color, importance, due, hasTime = "has_time", status, link, links, email, doneAt = "done_at", statusAt = "status_at"
+        case id, title, group, color, importance, due, hasTime = "has_time", status, link, links, email, doneAt = "done_at", statusAt = "status_at", watch
     }
 
     /// Every field is written, nil ones as null (the engine requires them all).
@@ -44,7 +46,15 @@ public struct BoardCard: Codable, Equatable {
         try c.encode(links, forKey: .links)
         try c.encodeIfPresent(email, forKey: .email)
         try c.encode(doneAt, forKey: .doneAt); try c.encode(statusAt, forKey: .statusAt)
+        try c.encodeIfPresent(watch, forKey: .watch)
     }
+}
+
+public struct BoardWatch: Codable, Equatable {
+    public var person: String
+    public var contact: String
+    public var since: String
+    public init(person: String, contact: String, since: String) { self.person = person; self.contact = contact; self.since = since }
 }
 
 /// The email a phone `link_email` action attaches.
@@ -75,17 +85,19 @@ public struct PhoneAction: Codable, Equatable {
     public var madeAt: Date?
     /// The email to link (link_email only).
     public var email: PhoneEmail?
+    /// watch_reply only: why the task goes back to To do ("Anna replied by email").
+    public var reason: String?
 
     public init(id: String, clientID: String? = nil, cardID: Int64?, action: String, title: String? = nil, group: String? = nil,
-                madeAt: Date? = nil, email: PhoneEmail? = nil) {
+                madeAt: Date? = nil, email: PhoneEmail? = nil, reason: String? = nil) {
         self.id = id; self.clientID = clientID; self.cardID = cardID; self.action = action; self.title = title; self.group = group
-        self.madeAt = madeAt; self.email = email
+        self.madeAt = madeAt; self.email = email; self.reason = reason
     }
 
     /// The key that makes an action apply once: the phone's id when there is one, else the engine's.
     public var onceKey: String { clientID.flatMap { $0.isEmpty ? nil : $0 } ?? id }
 
-    enum CodingKeys: String, CodingKey { case id, clientID = "client_id", cardID = "card_id", action, title, group, madeAt = "made_at", email }
+    enum CodingKeys: String, CodingKey { case id, clientID = "client_id", cardID = "card_id", action, title, group, madeAt = "made_at", email, reason }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -95,6 +107,7 @@ public struct PhoneAction: Codable, Equatable {
         action = try c.decode(String.self, forKey: .action)
         title = try c.decodeIfPresent(String.self, forKey: .title)
         group = try c.decodeIfPresent(String.self, forKey: .group)
+        reason = (try? c.decodeIfPresent(String.self, forKey: .reason)).flatMap { $0 } // try?-ok: only shown in the task's history
         // An unreadable time counts as unknown (applied without the newest-change test), not as a broken action.
         madeAt = (try? c.decodeIfPresent(String.self, forKey: .madeAt)).flatMap { $0 }.flatMap(PhoneBoard.parseISO) // try?-ok: unreadable time is treated as unknown
         // An unreadable email leaves it nil: the link is then skipped as invalid, never a broken batch.
@@ -161,8 +174,11 @@ public enum PhoneBoard {
                          due: c.due.map { hasTime ? iso($0, calendar) : day($0, calendar) }, hasTime: hasTime,
                          status: c.status.rawValue, link: all.first?.url, links: all,
                          email: c.isFromEmailSorting ? "sorting" : c.emailLinkedByUser ? "user" : nil,
-                         doneAt: c.status == .done ? c.done.map { iso($0, calendar) } : nil, statusAt: nil)
+                         doneAt: c.status == .done ? c.done.map { iso($0, calendar) } : nil, statusAt: nil,
+                         watch: c.status == .watch ? c.watchSince.map { BoardWatch(person: clipTo(c.watchPerson, 100), contact: c.watchContact, since: isoUTC($0)) } : nil)
     }
+
+    static func clipTo(_ s: String, _ n: Int) -> String { String(s.prefix(n)) }
 
     /// Every web link on the task for the phone, in order: the source (an email, else a link such as meeting notes),
     /// the Link field (a meeting when its host is a call), the Google Calendar event, then up to 3 links written in the
@@ -372,6 +388,12 @@ extension Store {
                             outcome = e == .badEmail ? "bad" : "refused"; return
                         }
                         outcome = "linked"
+                    } else if a.action == "watch_reply", let cardID = a.cardID {
+                        // The person a Watch task waits on replied: back to To do, only if it is still on Watch.
+                        let row = try db.query("SELECT deleted, withdrawn FROM cards WHERE id=?", [cardID]) { (DB.int($0, 0), DB.int($0, 1)) }.first
+                        guard let row, row.0 == 0, row.1 == 0 else { outcome = "unknown"; return }
+                        let at = madeHere.map { min($0, now) } ?? now
+                        outcome = try watchReplyRow(cardID, reason: a.reason ?? "replied", at: at) ? "moved" : "superseded"
                     } else if let status = Status(rawValue: a.action), let cardID = a.cardID {
                         let row = try db.query("SELECT deleted, withdrawn, status FROM cards WHERE id=?", [cardID]) {
                             (DB.int($0, 0), DB.int($0, 1), DB.text($0, 2)) }.first

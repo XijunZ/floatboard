@@ -42,7 +42,7 @@ describe("v2", () => {
     expect(p3.items.map((i: any) => i.id)).toEqual(["id4", "id9"]);
     expect(p3.items[0]).toEqual({ id: "id4", kind: "task", source_key: { message_id: expect.stringMatching(/^<.*@x>$/), sent_at: "2026-11-07T10:00:00.000Z" },
       title: "Reply to Anna", why: "asked", due: "2026-11-10T17:00", has_time: true, group: null, importance: 2, source_label: null,
-      link: "https://mail/1", summary: null, task_ref: null, learned: null,
+      link: "https://mail/1", summary: null, task_ref: null, learned: null, sender: "anna@acme.com", sender_name: null,
       provenance: { model: HAIKU, skill_version: expect.stringMatching(/^[0-9a-f]{12}$/), created: "2026-11-07T10:00:04.000Z" } });
     expect(p3.items[1]).toMatchObject({ kind: "summary", source_key: null, task_ref: "card:3" });
     for (const bad of ["garbage", "2026-11-07T10:00:00.000Z|id1", "2026-11-07T10:00:00.000Z|id1|x", "nope|id1|3", "a|b|1|2"]) {

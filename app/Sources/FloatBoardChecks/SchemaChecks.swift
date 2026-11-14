@@ -44,7 +44,7 @@ private func normalized(_ rows: [[String?]]) -> [[String?]] {
     let fresh = root.appendingPathComponent("fresh.sqlite")
     do { _ = try DB(url: fresh) } catch { check(false, "new_board_opens: \(error)") }
     let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("Tests/Fixtures/schema-v8.json")
+        .appendingPathComponent("Tests/Fixtures/schema-v9.json")
     var expected: [[String?]] = []
     do {
         let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as? [[Any]] ?? []

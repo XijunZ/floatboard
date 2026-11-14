@@ -42,10 +42,11 @@ public final class Store: ObservableObject {
                 SELECT id,title,notes,area,importance,due,status,created,started,done,link,gcal_account,gcal_link,
                        source,external_id,source_link,source_meta,imported_at,
                        source_mid,source_sent,withdrawn,ai_summary,connector,
-                       reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at
+                       reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at,
+                       watch_person,watch_contact,watch_since
                 FROM cards WHERE deleted=0 ORDER BY created
                 """) { s in
-                Card(
+                var c = Card(
                     id: DB.int(s, 0),
                     title: DB.text(s, 1),
                     notes: DB.text(s, 2),
@@ -75,6 +76,8 @@ public final class Store: ObservableObject {
                     replyDraftRequest: DB.text(s, 26),
                     replyDraftSentAt: DB.date(s, 27)
                 )
+                c.watchPerson = DB.text(s, 28); c.watchContact = DB.text(s, 29); c.watchSince = DB.date(s, 30)
+                return c
             }
         } catch {
             lastError = "\(error)"
@@ -149,6 +152,7 @@ public final class Store: ObservableObject {
         let done: Date? = status == .done ? now : nil
         try db.run("UPDATE cards SET status=?, started=?, done=?, updated=? WHERE id=?",
                    [status.rawValue, started, done, now, id])
+        try watchRow(id, entering: status == .watch, now: now)
         try log(id, "moved", stored.0, status, now)
         if status == .done, let cur = try currentCard(id) { try queueOutbox(cur.card, kind: .done, verdict: nil, now: now) }
         return true

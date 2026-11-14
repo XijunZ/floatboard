@@ -34,6 +34,13 @@ export type RunOptions = {
 };
 
 /** Source kinds the triage run reads. */
+/** Who sent it, as a person would say it: the chat's name, the display name in the From line, else the address. */
+export function senderName(m: Message): string {
+  if (m.chat) return m.chat.name;
+  const name = (m.fromName ?? /^\s*"?([^"<]*?)"?\s*</.exec(m.from)?.[1] ?? "").trim();
+  return (name || senderAddress(m.from)).slice(0, 100);
+}
+
 export const TRIAGE_KINDS = ["gmail", "outlook_web", "whatsapp"];
 
 export type RunStats = { fetched: number; skippedSeen: number; dropped: number; classified: number; actions: number;
@@ -241,11 +248,11 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
       else {
         const critical = isCritical(a, new Date(), criticalHours, timeZone);
         const id = crypto.randomUUID();
-        const ins = await env.DB.prepare(`INSERT OR IGNORE INTO items(id,user_id,source_id,message_id,kind,title,why,sender,subject,link,snippet,due,has_time,importance,group_name,critical,created,sent_at,history_id,summary)
-            VALUES(?,?,?,?, 'action', ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        const ins = await env.DB.prepare(`INSERT OR IGNORE INTO items(id,user_id,source_id,message_id,kind,title,why,sender,subject,link,snippet,due,has_time,importance,group_name,critical,created,sent_at,history_id,summary,sender_name)
+            VALUES(?,?,?,?, 'action', ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
           .bind(id, userId, m.sourceId, m.messageId, a.title, a.why, senderAddress(m.from), m.subject, m.link, m.text.slice(0, 300),
             a.due, a.hasTime ? 1 : 0, a.importance, a.group, critical ? 1 : 0, nowISO(), m.sentAt ?? null, m.historyId ?? null,
-            linksNote(a.links)).run();
+            linksNote(a.links), senderName(m)).run();
         if (ins.meta.changes) {
           stats.actions++;
           ev({ ...base, trace: id, decision: "action created", detail: `${a.title}${critical ? " (critical)" : ""}` });

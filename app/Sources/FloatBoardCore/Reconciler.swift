@@ -299,6 +299,8 @@ public enum Reconciler {
         var m = existing
         m["why"] = p.why
         m["source_label"] = p.sourceLabel
+        if let s = p.sender, !s.isEmpty { m["sender"] = s }
+        if let n = p.senderName, !n.isEmpty { m["sender_name"] = n }
         return String(decoding: try JSONSerialization.data(withJSONObject: m, options: [.sortedKeys]), as: UTF8.self)
     }
 }

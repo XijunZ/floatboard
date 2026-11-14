@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 8
+    public static let schemaVersion = 9
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -75,6 +75,15 @@ public final class DB {
 
             """
         }
+        if version < 9 {
+            // 8 -> 9: Watch (whom a task waits on, how to recognise their reply, and since when).
+            sql += """
+            ALTER TABLE cards ADD COLUMN watch_person TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cards ADD COLUMN watch_contact TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cards ADD COLUMN watch_since REAL;
+
+            """
+        }
         return sql
     }
 
@@ -113,7 +122,7 @@ public final class DB {
         reply_draft_link TEXT NOT NULL DEFAULT '',
         reply_draft_error TEXT NOT NULL DEFAULT '',
         reply_draft_request TEXT NOT NULL DEFAULT '',
-        reply_draft_sent_at REAL
+        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL
     );
     CREATE INDEX cards_external_id ON cards(external_id);
     CREATE UNIQUE INDEX cards_source_key ON cards(connector, source_mid, source_sent)

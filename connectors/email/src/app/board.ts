@@ -60,12 +60,17 @@ export type Card = {
   id: number; title: string; group: string; color: string; importance: 0 | 1 | 2; due: string | null; has_time: boolean;
   status: Status; link: string | null; links?: CardLink[]; email?: (typeof EMAIL_KINDS)[number]; done_at: string | null; status_at?: string | null;
   pending?: true; action_id?: string | null;
+  /** Watch only: whom it waits on, how to recognise their reply ("email:<address>", "wa:<chat id>" or ""), and since when. */
+  watch?: CardWatch;
 };
+export type CardWatch = { person: string; contact: string; since: string };
 /** The email a `link_email` action attaches (sent_at as the search gave it). */
 export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
 export type PhoneAction = {
-  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number]; title: string | null; group: string | null;
+  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number] | "watch_reply"; title: string | null; group: string | null;
   created: string; made_at: string; email?: LinkedEmail;
+  /** watch_reply only: the watched person wrote again ("Anna replied by email"); the Mac moves the task back to To do. */
+  reason?: string;
 };
 type ActionRow = {
   id: string; rid: number; client_id: string | null; card_id: number | null; action: string; title: string | null; group_name: string | null;
@@ -108,6 +113,17 @@ function cardLinks(v: unknown): CardLink[] | undefined {
 }
 
 /** Strictly validate a pushed board; throws Error(message) on anything off. `status_at` is optional (as the Mac sent it). */
+function cardWatch(w: any): CardWatch {
+  if (!w || typeof w !== "object" || Array.isArray(w)) throw new Error("watch must be an object");
+  if (typeof w.person !== "string" || w.person.length > 100) throw new Error("watch.person must be text up to 100 characters");
+  if (typeof w.contact !== "string" || w.contact.length > 330 || !(w.contact === "" || /^email:[^\s@]+@[^\s@]+$/.test(w.contact) || /^wa:[\w.@-]+$/.test(w.contact))) {
+    throw new Error("watch.contact must be email:<address>, wa:<chat id> or empty");
+  }
+  const since = isoOrNull(w.since, "watch.since");
+  if (!since) throw new Error("watch.since must be a date");
+  return { person: w.person, contact: w.contact, since };
+}
+
 export function parseCards(body: any): Card[] {
   if (!body || !Array.isArray(body.cards)) throw new Error("cards must be a list");
   if (body.cards.length > MAX_CARDS) throw new Error(`at most ${MAX_CARDS} cards`);
@@ -130,6 +146,7 @@ export function parseCards(body: any): Card[] {
         status_at: c.status_at === undefined ? null : isoOrNull(c.status_at, "status_at") };
       const links = cardLinks(c.links);
       if (links) out.links = links;
+      if (c.watch !== undefined && c.watch !== null) out.watch = cardWatch(c.watch);
       if (c.email !== undefined && c.email !== null) {
         if (!EMAIL_KINDS.includes(c.email)) throw new Error("email must be sorting or user when given");
         out.email = c.email;
@@ -289,7 +306,8 @@ route("PUT", "/v2/board", async (req, env, user) => {
 route("GET", "/v2/phone-actions", async (_req, env, user) => {
   const actions: PhoneAction[] = (await untaken(env, user.id)).map((a) => ({ id: a.id, client_id: a.client_id, card_id: a.card_id,
     action: a.action as PhoneAction["action"], title: a.title, group: a.group_name, created: a.created, made_at: a.made_at,
-    ...(a.action === "link_email" && a.payload ? { email: JSON.parse(a.payload) as LinkedEmail } : {}) }));
+    ...(a.action === "link_email" && a.payload ? { email: JSON.parse(a.payload) as LinkedEmail } : {}),
+    ...(a.action === "watch_reply" && a.payload ? { reason: String(JSON.parse(a.payload).reason ?? "") } : {}) }));
   return json({ server_time: nowISO(), actions });
 });
 
