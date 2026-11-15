@@ -181,7 +181,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleConnectLink(_ url: URL) {
         guard ConnectFlow.confirmAndAdd(url, store: store) else { return }
-        ui.tab = .connectors
+        // Next step after connecting: the keys the engine needs.
+        ui.tab = .settings
+        ui.settingsSection = .keys
         expand()
     }
 
@@ -209,8 +211,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = sub("FloatBoard") { m in
             add(m, "About FloatBoard", #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
             m.addItem(.separator())
-            add(m, "Settings…", #selector(barSettings), ",", target: self)
-            add(m, "Connectors…", #selector(showConnectors), target: self)
+            add(m, "Settings…", #selector(showSettings), ",", target: self)
+            add(m, "Bar…", #selector(barSettings), target: self)
             add(m, "Groups…", #selector(manageGroups), target: self)
             m.addItem(.separator())
             add(m, "Hide FloatBoard", #selector(NSApplication.hide(_:)), "h")
@@ -255,6 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let help = sub("Help") { m in
             add(m, "FloatBoard Guide", #selector(showGuide), "?", target: self)
             add(m, "Activity…", #selector(showActivity), "a", [.command, .option], target: self)
+            add(m, "Send Feedback…", #selector(showFeedback), target: self)
             m.addItem(.separator())
             add(m, "Restore from backup…", #selector(restoreBackup), target: self)
         }
@@ -390,7 +393,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func resetBoard() { panel.resetBoard() }
     @objc func syncConnectors() { connectors.trigger("menu") }
     @objc func barSettings() { ui.tab = .bar; ui.quickAdding = false; expand() }
-    @objc func showConnectors() { ui.tab = .connectors; ui.quickAdding = false; expand() }
+    @objc func showSettings() { ui.tab = .settings; ui.quickAdding = false; expand() }
+    @objc func showFeedback() { FeedbackWindow.show(store: store) }
     @objc func manageGroups() { ui.tab = .groups; ui.quickAdding = false; expand() }
 
     private func showError(_ title: String, _ error: Error) {
@@ -418,7 +422,7 @@ extension AppDelegate: NSMenuDelegate {
         menu.addItem(.sectionHeader(title: "Set up"))
         menu.addItem(item("Bar…", #selector(barSettings)))
         menu.addItem(item("Groups…", #selector(manageGroups)))
-        menu.addItem(item("Connectors…", #selector(showConnectors)))
+        menu.addItem(item("Settings…", #selector(showSettings)))
         if store.connectors.contains(where: { !$0.baseURL.isEmpty }) { menu.addItem(item("Sync connectors now", #selector(syncConnectors))) }
 
         menu.addItem(.separator())

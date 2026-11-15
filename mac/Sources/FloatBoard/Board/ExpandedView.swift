@@ -35,8 +35,8 @@ struct ExpandedView: View {
                 BarSettingsView()
             case .groups:
                 GroupsView()
-            case .connectors:
-                ConnectorsView()
+            case .settings:
+                SettingsView()
             }
             if let err = store.lastError {
                 Text(err).font(.caption).foregroundStyle(.red)

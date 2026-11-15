@@ -123,11 +123,20 @@ enum Snapshot {
             for c in store.cards { save(EditCardView(draft: c) {}, "edit-\(c.id).png", CGSize(width: 420, height: 400)) }
         }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
-        // ScrollView doesn't render here, so the connector cards and their settings forms are drawn directly.
-        let connectorList = VStack(alignment: .leading, spacing: 12) {
-            ForEach(store.connectors) { c in ConnectorCard(info: c); PhoneAppCard(info: c) }
-            Spacer(minLength: 0)
-        }.padding(12).frame(width: 900, alignment: .topLeading).fixedSize(horizontal: false, vertical: true)
-        save(connectorList, "connectors.png", CGSize(width: 900, height: 520))
+        // ScrollView doesn't render here, so each Settings section is drawn directly.
+        for s in SettingsSection.allCases {
+            let page = VStack(alignment: .leading, spacing: 14) {
+                Text(s.title).font(.system(size: 15, weight: .semibold))
+                switch s {
+                case .mode: ModeSection()
+                case .inputs: InputsSection()
+                case .outputs: OutputsSection()
+                case .rules: RulesSection()
+                case .keys: KeysSection()
+                }
+                Spacer(minLength: 0)
+            }.padding(12).frame(width: 800, alignment: .topLeading).fixedSize(horizontal: false, vertical: true)
+            save(page, "settings-\(s.rawValue).png", CGSize(width: 800, height: 900))
+        }
     }
 }

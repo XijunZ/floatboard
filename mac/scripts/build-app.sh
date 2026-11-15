@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 # Your own values (bundle id, signing identity) go in scripts/local.env, which git ignores. Example:
 #   BUNDLE_ID=com.yourdomain.floatboard
 BUNDLE_ID=com.example.floatboard
+FEEDBACK_URL=""
 [ -f scripts/local.env ] && . scripts/local.env
 swift build -c release
 APP=build/FloatBoard.app
@@ -33,6 +34,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleURLSchemes</key><array><string>floatboard</string></array>
   </dict></array>
   <key>NSHighResolutionCapable</key><true/>
+  <key>FloatBoardFeedbackURL</key><string>${FEEDBACK_URL}</string>
 </dict></plist>
 PLIST
 # Sign with the local "FloatBoard Local Signing" certificate if present, so macOS keeps the

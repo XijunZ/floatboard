@@ -3,46 +3,21 @@ import FloatBoardConnectors
 import FloatBoardCore
 import SwiftUI
 
-/// One engine on the Connectors tab, in three parts with one row style throughout:
-/// - header: the engine, its health, and actions on the whole engine (Sync now, ⋯);
-/// - Inputs: every source feeding it (Gmail inboxes, Outlook, Fathom, WhatsApp on this Mac), each with a switch and ⋯;
-/// - Rules and settings: the engine's settings form.
-/// The phone app is not part of the engine's inputs: it has its own card (`PhoneAppCard`).
-struct ConnectorCard: View {
+/// One engine (Settings › Mode): its address and health, and actions on the whole engine (Sync now, ⋯: re-check,
+/// setup page, archive, disconnect). Its inputs are in `EngineInputsCard`, its settings in the other sections.
+struct EngineCard: View {
     @EnvironmentObject var store: Store
     let info: ConnectorInfo
-    @State private var settingsOpen = false
     @State private var archiving = false
-    /// Switch positions the engine hasn't confirmed yet (shown at once; the next status replaces them).
-    @State private var pendingInputs: [String: Bool] = [:]
-    @State private var inputError: String?
     @ObservedObject private var rechecks = RecheckState.shared
 
     var body: some View {
         let status = ConnectorHealth.status(info, store: store)
-        VStack(alignment: .leading, spacing: 10) {
-            header(status)
-            Divider()
-            CardSection(title: "Inputs", help: "Where tasks come from.") {
-                ForEach(engineInputs(status)) { inputRow($0) }
-                WhatsAppInputRow(info: info, openRules: { settingsOpen = true })
-                if let inputError {
-                    Label(inputError, systemImage: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(.orange)
-                }
-                addInputMenu
-            }
-            Divider()
-            DisclosureGroup(isExpanded: $settingsOpen) {
-                ConnectorSettingsForm(info: info, schema: status?.schema ?? []).padding(.top, 6)
-            } label: {
-                Text("Rules and settings").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
-        .sheet(isPresented: $archiving) { ArchiveSheet(info: info).environmentObject(store) }
+        header(status)
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+            .sheet(isPresented: $archiving) { ArchiveSheet(info: info).environmentObject(store) }
     }
-
     // MARK: Header: the engine and actions on all of it
 
     private func header(_ status: ConnectorStatus?) -> some View {
@@ -95,7 +70,73 @@ struct ConnectorCard: View {
         .help("Re-check email, setup page, archive old data, disconnect this engine")
     }
 
-    // MARK: Inputs
+    // MARK: Actions
+
+    private func openSetup() {
+        if let u = URL(string: info.baseURL)?.appendingPathComponent("setup") { NSWorkspace.shared.open(u) }
+    }
+
+    private func confirmRecheck(days: Int) {
+        let a = NSAlert()
+        a.messageText = "Re-check the last \(days) days of email?"
+        a.informativeText = "The engine looks at that email again. Nothing is deleted. Email tasks you haven't touched that no longer need action are hidden (you can restore them from \"Show withdrawn\"). Tasks you changed are left alone. A backup is taken first."
+        a.addButton(withTitle: "Re-check"); a.addButton(withTitle: "Cancel")
+        NSApp.activate()
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let id = info.id
+        Task { @MainActor in
+            let out = await ConnectorRunner.shared?.recheck(connector: id, days: days)
+                ?? .init(summary: nil, notice: "FloatBoard isn't ready to sync yet. Try again in a moment.")
+            ConnectFlow.alert(out.summary == nil ? "Re-check did not run" : out.problems ? "Re-check finished with problems" : "Re-check finished", out.notice)
+        }
+    }
+
+    private func remove() {
+        let a = NSAlert()
+        a.messageText = "Disconnect \(info.name) from this Mac?"
+        a.informativeText = "This Mac stops syncing with the \(info.name) engine (\(URL(string: info.baseURL)?.host ?? info.baseURL)) and forgets its key. The engine itself, its setup page and your paired phones are not deleted. Its tasks and their history stay on your board, and your settings for it (rules, group descriptions, lists and learned preferences) are kept: they come back if you connect it again."
+        a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Disconnect…")
+        a.buttons[1].hasDestructiveAction = true
+        NSApp.activate()
+        guard a.runModal() == .alertSecondButtonReturn else { return }
+        guard ConnectFlow.confirmTwice("Disconnect \(info.name) now?",
+            "New tasks from it stop arriving, and changes made on your phone stop reaching this Mac, until you connect it again.", action: "Disconnect") else { return }
+        do { try ConnectorAccounts.remove(id: info.id, store: store) } catch {
+            store.activity("connector:\(info.id)", .error, "Could not remove \(info.name)", detail: "\(error)")
+            ConnectFlow.alert("Couldn't remove \(info.name)", "\(error)")
+        }
+    }
+}
+
+
+/// The inputs feeding one engine (Settings › Inputs): Gmail inboxes, Outlook, Fathom, and WhatsApp read on this Mac,
+/// each with a switch and ⋯, plus "Add an input" with a short guide for each kind.
+struct EngineInputsCard: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: UIState
+    let info: ConnectorInfo
+    /// Switch positions the engine hasn't confirmed yet (shown at once; the next status replaces them).
+    @State private var pendingInputs: [String: Bool] = [:]
+    @State private var inputError: String?
+    @State private var guide: InputGuide.Kind?
+
+    var body: some View {
+        let status = ConnectorHealth.status(info, store: store)
+        VStack(alignment: .leading, spacing: 4) {
+            if store.connectors.count > 1 {
+                Text("\(info.name) engine").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            }
+            ForEach(engineInputs(status)) { inputRow($0) }
+            WhatsAppInputRow(info: info, openRules: { ui.settingsSection = .rules })
+            if let inputError {
+                Label(inputError, systemImage: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(.orange)
+            }
+            addInputMenu
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .sheet(item: $guide) { InputGuide(kind: $0, info: info) }
+    }
 
     /// The engine's own inputs; WhatsApp has its own row (it is read on this Mac).
     private func engineInputs(_ status: ConnectorStatus?) -> [EngineSource] {
@@ -137,9 +178,9 @@ struct ConnectorCard: View {
 
     private var addInputMenu: some View {
         Menu {
-            Button("Gmail inbox (setup page)…") { openSetup() }
-            Button("Outlook (setup page)…") { openSetup() }
-            Button("Fathom meeting notes (setup page)…") { openSetup() }
+            Button("Gmail inbox…") { guide = .gmail }
+            Button("Outlook (Chrome extension)…") { guide = .outlook }
+            Button("Fathom meeting notes…") { guide = .fathom }
             Divider()
             Button("WhatsApp: use its switch above") {}.disabled(true)
         } label: { Text("Add an input…").font(.system(size: 11)) }
@@ -147,41 +188,8 @@ struct ConnectorCard: View {
         .disabled(info.baseURL.isEmpty)
     }
 
-    // MARK: Actions
-
     private func openSetup() {
         if let u = URL(string: info.baseURL)?.appendingPathComponent("setup") { NSWorkspace.shared.open(u) }
-    }
-
-    private func confirmRecheck(days: Int) {
-        let a = NSAlert()
-        a.messageText = "Re-check the last \(days) days of email?"
-        a.informativeText = "The engine looks at that email again. Nothing is deleted. Email tasks you haven't touched that no longer need action are hidden (you can restore them from \"Show withdrawn\"). Tasks you changed are left alone. A backup is taken first."
-        a.addButton(withTitle: "Re-check"); a.addButton(withTitle: "Cancel")
-        NSApp.activate()
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        let id = info.id
-        Task { @MainActor in
-            let out = await ConnectorRunner.shared?.recheck(connector: id, days: days)
-                ?? .init(summary: nil, notice: "FloatBoard isn't ready to sync yet. Try again in a moment.")
-            ConnectFlow.alert(out.summary == nil ? "Re-check did not run" : out.problems ? "Re-check finished with problems" : "Re-check finished", out.notice)
-        }
-    }
-
-    private func remove() {
-        let a = NSAlert()
-        a.messageText = "Disconnect \(info.name) from this Mac?"
-        a.informativeText = "This Mac stops syncing with the \(info.name) engine (\(URL(string: info.baseURL)?.host ?? info.baseURL)) and forgets its key. The engine itself, its setup page and your paired phones are not deleted. Its tasks and their history stay on your board, and your settings for it (rules, group descriptions, lists and learned preferences) are kept: they come back if you connect it again."
-        a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Disconnect…")
-        a.buttons[1].hasDestructiveAction = true
-        NSApp.activate()
-        guard a.runModal() == .alertSecondButtonReturn else { return }
-        guard ConnectFlow.confirmTwice("Disconnect \(info.name) now?",
-            "New tasks from it stop arriving, and changes made on your phone stop reaching this Mac, until you connect it again.", action: "Disconnect") else { return }
-        do { try ConnectorAccounts.remove(id: info.id, store: store) } catch {
-            store.activity("connector:\(info.id)", .error, "Could not remove \(info.name)", detail: "\(error)")
-            ConnectFlow.alert("Couldn't remove \(info.name)", "\(error)")
-        }
     }
 }
 
