@@ -316,6 +316,7 @@ enum GoogleCredentials {
 
     @MainActor
     private static func note(_ action: String, _ error: Error, once: Bool) {
+        if case CredentialsError.unavailable = error { return } // the Mac is asleep or locked: the next try works
         let key = "\(action): \(error)"
         if once { guard key != lastReadProblem else { return }; lastReadProblem = key }
         if let store { store.activity("credentials", .error, "Could not \(action)", detail: "\(error)") }

@@ -2,12 +2,15 @@ import FloatBoardCore
 import Foundation
 import Security
 
-public enum CredentialsError: Error, CustomStringConvertible {
+public enum CredentialsError: Error, CustomStringConvertible, Equatable {
     case unreadable(String), unwritable(String)
+    /// The Keychain can't be used right now (the Mac is asleep or locked); trying again later works.
+    case unavailable(String)
     public var description: String {
         switch self {
         case .unreadable(let m): return "The credentials file could not be read: \(m)"
         case .unwritable(let m): return "The credentials file could not be written: \(m)"
+        case .unavailable(let m): return "The Keychain isn't available right now (the Mac is asleep or locked): \(m)"
         }
     }
 }
@@ -130,6 +133,8 @@ enum Keychain {
         var out: CFTypeRef?
         let st = SecItemCopyMatching(q as CFDictionary, &out)
         if st == errSecItemNotFound { return nil }
+        // Asleep (a background "dark wake") or locked: not an error, the next try works.
+        if [errSecInteractionNotAllowed, -25320, -25330].contains(st) { throw CredentialsError.unavailable(message(st)) }
         guard st == errSecSuccess, let data = out as? Data else {
             throw CredentialsError.unreadable("Keychain: \(message(st))")
         }

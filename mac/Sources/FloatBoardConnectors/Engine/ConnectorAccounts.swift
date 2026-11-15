@@ -107,6 +107,7 @@ public enum ConnectorAccounts {
             reported[info.id] = nil
             return ConnectorClient(baseURL: url, key: key)
         } catch {
+            if case CredentialsError.unavailable = error { return nil } // the Mac is asleep or locked: the next sync tries again
             report(store, info.id, .error, "Could not read the connector's key", detail: "\(error)")
             return nil
         }
