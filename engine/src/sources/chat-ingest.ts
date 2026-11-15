@@ -17,9 +17,7 @@ import { Budget, CALLS_PER_INVOCATION } from "../lib/budget";
 import { recordCrash, runUser } from "../triage/run";
 import { alertFor } from "../reminders/alerts";
 
-export const CHAT_APPS = { whatsapp: "WhatsApp", wechat: "WeChat" } as const;
-/** Each app's chat keys start with its own prefix (the Mac makes them). */
-const KEY_PREFIX: Record<string, string> = { whatsapp: "wa:", wechat: "wx:" };
+export const CHAT_APPS = { whatsapp: "WhatsApp" } as const;
 export type ChatApp = keyof typeof CHAT_APPS;
 export const CHAT_KINDS: string[] = Object.keys(CHAT_APPS);
 const MAX_CHATS = 100, MAX_BODY = 1_200_000, MAX_TRANSCRIPT = 8000;
@@ -35,15 +33,15 @@ const clean = (v: unknown, max: number): string | null =>
 /** Only links that open the chat app (never a web page the Mac didn't make). */
 export function chatLink(v: unknown): string {
   const s = typeof v === "string" ? v.trim() : "";
-  return /^whatsapp:\/\/(send\?phone=\d{5,20})?$/.test(s) || /^https:\/\/wa\.me\/\d{5,20}$/.test(s) || s === "weixin://" ? s : "";
+  return /^whatsapp:\/\/(send\?phone=\d{5,20})?$/.test(s) || /^https:\/\/wa\.me\/\d{5,20}$/.test(s) ? s : "";
 }
 
 /** One chat from the Mac, checked and trimmed, or null when it can't be used. */
-export function readChat(x: unknown, app: string = "whatsapp"): ChatRow | null {
+export function readChat(x: unknown): ChatRow | null {
   if (!x || typeof x !== "object") return null;
   const r = x as Record<string, unknown>;
   const key = clean(r.key, 300), name = clean(r.name, 200), transcript = clean(r.transcript, MAX_TRANSCRIPT);
-  if (!key || !key.startsWith(KEY_PREFIX[app] ?? "\u0000") || name === null || !transcript) return null;
+  if (!key || !/^wa:/.test(key) || name === null || !transcript) return null;
   const t = typeof r.received === "string" ? Date.parse(r.received) : NaN;
   if (!Number.isFinite(t)) return null;
   const senders = Array.isArray(r.senders) ? r.senders.map((s) => clean(s, 100)).filter(Boolean).slice(0, 20).join(", ") : "";
@@ -74,7 +72,7 @@ route("POST", "/v2/chats", async (req, env, user, _p, ctx) => {
   if (!Array.isArray(chats) || chats.length > MAX_CHATS) return json({ error: `chats must be a list of at most ${MAX_CHATS}` }, 400);
   const sourceId = await chatSource(env, user.id, app as ChatApp);
   const now = nowISO();
-  const rows = chats.map((c) => readChat(c, app));
+  const rows = chats.map(readChat);
   const good = rows.filter((r): r is ChatRow => r !== null);
   const results = good.length ? await env.DB.batch(good.map((r) => env.DB.prepare(`INSERT OR IGNORE INTO chat_rows
       (user_id,source_id,row_key,app,chat_name,is_group,muted,senders,transcript,link,received,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)

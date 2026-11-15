@@ -41,7 +41,7 @@ export function senderName(m: Message): string {
   return (name || senderAddress(m.from)).slice(0, 100);
 }
 
-export const TRIAGE_KINDS = ["gmail", "outlook_web", "whatsapp", "wechat"];
+export const TRIAGE_KINDS = ["gmail", "outlook_web", "whatsapp"];
 
 export type RunStats = { fetched: number; skippedSeen: number; dropped: number; classified: number; actions: number;
   recaps: number; noAction: number; alerts: number; errors: number };
@@ -278,7 +278,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   const sourceOf = (row: SourceRow) => {
     if (!sources.has(row.id)) sources.set(row.id, opts.sourceFor ? opts.sourceFor(row)
       : row.kind === "outlook_web" ? new OutlookSource(env, row)
-      : row.kind === "whatsapp" || row.kind === "wechat" ? new ChatSource(env, row)
+      : row.kind === "whatsapp" ? new ChatSource(env, row)
       : new GmailSource(env, row, calls.wrap(), opts.lookbackDays ?? 7, [...DEFAULT_RECAP_SENDERS, ...rules.allow], unreadOnly));
     return sources.get(row.id)!;
   };
