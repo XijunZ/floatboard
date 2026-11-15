@@ -19,5 +19,6 @@
   "last_run_ok": "2026-11-08T10:00:00.000Z",
   "last_run_error": null,
   "oldest_unprocessed_event": null,
-  "db_size_bytes": 1400000
+  "db_size_bytes": 1400000,
+  "keys": { "claude": true, "google_client_id": "123-example.apps.googleusercontent.com" }
 }

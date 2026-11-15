@@ -22,8 +22,22 @@ public enum CredentialsError: Error, CustomStringConvertible {
 public enum Credentials {
     /// The file used when `FLOATBOARD_CREDS` is set, and the old file that is moved into the Keychain otherwise.
     public static var url: URL { LocalData.credentials }
-    /// True when the secrets live in a file (checks); false in the app, where they live in the Keychain.
-    public static var usesFile: Bool { ProcessInfo.processInfo.environment[LocalData.credentialsEnv] != nil }
+    /// True when the secrets live in a file: in checks (`FLOATBOARD_CREDS`), and in builds signed ad-hoc, where the
+    /// Keychain would ask for permission again after every rebuild. Builds signed with a certificate (such as the local
+    /// "FloatBoard Local Signing" one, see build-app.sh) keep the Keychain's permission across rebuilds.
+    public static var usesFile: Bool {
+        ProcessInfo.processInfo.environment[LocalData.credentialsEnv] != nil || !signedWithCertificate
+    }
+
+    /// Whether this running app is signed with a certificate (not ad-hoc and not unsigned).
+    public static let signedWithCertificate: Bool = {
+        var code: SecCode?, staticCode: SecStaticCode?, info: CFDictionary?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let dict = info as? [String: Any] else { return false }
+        return !((dict[kSecCodeInfoCertificates as String] as? [Any]) ?? []).isEmpty
+    }()
     static let service = "FloatBoard", account = "credentials"
 
     nonisolated(unsafe) private static var cache: [String: String]?

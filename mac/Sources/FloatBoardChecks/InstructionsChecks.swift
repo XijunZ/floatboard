@@ -55,3 +55,38 @@ import FloatBoardCore
         check(store.instructionVersions(connector: "in", part: "my_rules").count == 2, "unchanged_text_adds_no_version")
     } catch { check(false, "instructions: \(error)") }
 }
+
+/// Keys entered on the Mac reach the engine; while it can't be reached they wait (names only) and are sent later.
+@MainActor func keysChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-keys-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: temp cleanup
+    let store: Store
+    do { store = Store(db: try DB(url: root.appendingPathComponent("board.sqlite"))) } catch { check(false, "keys setup: \(error)"); return }
+    do {
+        try ConnectorAccounts.add(id: "ky", name: "Ky", baseURL: URL(string: "https://ky.example")!, key: "k", store: store)
+        try Keys.setClaude("sk-ant-secret-1", store: store)
+        try Keys.setGmailClient(id: "cid.apps", secret: "gsecret", store: store)
+        check(Keys.pending(connector: "ky", store: store) == [.claude, .googleClient] && Keys.value(Keys.claude, store: store) == "sk-ant-secret-1",
+              "keys_saved_on_the_mac_and_queued")
+        let meta = (try? store.db.query("SELECT group_concat(value) FROM meta") { DB.text($0, 0) }.first) ?? "" // try?-ok: empty fails the check
+        check(!meta.contains("sk-ant") && !meta.contains("gsecret"), "only_key_names_wait_in_the_board")
+
+        // Engine down: nothing is lost.
+        let down = FakeEngine { _, _, _ in (503, "{}") }
+        let ok1 = await Keys.push(connector: "ky", store: store, client: down.client())
+        check(!ok1 && Keys.pending(connector: "ky", store: store).count == 2, "keys_wait_while_the_engine_is_down")
+
+        // Engine up: both go in one request, then nothing waits.
+        let up = FakeEngine { _, p, _ in p == "/v2/keys" ? (200, #"{"ok":true,"keys":{"claude":true,"google_client_id":"cid.apps"}}"#) : (404, "{}") }
+        let ok2 = await Keys.push(connector: "ky", store: store, client: up.client())
+        let sent = up.bodies("/v2/keys").first ?? [:]
+        check(ok2 && Keys.pending(connector: "ky", store: store).isEmpty && sent["claude_key"] as? String == "sk-ant-secret-1"
+              && (sent["google_client"] as? [String: String])?["client_secret"] == "gsecret", "keys_sent_once_the_engine_answers")
+
+        // Removing the Claude key sends "" (removes it on the engine too).
+        try Keys.setClaude("", store: store)
+        _ = await Keys.push(connector: "ky", store: store, client: up.client())
+        check(up.bodies("/v2/keys").last?["claude_key"] as? String == "" && Keys.value(Keys.claude, store: store) == nil,
+              "removing_a_key_removes_it_on_the_engine")
+    } catch { check(false, "keys: \(error)") }
+}

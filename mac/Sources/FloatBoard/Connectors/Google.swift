@@ -286,8 +286,7 @@ private extension Data {
     }
 }
 
-/// The Google client and refresh tokens, kept in the shared credentials file (see `Credentials`).
-/// Not the macOS Keychain: without an Apple Developer ID it asks for permission again after every app update.
+/// Stored through `Credentials`: the macOS Keychain when the app is signed with a certificate, else a private file.
 enum GoogleCredentials {
     /// Set once the store exists. Every failure is written to Activity (the error, never the value).
     nonisolated(unsafe) static var store: Store?

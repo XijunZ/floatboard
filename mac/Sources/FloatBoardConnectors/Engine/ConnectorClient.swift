@@ -79,6 +79,8 @@ public struct ConnectorStatus: Codable, Equatable {
     public var dbSizeBytes: Int?
     /// The engine's inputs; empty from older engines.
     public var sources: [EngineSource] = []
+    /// Which keys the engine holds (never the keys); nil from older engines.
+    public var keys: EngineKeys?
 
     public init(settingsVersion: Int = 0, schema: [SettingField] = [], needsAttention: [String] = [], waiting: Int = 0,
                 lastRunOK: String? = nil, lastRunError: String? = nil, oldestUnprocessedEvent: String? = nil, dbSizeBytes: Int? = nil) {
@@ -90,7 +92,7 @@ public struct ConnectorStatus: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case settingsVersion = "settings_version", schema, needsAttention = "needs_attention", waiting
         case lastRunOK = "last_run_ok", lastRunError = "last_run_error", oldestUnprocessedEvent = "oldest_unprocessed_event"
-        case dbSizeBytes = "db_size_bytes", sources
+        case dbSizeBytes = "db_size_bytes", sources, keys
     }
 
     public init(from d: Decoder) throws {
@@ -104,7 +106,24 @@ public struct ConnectorStatus: Codable, Equatable {
         oldestUnprocessedEvent = try c.decodeIfPresent(String.self, forKey: .oldestUnprocessedEvent)
         dbSizeBytes = try c.decodeIfPresent(Int.self, forKey: .dbSizeBytes)
         sources = try c.decodeIfPresent([EngineSource].self, forKey: .sources) ?? []
+        keys = try c.decodeIfPresent(EngineKeys.self, forKey: .keys)
     }
+}
+
+/// Which keys an engine holds for you: whether it has a Claude key, and which Google client (its id only).
+public struct EngineKeys: Codable, Equatable, Sendable {
+    public var claude: Bool
+    public var googleClientID: String?
+    public init(claude: Bool, googleClientID: String?) { self.claude = claude; self.googleClientID = googleClientID }
+    enum CodingKeys: String, CodingKey { case claude, googleClientID = "google_client_id" }
+}
+
+/// One shared rulebook (read-only in the app).
+public struct Rulebook: Codable, Equatable, Sendable, Identifiable {
+    public let key: String
+    public let name: String
+    public let text: String
+    public var id: String { key }
 }
 
 public enum ConnectorError: Error, CustomStringConvertible, Equatable {
@@ -260,6 +279,25 @@ public struct ConnectorClient {
     }
 
     /// Turns one of the engine's inputs on or off.
+    /// Sends keys to the engine. `claudeKey`: nil leaves it, "" removes it. `googleClient`: nil leaves it; an empty id
+    /// removes it. Returns what the engine now holds.
+    @discardableResult
+    public func setKeys(claudeKey: String? = nil, googleClient: (id: String, secret: String)? = nil) async throws -> EngineKeys {
+        var body: [String: Any] = [:]
+        if let claudeKey { body["claude_key"] = claudeKey }
+        if let g = googleClient { body["google_client"] = g.id.isEmpty ? NSNull() : ["client_id": g.id, "client_secret": g.secret] }
+        let data = try await call("PUT", "/v2/keys", body: try JSONSerialization.data(withJSONObject: body))
+        struct Out: Decodable { let keys: EngineKeys }
+        do { return try JSONDecoder().decode(Out.self, from: data).keys } catch { throw ConnectorError.badResponse("\(error)") }
+    }
+
+    /// The shared rulebooks the engine follows.
+    public func rulebooks() async throws -> [Rulebook] {
+        let data = try await call("GET", "/v2/rulebook")
+        struct Out: Decodable { let rulebooks: [Rulebook] }
+        do { return try JSONDecoder().decode(Out.self, from: data).rulebooks } catch { throw ConnectorError.badResponse("\(error)") }
+    }
+
     public func setSourceEnabled(id: String, _ enabled: Bool) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["enabled": enabled])
         _ = try await call("POST", "/v2/sources/\(id)/enabled", body: body)
