@@ -18,9 +18,9 @@ Tests: `npm test` (runs locally in the Workers runtime with fake Google/Claude/p
 
 ### A. No terminal: the Deploy button (about 5 minutes)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/<owner>/FloatBoard/tree/main/engine)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/XijunZ/floatboard/tree/main/engine)
 
-1. Press the button (if it shows `<owner>`, use the address of the repository you are reading). Sign in to Cloudflare
+1. Press the button. Sign in to Cloudflare
    (free) and to GitHub. It copies the code into your GitHub, creates the database and deploys.
 2. It asks for two secrets. Type two long random passwords (your password manager can make them):
    **ENC_KEY** encrypts what the engine keeps; **ADMIN_KEY** is the password you use in the next step. Keep both.
@@ -34,8 +34,8 @@ Updates: the copy in your GitHub redeploys whenever you update it (Cloudflare's 
 ### B. One command (a terminal and Node.js 20 or newer)
 
 ```bash
-git clone https://github.com/<owner>/FloatBoard.git
-cd FloatBoard/engine
+git clone https://github.com/XijunZ/floatboard.git
+cd floatboard/engine
 npm ci
 npm run setup
 ```
@@ -179,7 +179,7 @@ git pull && npm ci && npm run update      # database changes first, then the new
 What `npm run setup` does, if you prefer to run each step yourself (Node.js 20 or newer):
 
 ```bash
-git clone https://github.com/<owner>/FloatBoard.git && cd FloatBoard/engine && npm ci
+git clone https://github.com/XijunZ/floatboard.git && cd floatboard/engine && npm ci
 npx wrangler login                                   # opens your browser; a free Cloudflare account is enough
 npx wrangler d1 create floatboard                    # copy the database_id it prints
 cp wrangler.local.toml.example wrangler.local.toml   # paste the database_id there

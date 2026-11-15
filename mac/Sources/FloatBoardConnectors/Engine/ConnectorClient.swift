@@ -325,6 +325,17 @@ public struct ConnectorClient {
         do { return try JSONDecoder().decode(Comparison.self, from: data) } catch { throw ConnectorError.badResponse("\(error)") }
     }
 
+    /// This engine's state for the person's other engine (inputs with their access and position, what was judged).
+    public func handoverState() async throws -> Data { try await call("GET", "/v2/handover") }
+
+    /// Takes the other engine's state. `switching`: inputs are on or off here as they were there; else (standby) new
+    /// inputs arrive switched off and existing ones keep their switch.
+    public func receiveHandover(_ state: Data, switching: Bool) async throws {
+        guard var o = try JSONSerialization.jsonObject(with: state) as? [String: Any] else { throw ConnectorError.badResponse("handover state") }
+        o["apply_enabled"] = switching
+        _ = try await call("POST", "/v2/handover", body: try JSONSerialization.data(withJSONObject: o))
+    }
+
     /// Sends the Fathom API key ("" removes it).
     public func setFathomKey(_ key: String) async throws {
         _ = try await call("PUT", "/v2/keys", body: try JSONSerialization.data(withJSONObject: ["fathom_key": key]))

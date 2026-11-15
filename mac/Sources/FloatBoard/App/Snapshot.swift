@@ -129,8 +129,7 @@ enum Snapshot {
                 Text(s.title).font(.system(size: 15, weight: .semibold))
                 switch s {
                 case .mode: ModeSection()
-                case .inputs: InputsSection()
-                case .outputs: OutputsSection()
+                case .connections: ConnectionsSection()
                 case .rules: RulesSection()
                 case .keys: KeysSection()
                 }

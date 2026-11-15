@@ -75,37 +75,92 @@ import FloatBoardCore
     } catch { check(false, "local_engine: \(error)") }
 }
 
-/// Switching to Mac only and back: "This Mac" appears as an engine the app syncs with like any other, and goes away.
+/// Switching between Always on and Mac only, both ways, loses nothing and starts where the other left off. The online
+/// engine here is a second copy of the same engine (its own database), reached as https://online.test.
 @MainActor func localModeChecks() async {
-    guard (try? LocalEngine.bundledScript()) != nil else { return } // try?-ok: reported by localEngineChecks
+    guard let script = try? LocalEngine.bundledScript() else { return } // try?-ok: reported by localEngineChecks
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-mode-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: root) } // try?-ok: temp cleanup
     let store: Store
     do { store = Store(db: try DB(url: root.appendingPathComponent("board.sqlite"))) } catch { check(false, "mode setup: \(error)"); return }
-    LocalMode.resetForTesting()
-    LocalMode.transportOverride = { req in (Data("{}".utf8), HTTPURLResponse(url: req.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!) }
-    defer { LocalMode.transportOverride = nil; LocalMode.resetForTesting() }
+    let none: LocalEngine.Transport = { req in (Data("{}".utf8), HTTPURLResponse(url: req.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!) }
+    let onlineEngine: LocalEngine
     do {
-        try Keys.setClaude("sk-mode", store: store)
-        try await LocalMode.enable(store: store)
-        let info = store.connectors.first { $0.id == LocalMode.connectorID }
-        check(info?.name == "This Mac" && LocalMode.isOn(store: store) && Keys.pending(connector: LocalMode.connectorID, store: store).contains(.claude),
-              "mac_only_adds_this_mac_and_queues_keys")
-        guard let info, let client = ConnectorAccounts.client(for: info, store: store) else { check(false, "mac_only_client"); return }
-        _ = await Keys.push(connector: LocalMode.connectorID, store: store, client: client)
-        let st = try await client.status()
-        check(st.keys?.claude == true, "mac_only_engine_gets_the_claude_key")
-        let r = await ConnectorSync.run(connector: LocalMode.connectorID, store: store, client: client, now: Date())
+        onlineEngine = try LocalEngine(script: script, databaseURL: root.appendingPathComponent("online.sqlite"),
+                                       secrets: ["ENC_KEY": "online engine encryption key for the checks", "ADMIN_KEY": "adm-on"], transport: none)
+    } catch { check(false, "mode online engine: \(error)"); return }
+    func raw(_ e: LocalEngine, _ method: String, _ url: String, _ body: String?, _ headers: [String: String]) async throws -> [String: Any] {
+        var r = URLRequest(url: URL(string: url)!); r.httpMethod = method
+        for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
+        if let body { r.httpBody = Data(body.utf8); r.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        let (d, _) = try await e.handle(r)
+        return (try JSONSerialization.jsonObject(with: d) as? [String: Any]) ?? [:]
+    }
+    LocalMode.resetForTesting()
+    LocalMode.transportOverride = none
+    ConnectorAccounts.testTransport = { req in try await onlineEngine.handle(req) }
+    defer { LocalMode.transportOverride = nil; ConnectorAccounts.testTransport = nil; LocalMode.resetForTesting() }
+    func inbox(_ state: [String: Any]) -> [String: Any]? { (state["sources"] as? [[String: Any]])?.first { $0["address"] as? String == "me@example.com" } }
+    do {
+        // The person's online engine, already set up: an inbox read up to "hist-10", one email judged, rules saved.
+        let made = try await raw(onlineEngine, "POST", "https://online.test/admin/users", #"{"name":"Me"}"#, ["X-Admin-Key": "adm-on"])
+        guard let onKey = made["key"] as? String else { check(false, "mode online user"); return }
+        let auth = ["Authorization": "Bearer \(onKey)"]
+        _ = try await raw(onlineEngine, "POST", "https://online.test/v2/handover",
+                          #"{"sources":[{"kind":"gmail","address":"me@example.com","enabled":true,"cursor":"hist-10","refresh_token":"rt-1","client_id":"cid","client_secret":"cs","fathom_key":null}],"seen":["<old@x>"],"claude_key":"sk-online","apply_enabled":true}"#, auth)
+        try ConnectorAccounts.add(id: "email", name: "Email", baseURL: URL(string: "https://online.test")!, key: onKey, store: store)
+        try store.saveConnectorSettings(connector: "email", values: ["my_rules": "Invoices are tasks", "alerts_on": true])
         store.reload()
-        check(r.error == nil && store.connectors.first { $0.id == LocalMode.connectorID }?.lastOK != nil, "mac_only_engine_syncs_like_an_online_one: \(r)")
-        await LocalMode.tick(store: store)
-        check(!store.recentActivity(limit: 50).contains { $0.message.hasPrefix("The engine on this Mac hit a problem") }, "mac_only_schedule_runs")
-        try await LocalMode.disable(store: store)
-        check(!LocalMode.isOn(store: store), "always_on_removes_this_mac")
-        // Back again: the same user (key kept), nothing to recreate.
+        check(!LocalMode.isSetUp(), "mac_only_not_set_up_before_first_switch")
+
+        // To Mac only: everything arrives, the online inbox pauses.
         try await LocalMode.enable(store: store)
-        check(LocalMode.isOn(store: store), "mac_only_again_reuses_its_engine")
-    } catch { check(false, "mac_only: \(error)") }
+        guard let local = LocalMode.client(store: store),
+              let online = ConnectorAccounts.client(for: store.connectors.first { $0.id == "email" }!, store: store) else { check(false, "mode clients"); return }
+        var l = try JSONSerialization.jsonObject(with: try await local.handoverState()) as? [String: Any] ?? [:]
+        var o = try JSONSerialization.jsonObject(with: try await online.handoverState()) as? [String: Any] ?? [:]
+        check(inbox(l)?["enabled"] as? Bool == true && inbox(l)?["cursor"] as? String == "hist-10" && inbox(l)?["refresh_token"] as? String == "rt-1"
+              && (l["seen"] as? [String])?.contains("<old@x>") == true && l["claude_key"] as? String == "sk-online",
+              "to_mac_only_inbox_access_position_and_judged_move")
+        check(inbox(o)?["enabled"] as? Bool == false, "to_mac_only_online_inbox_paused")
+        check(store.connectors.first { $0.id == LocalMode.connectorID }?.settings["my_rules"] as? String == "Invoices are tasks",
+              "to_mac_only_rules_move")
+
+        // On this Mac: reading moves on, a rule changes; the standby online engine is kept in step but doesn't read.
+        _ = try await raw(onlineEngine, "GET", "https://online.test/v2/status", nil, auth) // reachable
+        let macKey = try ConnectorAccounts.key(for: LocalMode.connectorID) ?? ""
+        var r = URLRequest(url: URL(string: LocalMode.address + "/v2/handover")!); r.httpMethod = "POST"
+        r.setValue("Bearer \(macKey)", forHTTPHeaderField: "Authorization")
+        r.httpBody = Data(#"{"sources":[{"kind":"gmail","address":"me@example.com","enabled":true,"cursor":"hist-20","refresh_token":"rt-1","client_id":"cid","client_secret":"cs","fathom_key":null}],"seen":["<new@x>"],"apply_enabled":true}"#.utf8)
+        _ = try await LocalMode.handle(r)
+        try store.saveConnectorSettings(connector: LocalMode.connectorID, values: ["my_rules": "Invoices are tasks\nSchool emails are tasks"])
+        store.reload()
+        await LocalMode.mirror(store: store)
+        store.reload()
+        o = try JSONSerialization.jsonObject(with: try await online.handoverState()) as? [String: Any] ?? [:]
+        check(inbox(o)?["cursor"] as? String == "hist-20" && inbox(o)?["enabled"] as? Bool == false && (o["seen"] as? [String])?.contains("<new@x>") == true
+              && store.connectors.first { $0.id == "email" }?.settings["my_rules"] as? String == "Invoices are tasks\nSchool emails are tasks"
+              && store.connectors.first { $0.id == "email" }?.settings["alerts_on"] as? Bool == true,
+              "standby_online_kept_in_step_without_reading")
+
+        // Back to Always on: picks up at hist-20, reading again; this Mac's engine on standby.
+        try await LocalMode.disable(store: store)
+        o = try JSONSerialization.jsonObject(with: try await online.handoverState()) as? [String: Any] ?? [:]
+        check(inbox(o)?["enabled"] as? Bool == true && inbox(o)?["cursor"] as? String == "hist-20" && !LocalMode.isOn(store: store) && LocalMode.isSetUp(),
+              "back_to_always_on_picks_up_where_the_mac_left_off")
+        // Standby the other way: the Mac's engine follows the online one, switched off.
+        _ = try await raw(onlineEngine, "POST", "https://online.test/v2/handover",
+                          #"{"sources":[{"kind":"gmail","address":"me@example.com","enabled":true,"cursor":"hist-30","refresh_token":"rt-2","client_id":"cid","client_secret":"cs","fathom_key":null}],"seen":[],"apply_enabled":true}"#, auth)
+        await LocalMode.mirror(store: store)
+        l = try JSONSerialization.jsonObject(with: try await local.handoverState()) as? [String: Any] ?? [:]
+        check(inbox(l)?["cursor"] as? String == "hist-30" && inbox(l)?["refresh_token"] as? String == "rt-2" && inbox(l)?["enabled"] as? Bool == false,
+              "standby_mac_kept_in_step_without_reading")
+        // And to Mac only again: the same engine, from hist-30.
+        try await LocalMode.enable(store: store)
+        l = try JSONSerialization.jsonObject(with: try await local.handoverState()) as? [String: Any] ?? [:]
+        check(LocalMode.isOn(store: store) && inbox(l)?["cursor"] as? String == "hist-30" && inbox(l)?["enabled"] as? Bool == true,
+              "mac_only_again_starts_where_always_on_left_off")
+    } catch { check(false, "mode switching: \(error)") }
 }
 
 /// "On this Mac": judging with Apple's model (faked here) through the engine inside the app, and the comparison.
