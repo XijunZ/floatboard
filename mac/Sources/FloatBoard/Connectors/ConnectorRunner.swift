@@ -148,6 +148,7 @@ final class ConnectorRunner {
             running.insert(id)
             Task { @MainActor in
                 let r = await ConnectorSync.run(connector: id, store: store, client: client, now: Date())
+                await Keys.push(connector: id, store: store, client: client)
                 running.remove(id)
                 store.reload()
                 Health.refresh(store: store, backups: backups)

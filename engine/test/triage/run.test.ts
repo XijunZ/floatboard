@@ -113,7 +113,7 @@ describe("run", () => {
     const r = await runUser(env as any, u.id, { sourceFor, fetchFn: claudeFetch });
     expect(r.processed).toBe(0);
     const run = await env.DB.prepare("SELECT error FROM runs WHERE user_id=?").bind(u.id).first<{ error: string }>();
-    expect(run!.error).toContain("Claude API key");
+    expect(run!.error).toContain("Settings › Keys");
     const seen = await env.DB.prepare("SELECT count(*) AS n FROM seen WHERE user_id=?").bind(u.id).first<{ n: number }>();
     expect(seen!.n).toBe(0); // nothing lost: processed once a key is added
   });

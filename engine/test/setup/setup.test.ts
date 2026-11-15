@@ -24,11 +24,14 @@ beforeEach(() => {
   }) as typeof fetch);
 });
 
+/** Keys come from the Mac app now (PUT /v2/keys with the user key). */
+const setKeys = (key: string, body: unknown) =>
+  call("/v2/keys", { method: "PUT", key, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
 async function withClient(key: string) {
-  const s = await signIn(key);
-  const r = await form("/setup/google/client", { csrf: s.csrf, client_id: "web-cid.apps.googleusercontent.com", client_secret: "web-csecret" }, { cookie: s.cookie });
+  const r = await setKeys(key, { google_client: { client_id: "web-cid.apps.googleusercontent.com", client_secret: "web-csecret" } });
   expect(r.status).toBe(200);
-  return s;
+  return signIn(key);
 }
 
 /** Browser nonce cookie set by each start, by state (the callback needs the one from the same browser). */
@@ -64,7 +67,7 @@ describe("setup page", () => {
     expect(bad.status).toBe(401);
     expect(bad.headers.get("Set-Cookie")).toBeNull();
     // Without a session nothing behind the page works.
-    expect((await form("/setup/claude", { csrf: "x", anthropic_key: "sk" })).status).toBe(401);
+    expect((await form("/setup/ntfy/on", { csrf: "x" })).status).toBe(401);
     expect((await get("/setup/google/start?csrf=x")).status).toBe(401);
     expect((await get("/setup", "fb_setup=forged")).headers.get("Content-Type")).toContain("text/html");
     expect(await (await get("/setup", "fb_setup=forged")).text()).not.toContain("floatboard://");
@@ -101,7 +104,7 @@ describe("setup page", () => {
     const s = await signIn(u.key);
     await env.DB.prepare("UPDATE setup_sessions SET expires=? WHERE user_id=?").bind(new Date(Date.now() - 1000).toISOString(), u.id).run();
     expect(await (await get("/setup", s.cookie)).text()).not.toContain("floatboard://");
-    expect((await form("/setup/claude", { csrf: s.csrf, anthropic_key: "sk" }, { cookie: s.cookie })).status).toBe(401);
+    expect((await form("/setup/ntfy/on", { csrf: s.csrf }, { cookie: s.cookie })).status).toBe(401);
   });
 
   it("csp_and_strict_headers_present", async () => {
@@ -139,47 +142,68 @@ describe("setup page", () => {
   it("csrf_rejected", async () => {
     const u = await newUser("X");
     const s = await signIn(u.key);
-    expect((await form("/setup/claude", { anthropic_key: "sk-1" }, { cookie: s.cookie })).status).toBe(403);
-    expect((await form("/setup/claude", { csrf: "wrong", anthropic_key: "sk-1" }, { cookie: s.cookie })).status).toBe(403);
+    expect((await form("/setup/ntfy/on", {}, { cookie: s.cookie })).status).toBe(403);
+    expect((await form("/setup/ntfy/on", { csrf: "wrong" }, { cookie: s.cookie })).status).toBe(403);
     // Another session's token doesn't work either.
     const other = await signIn((await newUser("Y")).key);
-    expect((await form("/setup/claude", { csrf: other.csrf, anthropic_key: "sk-1" }, { cookie: s.cookie })).status).toBe(403);
+    expect((await form("/setup/ntfy/on", { csrf: other.csrf }, { cookie: s.cookie })).status).toBe(403);
     // Cross-site origin is refused even with the right token.
-    expect((await form("/setup/claude", { csrf: s.csrf, anthropic_key: "sk-1" }, { cookie: s.cookie, origin: "https://evil.example" })).status).toBe(403);
-    expect((await call("/setup/claude", { method: "POST", headers: { Cookie: s.cookie, "Content-Type": "application/x-www-form-urlencoded", "Sec-Fetch-Site": "cross-site" },
-      body: new URLSearchParams({ csrf: s.csrf, anthropic_key: "sk-1" }).toString() })).status).toBe(403);
+    expect((await form("/setup/ntfy/on", { csrf: s.csrf }, { cookie: s.cookie, origin: "https://evil.example" })).status).toBe(403);
+    expect((await call("/setup/ntfy/on", { method: "POST", headers: { Cookie: s.cookie, "Content-Type": "application/x-www-form-urlencoded", "Sec-Fetch-Site": "cross-site" },
+      body: new URLSearchParams({ csrf: s.csrf }).toString() })).status).toBe(403);
     expect((await get(`/setup/google/start?csrf=wrong`, s.cookie)).status).toBe(403);
-    const u2 = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(u.id).first<any>();
-    expect(u2.anthropic_key_enc).toBeNull();
+    const u2 = await env.DB.prepare("SELECT ntfy_topic FROM users WHERE id=?").bind(u.id).first<any>();
+    expect(u2.ntfy_topic).toBeNull();
     expect((await logRows(u.id)).some((r) => r.action === "csrf" && r.ok === 0)).toBe(true);
     // Same origin (or the "null" origin browsers send under Referrer-Policy no-referrer) + right token is accepted.
-    expect((await form("/setup/claude", { csrf: s.csrf, anthropic_key: "sk-1" }, { cookie: s.cookie, origin: BASE })).status).toBe(200);
-    expect((await form("/setup/claude", { csrf: s.csrf, anthropic_key: "sk-2" }, { cookie: s.cookie, origin: "null" })).status).toBe(200);
+    expect((await form("/setup/ntfy/on", { csrf: s.csrf }, { cookie: s.cookie, origin: BASE })).status).toBe(200);
+    expect((await form("/setup/ntfy/on", { csrf: s.csrf }, { cookie: s.cookie, origin: "null" })).status).toBe(200);
   });
 
-  it("claude_key_never_returned", async () => {
+  it("keys_come_from_the_mac_and_are_never_returned", async () => {
     const u = await newUser("X");
     const s = await signIn(u.key);
     expect(s.page).not.toContain("saved ✓");
-    const r = await form("/setup/claude", { csrf: s.csrf, anthropic_key: "sk-ant-very-secret" }, { cookie: s.cookie });
+    expect(s.page).toContain("Settings › Keys");
+    expect(s.page).not.toContain('name="anthropic_key"');
+    expect(s.page).not.toContain('name="client_secret"');
+    // The old forms are gone.
+    expect((await form("/setup/claude", { csrf: s.csrf, anthropic_key: "sk" }, { cookie: s.cookie })).status).toBe(404);
+    // Without the user key nothing is stored.
+    expect((await call("/v2/keys", { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(401);
+    expect((await setKeys(u.key, {})).status).toBe(400);
+    expect((await setKeys(u.key, { google_client: { client_id: "x" } })).status).toBe(400);
+    const r = await setKeys(u.key, { claude_key: "sk-ant-very-secret", google_client: { client_id: "cid.apps", client_secret: "gcs-secret-777" } });
     expect(r.status).toBe(200);
-    const html = await r.text();
-    expect(html).toContain("saved ✓");
-    expect(html).not.toContain("sk-ant-very-secret");
-    const again = await (await get("/setup", s.cookie)).text();
-    expect(again).toContain("saved ✓");
-    expect(again).not.toContain("sk-ant-very-secret");
+    const body = await r.text();
+    expect(JSON.parse(body).keys).toEqual({ claude: true, google_client_id: "cid.apps" });
+    expect(body).not.toContain("sk-ant-very-secret");
+    expect(body).not.toContain("gcs-secret-777");
+    const page = await (await get("/setup", s.cookie)).text();
+    expect(page).toContain("saved ✓");
+    expect(page).toContain("cid.apps");
+    expect(page).not.toContain("sk-ant-very-secret");
+    expect(page).not.toContain("gcs-secret-777");
     const row = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(u.id).first<any>();
     expect(row.anthropic_key_enc).not.toContain("sk-ant-very-secret");
     expect(await decrypt(env as any, row.anthropic_key_enc)).toBe("sk-ant-very-secret");
-    const logs = JSON.stringify(await logRows(u.id));
-    expect(logs).toContain("claude_key");
-    expect(logs).not.toContain("sk-ant-very-secret");
-    // The Google client secret is write-only too.
-    await form("/setup/google/client", { csrf: s.csrf, client_id: "cid.apps", client_secret: "gcs-secret-777" }, { cookie: s.cookie });
-    const page = await (await get("/setup", s.cookie)).text();
-    expect(page).toContain("cid.apps");
-    expect(page).not.toContain("gcs-secret-777");
+    const status = await (await call("/v2/status", { key: u.key })).json<any>();
+    expect(status.keys).toEqual({ claude: true, google_client_id: "cid.apps" });
+    expect(JSON.stringify(status)).not.toContain("sk-ant");
+    // The log says what changed, never the key.
+    const ev = JSON.stringify((await env.DB.prepare("SELECT detail FROM run_events WHERE user_id=? AND decision='keys'").bind(u.id).all()).results);
+    expect(ev).toContain("Claude key saved");
+    expect(ev).not.toContain("sk-ant-very-secret");
+    // Removing: "" for the Claude key, null for the Google client.
+    expect((await (await setKeys(u.key, { claude_key: "", google_client: null })).json<any>()).keys).toEqual({ claude: false, google_client_id: null });
+  });
+
+  it("rulebook_is_readable_by_the_app", async () => {
+    const u = await newUser("X");
+    const r = await (await call("/v2/rulebook", { key: u.key })).json<any>();
+    expect(r.rulebooks.map((b: any) => b.key)).toEqual(["email", "chat"]);
+    expect(r.rulebooks[0].text.length).toBeGreaterThan(200);
+    expect((await call("/v2/rulebook")).status).toBe(401);
   });
 
   it("connect_link_contains_engine_and_key", async () => {

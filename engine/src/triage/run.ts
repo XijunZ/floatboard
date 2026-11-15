@@ -115,7 +115,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   const user = await env.DB.prepare("SELECT anthropic_key_enc, name FROM users WHERE id=?").bind(userId).first<{ anthropic_key_enc: string | null; name: string | null }>();
   const userName = user?.name ?? "";
   if (!user?.anthropic_key_enc) {
-    await finish(0, "Add your Claude API key in Connections to start reading email.", "no_key");
+    await finish(0, "Add your Claude key in FloatBoard › Settings › Keys to start reading email.", "no_key");
     return { processed: 0, done: true };
   }
   const client = makeClient(await decrypt(env, user.anthropic_key_enc), calls.wrap(opts.fetchFn));

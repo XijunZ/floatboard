@@ -11,6 +11,7 @@ import { processEvents } from "../email/events";
 import { DEFAULT_TIME_ZONE, isTimeZone, zoneOrDefault } from "../lib/time";
 import { outlookSilent, SILENT_NOTICE } from "../sources/outlook-ingest";
 import { dbSizeBytes } from "./archive";
+import { keyStatus } from "./keys";
 
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -257,7 +258,7 @@ route("GET", "/v2/status", async (_req, env, user) => {
   const u = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(user.id).first<{ anthropic_key_enc: string | null }>();
   const { results: bad } = await env.DB.prepare("SELECT kind, address, last_error FROM sources WHERE user_id=? AND enabled=1 AND last_error IS NOT NULL").bind(user.id).all<any>();
   const needs_attention: string[] = bad.map((r) => `${sourceLabel(r)}: ${r.last_error}`);
-  if (!u?.anthropic_key_enc) needs_attention.unshift("Add your Claude API key to start reading email.");
+  if (!u?.anthropic_key_enc) needs_attention.unshift("Add your Claude key in FloatBoard › Settings › Keys to start reading email.");
   // The Outlook extension only reports from an open, signed-in Outlook tab: a long silence is worth a line.
   const { results: outlook } = await env.DB.prepare("SELECT last_run, created FROM sources WHERE user_id=? AND kind='outlook_web' AND enabled=1")
     .bind(user.id).all<{ last_run: string | null; created: string }>();
@@ -300,6 +301,8 @@ route("GET", "/v2/status", async (_req, env, user) => {
     db_size_bytes: await dbSizeBytes(env),
     // The inputs feeding this engine, for the Mac's Connectors tab (one row each, with an on/off switch).
     sources: await listSources(env, user.id),
+    // Which keys the engine holds (never the keys), for the Mac's Keys section.
+    keys: await keyStatus(env, user.id),
   });
 });
 

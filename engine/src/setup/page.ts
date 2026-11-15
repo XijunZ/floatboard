@@ -148,7 +148,7 @@ export function dashboardPage(d: Dashboard): string {
     : `<p class="muted">No Gmail accounts connected yet.</p>`;
   return layout("FloatBoard engine setup", `
 <h1>FloatBoard engine setup</h1>
-<p class="muted">Signed in as ${esc(d.name)}. This page holds only secrets and connections; rules, groups and lists live in the FloatBoard app.</p>
+<p class="muted">Signed in as ${esc(d.name)}. This page connects Gmail, Fathom, Outlook and phones. Keys, rules, groups and lists are set in the FloatBoard Mac app (Settings).</p>
 <form method="post" action="/setup/signout">${csrfField(d.csrf)}<button class="secondary" type="submit">Sign out</button></form>
 ${banner(d.notice, d.error)}
 
@@ -161,11 +161,8 @@ and add this exact <strong>Authorized redirect URI</strong>:</p>
 When you connect, Google warns that the app is unverified; that is expected for your own app: choose <strong>Advanced</strong>
 and continue.</p>
 <p>Status: ${d.googleClientId ? `<span class="ok">saved ✓</span> <span class="muted">client ID ${esc(d.googleClientId)}</span>` : `<span class="muted">not set</span>`}</p>
-<form method="post" action="/setup/google/client">${csrfField(d.csrf)}
-<label for="client_id">Client ID</label><input type="text" id="client_id" name="client_id" value="${esc(d.googleClientId ?? "")}" required autocomplete="off">
-<label for="client_secret">Client secret${d.googleClientId ? " (leave blank to keep the saved one)" : ""}</label>
-<input type="password" id="client_secret" name="client_secret" autocomplete="off"${d.googleClientId ? "" : " required"}>
-<button type="submit">Save client</button></form></section>
+<p class="muted">Enter the client ID and secret in the FloatBoard Mac app: <strong>Settings › Keys</strong>. The Mac keeps them in its
+Keychain and sends them here.</p></section>
 
 <section><h2>2. Gmail accounts</h2>
 ${gmailList}
@@ -174,10 +171,7 @@ ${d.googleClientId ? `<a class="button" href="${esc(startHref())}">Connect a Gma
 
 <section><h2>3. Claude API key</h2>
 <p>Status: ${d.hasClaudeKey ? `<span class="ok">saved ✓</span>` : `<span class="muted">not set</span>`}</p>
-<form method="post" action="/setup/claude">${csrfField(d.csrf)}
-<label for="anthropic_key">${d.hasClaudeKey ? "Replace key" : "Key"}</label>
-<input type="password" id="anthropic_key" name="anthropic_key" autocomplete="off" required>
-<button type="submit">Save key</button></form></section>
+<p class="muted">Enter it in the FloatBoard Mac app: <strong>Settings › Keys</strong>.</p></section>
 
 <section><h2>Phone alerts (ntfy app)</h2>
 <p>Status: ${d.ntfyTopic ? `<span class="ok">on ✓</span>` : `<span class="muted">off</span>`}</p>

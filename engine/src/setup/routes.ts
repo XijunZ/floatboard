@@ -280,26 +280,6 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
       await record(env, req, "signout", true, userId);
       return redirect("/setup", { "Set-Cookie": clearCookie });
     }
-    case "/setup/google/client": {
-      const clientId = (f.client_id ?? "").trim(), secret = (f.client_secret ?? "").trim();
-      if (!clientId || clientId.length > 300 || secret.length > 300) {
-        await record(env, req, "google_client", false, userId, "invalid client id");
-        return dashboard(req, env, s, { error: "Enter the client ID from Google Cloud." }, 400);
-      }
-      if (secret) {
-        await env.DB.prepare(`INSERT INTO google_clients(user_id,client_id,client_secret_enc,updated) VALUES(?,?,?,?)
-            ON CONFLICT(user_id) DO UPDATE SET client_id=excluded.client_id, client_secret_enc=excluded.client_secret_enc, updated=excluded.updated`)
-          .bind(userId, clientId, await encrypt(env, secret), nowISO()).run();
-      } else {
-        const r = await env.DB.prepare("UPDATE google_clients SET client_id=?, updated=? WHERE user_id=?").bind(clientId, nowISO(), userId).run();
-        if (!r.meta.changes) {
-          await record(env, req, "google_client", false, userId, "no secret given");
-          return dashboard(req, env, s, { error: "Enter the client secret too." }, 400);
-        }
-      }
-      await record(env, req, "google_client", true, userId, secret ? "id and secret saved" : "id saved, secret kept");
-      return dashboard(req, env, s, { notice: "Google Cloud client saved ✓" });
-    }
     case "/setup/gmail/remove": {
       const r = await env.DB.prepare("DELETE FROM sources WHERE id=? AND user_id=? AND kind='gmail' RETURNING address")
         .bind(f.source_id ?? "", userId).first<{ address: string }>();
@@ -309,16 +289,6 @@ async function userPost(req: Request, env: Env, path: string): Promise<Response>
       }
       await record(env, req, "gmail_remove", true, userId, `removed ${r.address}`);
       return dashboard(req, env, s, { notice: `${r.address} removed.` });
-    }
-    case "/setup/claude": {
-      const key = (f.anthropic_key ?? "").trim();
-      if (!key || key.length > 500) {
-        await record(env, req, "claude_key", false, userId, "empty or too long");
-        return dashboard(req, env, s, { error: "Paste your Claude API key." }, 400);
-      }
-      await env.DB.prepare("UPDATE users SET anthropic_key_enc=? WHERE id=?").bind(await encrypt(env, key), userId).run();
-      await record(env, req, "claude_key", true, userId);
-      return dashboard(req, env, s, { notice: "Claude key saved ✓" });
     }
     case "/setup/ntfy/on":
     case "/setup/ntfy/new": {
