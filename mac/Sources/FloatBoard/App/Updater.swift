@@ -19,6 +19,7 @@ final class Updater: ObservableObject {
     private var timer: Timer?
     static let autoKey = "updates.auto"
     static let notifiedKey = "updates.notified"
+    static let checkedAtKey = "updates.checkedAt", checkedBuildKey = "updates.checkedBuild", checkedHeadKey = "updates.checkedHead"
 
     var built: String { Bundle.main.object(forInfoDictionaryKey: "FloatBoardCommit") as? String ?? "" }
     var sourceDir: String { Bundle.main.object(forInfoDictionaryKey: "FloatBoardSourceDir") as? String ?? "" }
@@ -32,7 +33,13 @@ final class Updater: ObservableObject {
     func start(store: Store) {
         self.store = store
         guard !repo.isEmpty, !LocalData.isScratchDatabase else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+        // The last result for this same version shows at once ("Up to date, checked 09:12"); a fresh check follows.
+        if let at = UserDefaults.standard.object(forKey: Self.checkedAtKey) as? Date,
+           UserDefaults.standard.string(forKey: Self.checkedBuildKey) == built,
+           UserDefaults.standard.string(forKey: Self.checkedHeadKey) == built {
+            lastChecked = at; state = .upToDate
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self else { return }
             MainActor.assumeIsolated { self.scheduleCheck(launch: true) }
         }
@@ -57,6 +64,9 @@ final class Updater: ObservableObject {
             let head = try await Self.json("https://api.github.com/repos/\(repo)/commits/main")?["sha"] as? String ?? ""
             let compare = built.isEmpty || head == built ? nil : try? await Self.json("https://api.github.com/repos/\(repo)/compare/\(built)...\(head)") // try?-ok: a 404 means this build isn't on GitHub, handled by decide
             lastChecked = Date()
+            UserDefaults.standard.set(lastChecked, forKey: Self.checkedAtKey)
+            UserDefaults.standard.set(built, forKey: Self.checkedBuildKey)
+            UserDefaults.standard.set(head, forKey: Self.checkedHeadKey)
             switch UpdateCheck.decide(built: built, compare: compare, head: head) {
             case .upToDate: state = .upToDate
             case .unknown(let why): state = .unknown(why)
@@ -70,7 +80,8 @@ final class Updater: ObservableObject {
                 if launch && autoInstall { update() }
             }
         } catch {
-            state = .idle // offline: nothing to say; the next check tries again
+            // Offline: keep showing the last result; the next check tries again.
+            if state == .checking { state = lastChecked == nil ? .idle : .upToDate }
         }
     }
 
