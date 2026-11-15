@@ -381,7 +381,7 @@ Where the build differs from the plan above, and why:
 - **Database dialects (C3).** Every platform uses SQLite: Cloudflare D1, a local file on the Mac, and **Turso** on
   Vercel (libSQL, the same dialect, from Vercel's marketplace). So there is still one set of queries and migrations,
   and the same tests cover them. Vercel's 5-minute schedule needs Vercel Pro (Hobby allows one run a day).
-- **Supabase (C3) is not built.** It only offers Postgres, which would mean a second copy of every query (about 270)
+- **Supabase (C3) is dropped** (decided 15 Nov). It only offers Postgres, which would mean a second copy of every query (about 270)
   and every migration, kept in step forever. Cloudflare (free), Vercel (paid) and Mac only cover free, paid and
   no-cloud. Revisit only if someone needs Supabase specifically.
 - **Mac only (C2)** runs the whole engine inside the app, not just the screening part: the app talks to it exactly as

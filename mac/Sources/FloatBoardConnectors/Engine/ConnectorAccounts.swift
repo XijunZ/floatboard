@@ -78,6 +78,9 @@ public enum ConnectorAccounts {
         reported[id] = nil
     }
 
+    /// Checks only: every online connector's traffic goes here instead of the network.
+    @MainActor public static var testTransport: ConnectorClient.Transport?
+
     /// The last problem logged per connector, so each one is logged once per change, not on every sync trigger.
     @MainActor static var reported: [String: String] = [:]
 
@@ -105,6 +108,7 @@ public enum ConnectorAccounts {
                 return nil
             }
             reported[info.id] = nil
+            if let testTransport { return ConnectorClient(baseURL: url, key: key, transport: testTransport) }
             return ConnectorClient(baseURL: url, key: key)
         } catch {
             if case CredentialsError.unavailable = error { return nil } // the Mac is asleep or locked: the next sync tries again

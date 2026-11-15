@@ -74,15 +74,24 @@ public enum LocalMode {
         return ConnectorClient(baseURL: url, key: key) { req in try await LocalMode.handle(req) }
     }
 
-    // MARK: Switching
+    // MARK: Switching (nothing set up is lost)
 
-    /// Turns Mac only on: starts the engine, makes its user once, adds "This Mac", queues your keys for it, moves
-    /// WhatsApp here and pauses the online engines' Gmail and Fathom inputs.
+    /// True once this Mac's engine has been set up (its user exists); it is then kept in step even while on standby.
+    public static func isSetUp() -> Bool {
+        ((try? Credentials.get(ConnectorAccounts.credentialName(connectorID))) ?? nil)?.isEmpty == false // try?-ok: unreadable means not set up yet
+    }
+
+    static func online(_ store: Store) -> [ConnectorInfo] { store.connectors.filter { $0.id != connectorID && !$0.baseURL.isEmpty } }
+
+    /// Turns Mac only on. The first time, this Mac's engine and its user are made; after that the same one is used.
+    /// Then everything set up moves here from the online engine: rules, groups and what was learned (settings),
+    /// Gmail and Fathom with their access and reading position, what was already judged, and WhatsApp screening.
+    /// The online engine stays connected (phone app, Outlook) and stops reading Gmail and Fathom while this Mac does.
     public static func enable(store: Store) async throws {
         storeRef = store
         let e = try start(store: store)
         let keyName = ConnectorAccounts.credentialName(connectorID)
-        if (try Credentials.get(keyName) ?? "").isEmpty {
+        if !isSetUp() {
             var req = URLRequest(url: URL(string: address + "/admin/users")!)
             req.httpMethod = "POST"
             req.setValue(try secret(adminName, store: store) { "" }, forHTTPHeaderField: "X-Admin-Key")
@@ -96,34 +105,78 @@ public enum LocalMode {
         }
         try store.upsertConnector(id: connectorID, name: name, baseURL: address)
         store.reload()
-        // Keys you already entered on this Mac go to its engine too.
+        guard let local = client(store: store) else { throw LocalEngineError.script("no key for this Mac's engine") }
         var items: Set<Keys.Item> = []
         if Keys.value(Keys.claude, store: store) != nil { items.insert(.claude) }
         if Keys.value(Keys.gmailClientID, store: store) != nil { items.insert(.googleClient) }
         try Keys.setPending(Keys.pending(connector: connectorID, store: store).union(items), connector: connectorID, store: store)
 
-        for c in store.connectors where c.id != connectorID && !c.baseURL.isEmpty {
-            if WhatsAppSync.isOn(connector: c.id, store: store) {
-                WhatsAppSync.setOn(false, connector: c.id, store: store)
-                WhatsAppSync.setOn(true, connector: connectorID, store: store)
+        if let from = online(store).first {
+            try copySettings(from: from.id, to: connectorID, store: store)
+            if let remote = ConnectorAccounts.client(for: from, store: store) {
+                try await local.receiveHandover(try await remote.handoverState(), switching: true)
             }
-            await pauseInputs(of: c, store: store)
+            for c in online(store) {
+                WhatsAppSync.move(from: c.id, to: connectorID, store: store)
+                await pauseInputs(of: c, store: store)
+            }
         }
-        store.activity("connector:\(connectorID)", .info, "Mac only mode on: screening runs on this Mac")
+        store.activity("connector:\(connectorID)", .info, "Mac only mode on: screening runs on this Mac, from where your online engine left off")
     }
 
-    /// Back to Always on: "This Mac" is removed from the list (its database and key are kept for next time), and the
-    /// online engines' paused inputs and WhatsApp screening are turned back on.
+    /// Back to Always on: everything moves to the online engine the same way (including inboxes connected while on this
+    /// Mac and where reading got to), then this Mac's engine goes on standby: hidden from the list, kept in step.
     public static func disable(store: Store) async throws {
-        let wasWhatsApp = WhatsAppSync.isOn(connector: connectorID, store: store)
-        WhatsAppSync.setOn(false, connector: connectorID, store: store)
+        guard let to = online(store).first else { throw LocalEngineError.script("connect an online engine first") }
+        guard let remote = ConnectorAccounts.client(for: to, store: store) else { throw LocalEngineError.script("no key for \(to.name)") }
+        if let local = client(store: store) {
+            let state = try await local.handoverState()
+            try await remote.receiveHandover(state, switching: true)
+            // On standby this Mac's engine keeps everything but has its inputs switched off.
+            if var o = try JSONSerialization.jsonObject(with: state) as? [String: Any] {
+                o["sources"] = (o["sources"] as? [[String: Any]] ?? []).map { var x = $0; x["enabled"] = false; return x }
+                try await local.receiveHandover(try JSONSerialization.data(withJSONObject: o), switching: true)
+            }
+        }
+        try copySettings(from: connectorID, to: to.id, store: store)
+        WhatsAppSync.move(from: connectorID, to: to.id, store: store)
         try store.removeConnector(id: connectorID)
         store.reload()
-        for c in store.connectors where !c.baseURL.isEmpty {
-            if wasWhatsApp { WhatsAppSync.setOn(true, connector: c.id, store: store); break }
+        await resumeInputs(of: to, store: store)
+        store.activity("connector:\(connectorID)", .info, "Mac only mode off: screening runs on \(to.name) again, from where this Mac left off")
+    }
+
+    /// Settings are the Mac's (rules, groups, lists, what was learned): the screening engine's copy is the one in use.
+    /// Phone alert settings belong to the online engine (it sends the alerts), so they are never copied onto it.
+    static let onlineOwned: Set<String> = ["alerts_on", "critical_hours"]
+
+    static func copySettings(from: String, to: String, store: Store) throws {
+        guard let src = store.connectors.first(where: { $0.id == from })?.settings,
+              let dst = store.connectors.first(where: { $0.id == to })?.settings else { return }
+        let changed = src.filter { k, v in
+            !(to != connectorID && onlineOwned.contains(k)) && !NSDictionary(dictionary: [k: v]).isEqual(to: [k: dst[k] as Any])
         }
-        for c in store.connectors where !c.baseURL.isEmpty { await resumeInputs(of: c, store: store) }
-        store.activity("connector:\(connectorID)", .info, "Mac only mode off: screening runs on your online engine")
+        guard !changed.isEmpty else { return }
+        try store.saveConnectorSettings(connector: to, values: changed, note: "copied from \(from == connectorID ? name : from)")
+    }
+
+    /// Every few minutes: the engine that screens hands its state to the one on standby (which never reads), so a switch
+    /// starts exactly where it should. Only once this Mac's engine has been set up.
+    public static func mirror(store: Store) async {
+        guard isSetUp(), let to = online(store).first, let remote = ConnectorAccounts.client(for: to, store: store),
+              let local = client(store: store) else { return }
+        storeRef = store
+        do {
+            if isOn(store: store) {
+                try await remote.receiveHandover(try await local.handoverState(), switching: false)
+                try copySettings(from: connectorID, to: to.id, store: store)
+            } else {
+                try await local.receiveHandover(try await remote.handoverState(), switching: false)
+            }
+        } catch {
+            store.activity("connector:\(connectorID)", .warning, "Couldn't keep this Mac's engine and \(to.name) in step; will try again",
+                           detail: (error as? ConnectorError)?.description ?? "\(error)")
+        }
     }
 
     static func pauseInputs(of c: ConnectorInfo, store: Store) async {
@@ -149,9 +202,8 @@ public enum LocalMode {
         do {
             for id in raw.split(separator: ",") { try await client.setSourceEnabled(id: String(id), true) }
             try store.db.run("DELETE FROM meta WHERE key=?", [pausedKey(c.id)])
-            store.activity("connector:\(c.id)", .info, "Turned \(c.name)'s inputs back on")
         } catch {
-            store.activity("connector:\(c.id)", .warning, "Couldn't turn \(c.name)'s inputs back on; use their switches in Settings › Inputs",
+            store.activity("connector:\(c.id)", .warning, "Couldn't turn \(c.name)'s inputs back on; use their switches in Settings › Connections",
                            detail: (error as? ConnectorError)?.description ?? "\(error)")
         }
     }

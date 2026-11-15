@@ -41,6 +41,19 @@ public enum WhatsAppSync {
         }
     }
 
+    /// Moves WhatsApp screening (its switch and how far it has read) from one connection to another.
+    @MainActor public static func move(from: String, to: String, store: Store) {
+        guard isOn(connector: from, store: store) else { return }
+        let cur = cursors(connector: from, store: store)
+        setOn(true, connector: to, store: store)
+        do { try saveCursors(cur, connector: to, store: store) } catch {
+            store.activity("connector:\(to)", .warning, "WhatsApp moved, but where it had read up to wasn't kept", detail: "\(error)")
+        }
+        do { try store.db.run("DELETE FROM meta WHERE key=?", [onKey(from)]); status[from] = nil } catch {
+            store.activity("connector:\(from)", .warning, "Couldn't turn WhatsApp off here", detail: "\(error)")
+        }
+    }
+
     @MainActor static func cursors(connector id: String, store: Store) -> [String: Double] {
         do {
             guard let s = try store.db.query("SELECT value FROM meta WHERE key=?", [cursorKey(id)]) { DB.text($0, 0) }.first,

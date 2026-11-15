@@ -5,13 +5,12 @@ import SwiftUI
 
 /// The sections of Settings (docs/architecture.md, Edition 2): what the product is, in the order you set it up.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case mode, inputs, outputs, rules, keys
+    case mode, connections, rules, keys
     var id: String { rawValue }
     var title: String {
         switch self {
         case .mode: "Mode"
-        case .inputs: "Inputs"
-        case .outputs: "Outputs"
+        case .connections: "Connections"
         case .rules: "Rules & learning"
         case .keys: "Keys"
         }
@@ -19,8 +18,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .mode: "server.rack"
-        case .inputs: "tray.and.arrow.down"
-        case .outputs: "tray.and.arrow.up"
+        case .connections: "point.3.connected.trianglepath.dotted"
         case .rules: "text.book.closed"
         case .keys: "key"
         }
@@ -28,8 +26,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var blurb: String {
         switch self {
         case .mode: "Where screening runs."
-        case .inputs: "Where tasks come from."
-        case .outputs: "Where tasks and alerts go."
+        case .connections: "Where tasks come from, your phone, and where tasks and alerts go."
         case .rules: "What FloatBoard follows, and what it has learned."
         case .keys: "Every key, kept in this Mac's Keychain."
         }
@@ -69,8 +66,7 @@ struct SettingsView: View {
                     }
                     switch ui.settingsSection {
                     case .mode: ModeSection()
-                    case .inputs: InputsSection()
-                    case .outputs: OutputsSection()
+                    case .connections: ConnectionsSection()
                     case .rules: RulesSection()
                     case .keys: KeysSection()
                     }
@@ -101,6 +97,11 @@ struct SettingsBlock<Content: View>: View {
 /// Engines with an address (the ones this Mac can talk to).
 @MainActor private func engines(_ store: Store) -> [ConnectorInfo] { store.connectors.filter { !$0.baseURL.isEmpty } }
 
+/// The engine that screens: its settings are the ones in use (the other engine gets a copy), so they are edited once.
+@MainActor private func screening(_ store: Store) -> [ConnectorInfo] {
+    LocalMode.isOn(store: store) ? engines(store).filter { $0.id == LocalMode.connectorID } : Array(engines(store).prefix(1))
+}
+
 /// Shown in sections that need an engine when there is none yet.
 private struct NoEngineYet: View {
     @EnvironmentObject var ui: UIState
@@ -120,17 +121,24 @@ struct ModeSection: View {
     @State private var pasted = ""
     @State private var switching = false
     @State private var problem: String?
+    /// The mode picked but not yet confirmed: the panel below says what will happen.
+    @State private var pending: String?
 
     var body: some View {
         let local = LocalMode.isOn(store: store)
         let online = engines(store).filter { $0.id != LocalMode.connectorID }
         HStack(alignment: .top, spacing: 10) {
-            choice("Always on", "Your own online engine screens email, meeting notes and chats every 5 minutes, even when this Mac is off. Needed for the phone app.",
+            choice("Always on", "Your online engine screens email, meeting notes and chats every 5 minutes, even when this Mac is off.",
                    icon: "cloud", selected: !local && !online.isEmpty, enabled: !switching,
-                   note: !local && !online.isEmpty ? "In use" : online.isEmpty ? "Connect an engine below" : "Switch back") { useAlwaysOn(online) }
-            choice("Mac only", "Screening runs on this Mac while it's awake, with no online service. Uses your Claude key directly. No phone app.",
-                   icon: "laptopcomputer", selected: local, enabled: !switching, note: local ? "In use" : "Use this Mac") { useMacOnly(online) }
+                   note: !local && !online.isEmpty ? "In use" : online.isEmpty ? "Connect an engine below" : "Switch back…") {
+                if local { pending = online.isEmpty ? nil : "always"; problem = online.isEmpty ? "Connect an online engine first (below)." : nil }
+            }
+            choice("Mac only", "Screening runs on this Mac while it's awake, with your Claude key and no online service.",
+                   icon: "laptopcomputer", selected: local, enabled: !switching, note: local ? "In use" : "Switch…") {
+                if !local { pending = "mac"; problem = nil }
+            }
         }
+        if let pending { confirmPanel(pending, online: online) }
         if switching { ProgressView().controlSize(.small) }
         if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(.orange) }
         ForEach(engines(store)) { EngineCard(info: $0) }
@@ -153,26 +161,39 @@ struct ModeSection: View {
         }
     }
 
-    private func useMacOnly(_ online: [ConnectorInfo]) {
-        guard !LocalMode.isOn(store: store) else { return }
-        let a = NSAlert()
-        a.messageText = "Screen on this Mac?"
-        a.informativeText = "FloatBoard runs the screening itself while this Mac is awake, with your Claude key. "
-            + (online.isEmpty ? "" : "Your online engine's Gmail and Fathom inputs are paused (switch back any time), and WhatsApp screening moves here. ")
-            + "Gmail is connected from Settings › Inputs with your Google client."
-        a.addButton(withTitle: "Use Mac only"); a.addButton(withTitle: "Cancel")
-        NSApp.activate()
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        run { try await LocalMode.enable(store: store) }
-    }
-
-    private func useAlwaysOn(_ online: [ConnectorInfo]) {
-        guard LocalMode.isOn(store: store) else { return }
-        guard !online.isEmpty else { problem = "Connect an online engine first (below)."; return }
-        guard ConnectFlow.confirmTwice("Switch back to Always on?",
-            "This Mac stops screening; your online engine's paused inputs and WhatsApp screening are turned back on. Tasks already on your board stay.",
-            action: "Switch") else { return }
-        run { try await LocalMode.disable(store: store) }
+    /// What switching does, and the buttons that do it. Nothing changes until Switch is pressed.
+    private func confirmPanel(_ to: String, online: [ConnectorInfo]) -> some View {
+        let toMac = to == "mac"
+        let engineName = online.first?.name ?? "your online engine"
+        let lines: [String] = toMac ? [
+            LocalMode.isSetUp() ? "This Mac's engine picks up from where \(engineName) is now (it has been kept in step)."
+                : online.isEmpty ? "This Mac's engine is set up (first time only)." : "This Mac's engine is set up (first time only) and gets everything from \(engineName).",
+            "Moves here: your rules, groups and what was learned; Gmail and Fathom with their sign-ins and how far they were read; what was already judged (so nothing is judged twice); WhatsApp screening.",
+            online.isEmpty ? "Add Gmail afterwards in Connections › Inputs." : "\(engineName) stays connected (phone app, Outlook, phone alerts) and stops reading Gmail and Fathom while this Mac does.",
+            "Screening only runs while this Mac is awake. Tasks on your board don't change.",
+        ] : [
+            "\(engineName) picks up from where this Mac is now: everything set up here moves back, including inboxes you connected on this Mac and how far they were read.",
+            "Gmail and Fathom turn back on there; WhatsApp screening moves with them.",
+            "This Mac's engine goes on standby and is kept in step, so switching back later is instant. Tasks on your board don't change.",
+        ]
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(toMac ? "Switch to Mac only?" : "Switch back to Always on?").font(.system(size: 13, weight: .semibold))
+            ForEach(lines, id: \.self) { l in
+                Label(l, systemImage: "arrow.right.circle").font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Nothing you set up is lost either way.").font(.system(size: 11, weight: .medium))
+            HStack {
+                Button("Cancel") { pending = nil }
+                Button(toMac ? "Switch to Mac only" : "Switch to Always on") {
+                    pending = nil
+                    run { toMac ? try await LocalMode.enable(store: store) : try await LocalMode.disable(store: store) }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 580, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
     }
 
     private func run(_ work: @escaping () async throws -> Void) {
@@ -183,7 +204,7 @@ struct ModeSection: View {
                 try await work()
                 NotificationCenter.default.post(name: .floatBoardSyncConnectors, object: nil)
             } catch {
-                problem = "Couldn't switch: \(error)"
+                problem = "Couldn't switch: \(error). Nothing was lost; try again."
                 store.activity("connector:\(LocalMode.connectorID)", .error, "Could not switch mode", detail: "\(error)")
             }
         }
@@ -213,12 +234,19 @@ struct ModeSection: View {
 
 // MARK: - Inputs
 
-struct InputsSection: View {
+struct ConnectionsSection: View {
     @EnvironmentObject var store: Store
     var body: some View {
-        if engines(store).isEmpty { NoEngineYet(what: "Inputs") }
-        ForEach(engines(store)) { EngineInputsCard(info: $0) }
-        WithdrawnList()
+        SettingsBlock(title: "Inputs", help: "Where tasks come from. Each has a switch; Add an input connects another.") {
+            if engines(store).isEmpty { NoEngineYet(what: "Inputs") }
+            ForEach(engines(store)) { EngineInputsCard(info: $0) }
+            WithdrawnList()
+        }
+        let phones = engines(store).filter { $0.id != LocalMode.connectorID }
+        SettingsBlock(title: "Phone", help: phones.isEmpty ? "The phone app needs Always on (Settings › Mode)." : "Your board on your phone, served by your online engine.") {
+            ForEach(phones) { PhoneAppCard(info: $0) }
+        }
+        OutputsBlock()
     }
 }
 
@@ -339,22 +367,23 @@ struct InputGuide: View {
 
 // MARK: - Outputs
 
-struct OutputsSection: View {
+/// Where tasks and alerts go.
+struct OutputsBlock: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var google: Google
 
     var body: some View {
+        Text("Outputs").font(.system(size: 15, weight: .semibold)).padding(.top, 6)
         SettingsBlock(title: "Board", help: "Every new task lands on your board. It is always on.") {
-            ForEach(engines(store)) { form($0, ["default_group", "auto_add"]) }
+            ForEach(screening(store)) { form($0, ["default_group", "auto_add"]) }
         }
-        ForEach(engines(store)) { PhoneAppCard(info: $0) }
-        SettingsBlock(title: "Phone alerts", help: "Urgent tasks and due reminders on your phone (through the phone app; ntfy is set up on the engine's setup page).") {
+        SettingsBlock(title: "Phone alerts", help: "Urgent tasks and due reminders on your phone, through the phone app (or ntfy, set up on the engine's setup page).") {
             if engines(store).isEmpty { NoEngineYet(what: "Phone alerts") }
-            ForEach(engines(store)) { form($0, ["alerts_on", "critical_hours"]) }
+            ForEach(engines(store).filter { $0.id != LocalMode.connectorID }.prefix(1)) { form($0, ["alerts_on", "critical_hours"]) }
         }
         SettingsBlock(title: "Email", help: "What happens in Gmail. Reply drafts appear as a Draft reply button on email tasks; drafts are saved in Gmail and never sent.") {
             if engines(store).isEmpty { NoEngineYet(what: "Email actions") }
-            ForEach(engines(store)) { form($0, ["mark_read_on_done", "ai_footer"]) }
+            ForEach(screening(store)) { form($0, ["mark_read_on_done", "ai_footer"]) }
         }
         SettingsBlock(title: "Calendar") {
             AccountsView(showSetup: false)
@@ -377,12 +406,13 @@ struct RulesSection: View {
 
     var body: some View {
         if engines(store).isEmpty { NoEngineYet(what: "Rules") }
-        ForEach(engines(store)) { info in
+        ForEach(screening(store)) { info in
+            let oldChatRules = !((info.settings["chat_rules"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ConnectorSettingsForm(info: info, schema: ConnectorHealth.status(info, store: store)?.schema ?? [],
+                                  keys: ["my_rules"] + (oldChatRules ? ["chat_rules"] : []) + ["group_notes", "ignore_senders", "allow_senders",
+                                         "unread_only", "learned", "learn_at", "*"])
             AIModelBlock(info: info)
             Rulebooks(info: info)
-            ConnectorSettingsForm(info: info, schema: ConnectorHealth.status(info, store: store)?.schema ?? [],
-                                  keys: ["my_rules", "chat_rules", "group_notes", "ignore_senders", "allow_senders", "unread_only",
-                                         "learned", "learn_at", "*"])
         }
     }
 }
@@ -400,7 +430,7 @@ struct AIModelBlock: View {
             } else {
                 ForEach(["judge", "recap", "learn", "reply"], id: \.self) { job in
                     if let c = cost[job] {
-                        Text("\(Self.label(job)): \(c.calls) call\(c.calls == 1 ? "" : "s"), about \(Self.money(c.usd)) a month"
+                        Text("\(Self.label(job)): \(c.calls) call\(c.calls == 1 ? "" : "s"), \(Self.money(c.usd)) a month"
                              + (c.usdIf.filter { abs($0.value - c.usd) > 0.004 }.map { " · with \($0.key.capitalized): \(Self.money($0.value))" }.sorted().joined()))
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
@@ -413,7 +443,7 @@ struct AIModelBlock: View {
     static func label(_ job: String) -> String {
         switch job { case "judge": "Judging"; case "recap": "Meeting summaries"; case "learn": "Learning"; default: "Reply drafts" }
     }
-    static func money(_ usd: Double) -> String { usd < 0.01 ? "under $0.01" : String(format: "$%.2f", usd) }
+    static func money(_ usd: Double) -> String { usd < 0.01 ? "under $0.01" : String(format: "about $%.2f", usd) }
 }
 
 /// "Compare with Haiku": before choosing On this Mac, see how often it agrees with Haiku on your latest chats.
@@ -462,7 +492,7 @@ struct Rulebooks: View {
     @State private var error: String?
 
     var body: some View {
-        SettingsBlock(title: "Shared rules", help: "The rulebooks every FloatBoard engine follows. Read-only: your own rules below override them.") {
+        SettingsBlock(title: "Built-in rulebook (read-only)", help: "What every FloatBoard engine follows, so it can be improved for everyone. To change how it treats something, write a line in Your rules: yours always win.") {
             ForEach(books) { b in
                 DisclosureGroup(b.name) {
                     ScrollView {
@@ -519,7 +549,7 @@ struct KeysSection: View {
             AccountsView(showAccounts: false)
         }
         Divider()
-        SettingsBlock(title: "Gmail sign-ins", help: "Each inbox you connect. Connect or reconnect them from Inputs › Add an input › Gmail inbox.") {
+        SettingsBlock(title: "Gmail sign-ins", help: "Each inbox you connect. Connect or reconnect them in Connections › Inputs › Add an input › Gmail inbox.") {
             ForEach(engines(store)) { info in
                 ForEach((ConnectorHealth.status(info, store: store)?.sources ?? []).filter { $0.kind == "gmail" }) { s in
                     Label(s.address + (s.lastError.map { " · \($0)" } ?? " · signed in"), systemImage: "envelope")
@@ -527,24 +557,6 @@ struct KeysSection: View {
                 }
             }
         }
-        Divider()
-        DisclosureGroup("Older way: a web client for the engine's setup page") {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Only needed if you connect Gmail from an online engine's setup page instead of from this Mac.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                state(mac: Keys.value(Keys.gmailClientID, store: store) != nil, engine: engineKeys.map { $0.googleClientID != nil },
-                      waiting: waiting.contains(.googleClient), detail: engineKeys?.googleClientID.map { "client ID \($0.prefix(18))…" })
-                HStack {
-                    TextField("Client ID", text: $gid).textFieldStyle(.roundedBorder).frame(width: 300)
-                    SecureField("Client secret", text: $gsecret).textFieldStyle(.roundedBorder).frame(width: 200)
-                    Button("Save") { save { try Keys.setGmailClient(id: gid, secret: gsecret, store: store); gid = ""; gsecret = "" } }
-                        .disabled(gid.trimmingCharacters(in: .whitespaces).isEmpty || gsecret.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                GmailClientSteps()
-            }
-            .padding(.top, 4)
-        }
-        .font(.system(size: 12))
         Divider()
         SettingsBlock(title: "Engine connection", help: "The key this Mac uses to talk to your engine. Disconnect it in Mode.") {
             ForEach(engines(store)) { info in
@@ -555,7 +567,7 @@ struct KeysSection: View {
         }
         Text(Credentials.usesFile
              ? "Keys are kept in a private file on this Mac (this build isn't signed with a certificate, so the Keychain would ask again after every update)."
-             : "Keys are kept in this Mac's Keychain. Your engine gets only the ones it needs, and never sends them back.")
+             : "Keys are kept in this Mac's Keychain. Your engines get only the ones they need.")
             .font(.system(size: 10)).foregroundStyle(.secondary)
         if let message { Text(message).font(.system(size: 11)).foregroundStyle(.secondary) }
     }
@@ -583,41 +595,5 @@ struct KeysSection: View {
         } catch {
             message = "Couldn't save: \(error)"
         }
-    }
-}
-
-/// The one-time Google Cloud steps for the Gmail client, with the engine's own redirect address to copy.
-private struct GmailClientSteps: View {
-    @EnvironmentObject var store: Store
-    @State private var open = false
-    var body: some View {
-        let redirect = engines(store).first.flatMap { URL(string: $0.baseURL)?.appendingPathComponent("setup/google/callback").absoluteString }
-        DisclosureGroup("How to make the Google client (about 5 minutes, once)", isExpanded: $open) {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array([
-                    "Open console.cloud.google.com and create a project (any name, e.g. FloatBoard).",
-                    "APIs & Services › Library: enable the Gmail API.",
-                    "Google Auth Platform › Get started: app name FloatBoard, External, your email.",
-                    "Audience: press Publish app, so it says In production (otherwise Gmail sign-ins expire every 7 days).",
-                    "Clients › Create client › Web application. Under Authorized redirect URIs add the address below.",
-                    "Copy the Client ID and Client secret into the boxes above and press Save.",
-                ].enumerated()), id: \.offset) { i, s in
-                    Text("\(i + 1). \(s)").font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
-                }
-                if let redirect {
-                    HStack {
-                        Text(redirect).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                        Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(redirect, forType: .string) }
-                            .controlSize(.small)
-                    }
-                }
-                Button("Open Google Cloud Console") {
-                    if let u = URL(string: "https://console.cloud.google.com/apis/credentials") { NSWorkspace.shared.open(u) }
-                }
-                .controlSize(.small)
-            }
-            .padding(.top, 4)
-        }
-        .font(.system(size: 11))
     }
 }

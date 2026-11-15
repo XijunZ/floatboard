@@ -123,8 +123,9 @@ final class ConnectorRunner {
     /// Reads unread WhatsApp chats for each connection that has screening on, and sends new ones to its engine.
     /// One schedule run of the engine on this Mac (Mac only mode), then a sync so its new tasks reach the board.
     func localTick() {
-        guard LocalMode.isOn(store: store) else { return }
         Task { @MainActor in
+            await LocalMode.mirror(store: store) // keeps the standby engine in step (once Mac only has been set up)
+            guard LocalMode.isOn(store: store) else { return }
             await LocalMode.tick(store: store)
             trigger("local", only: [LocalMode.connectorID])
         }

@@ -21,7 +21,7 @@ struct CalendarMenu: View {
                 Divider()
             }
             if google.accounts.isEmpty {
-                Button("Connect a Google account…") { ui.tab = .settings; ui.settingsSection = .outputs }
+                Button("Connect a Google account…") { ui.tab = .settings; ui.settingsSection = .connections }
             } else {
                 ForEach(google.accounts, id: \.self) { acct in
                     Menu("Add to \(acct)") {
