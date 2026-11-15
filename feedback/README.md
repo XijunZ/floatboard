@@ -5,8 +5,9 @@ hands out FloatBoard (the maintainer), not by each user. A small Cloudflare Work
 
 - Every message is **stored** first, then filed as an issue in a **private** GitHub repository (label `feedback`),
   and announced on your ntfy topic if you set one. GitHub also notifies you of each new issue (email and phone app).
-- If GitHub can't be reached, the message stays stored and is retried every hour. Three failures in a row send one
-  ntfy alert.
+- If GitHub can't be reached, the message stays stored and is retried on every new message, and hourly if your
+  Cloudflare account has a free cron slot (the free plan allows 5 in all; remove `[triggers]` from your
+  wrangler.local.toml if it has none). Three failures in a row send one ntfy alert.
 - At most 5 messages a day per install, 5,000 characters each. Diagnostics come only when the person ticks
   "Include diagnostics" in the app, and never contain task or message text.
 
