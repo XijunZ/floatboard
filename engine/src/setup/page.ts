@@ -68,6 +68,19 @@ ${banner(null, opts.error)}
 <button type="submit">Sign in</button></form></section>`);
 }
 
+/** A brand-new engine (no users yet): "Make this yours" creates the owner. Needs the admin key chosen at deploy time. */
+export function claimPage(opts: { error?: string | null } = {}): string {
+  return layout("Make this engine yours", `
+<h1>Make this engine yours</h1>
+<p>This FloatBoard engine is new. Give your name and the admin key you chose when you deployed it; you then connect
+FloatBoard on your Mac in one click.</p>
+${banner(null, opts.error)}
+<section><form method="post" action="/setup/claim">
+<label for="name">Your name</label><input type="text" id="name" name="name" maxlength="60" required autocomplete="name">
+<label for="key">Admin key</label><input type="password" id="key" name="key" required autocomplete="current-password">
+<button type="submit">Make it mine</button></form></section>`);
+}
+
 export function messagePage(title: string, message: string, opts: { ok?: boolean; back?: string } = {}): string {
   return layout(title, `<h1>${esc(title)}</h1><p class="${opts.ok ? "notice" : "error"}">${esc(message)}</p>
 <p><a class="button secondary" href="${esc(opts.back ?? "/setup")}">Back to setup</a></p>`);

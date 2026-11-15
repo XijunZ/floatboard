@@ -4,9 +4,11 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "migrate:remote": "wrangler d1 migrations apply floatboard --remote",
-    "build:mac": "node local/build.mjs"
+    "build:mac": "node local/build.mjs",
+    "setup": "node scripts/setup.mjs",
+    "update": "wrangler d1 migrations apply floatboard --remote --config wrangler.local.toml && wrangler deploy --config wrangler.local.toml"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.7",

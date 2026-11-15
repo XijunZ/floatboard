@@ -14,6 +14,7 @@ import { decrypt, encrypt } from "../lib/crypto";
 import { type Env, nowISO } from "../env";
 import {
   adminPage, dashboardPage, htmlResponse, messagePage, notFoundPage, redirect, signInPage, type Dashboard, type GmailRow, type OutlookStatus,
+  claimPage,
 } from "./page";
 import { isWebhookSecret } from "../sources/fathom";
 import { fathomKeyWorks } from "../sources/fathomCatchup";
@@ -154,6 +155,38 @@ async function dashboard(req: Request, env: Env, s: Session, extra: Partial<Dash
     dbSizeBytes: await dbSizeBytes(env),
     ...extra,
   }), status);
+}
+
+/** True while the engine has no users (fresh from Deploy or `npm run setup`). */
+async function unclaimed(env: Env): Promise<boolean> {
+  return !(await env.DB.prepare("SELECT 1 AS x FROM users LIMIT 1").first());
+}
+
+/** The first visit to a new engine makes its owner: name + the admin key chosen at deploy time. Only while unclaimed. */
+async function claim(req: Request, env: Env): Promise<Response> {
+  const ip = ipOf(req);
+  if (crossSite(req)) {
+    await record(env, req, "claim", false, null, "cross-site claim refused");
+    return htmlResponse(claimPage({ error: "That didn't come from this page." }), 403);
+  }
+  if (!(await unclaimed(env))) {
+    await record(env, req, "claim", false, null, "already claimed");
+    return htmlResponse(signInPage({ error: "This engine already has an owner. Sign in with your user key." }), 403);
+  }
+  if (await tooManyFailures(env, ip)) return htmlResponse(claimPage({ error: "Too many tries from this network. Try again in 15 minutes." }), 429);
+  const f = await readForm(req);
+  const name = (f.name ?? "").trim().slice(0, 60);
+  if (!sameSecret((f.key ?? "").trim(), env.ADMIN_KEY)) {
+    await attempt(env, ip, false, "claim");
+    await record(env, req, "claim", false, null, "wrong admin key");
+    return htmlResponse(claimPage({ error: "That admin key isn't right." }), 401);
+  }
+  if (!name) return htmlResponse(claimPage({ error: "Enter your name." }), 400);
+  await attempt(env, ip, true, "claim");
+  const u = await insertUser(env, name);
+  const sid = await createSession(env, "user", u.id, u.key);
+  await record(env, req, "claim", true, u.id);
+  return redirect("/setup", { "Set-Cookie": sessionCookie(sid) });
 }
 
 async function signIn(req: Request, env: Env, admin: boolean): Promise<Response> {
@@ -423,7 +456,8 @@ export async function handleSetup(req: Request, env: Env): Promise<Response> {
     if (req.method === "GET") {
       if (path === "/setup") {
         const s = await loadSession(req, env);
-        return s?.kind === "user" ? dashboard(req, env, s) : htmlResponse(signInPage());
+        if (s?.kind === "user") return dashboard(req, env, s);
+        return htmlResponse(await unclaimed(env) ? claimPage() : signInPage());
       }
       if (path === "/setup/admin") {
         const s = await loadSession(req, env);
@@ -433,6 +467,7 @@ export async function handleSetup(req: Request, env: Env): Promise<Response> {
       if (path === "/setup/google/callback") return googleCallback(req, env);
     } else if (req.method === "POST") {
       if (path === "/setup/signin") return signIn(req, env, false);
+      if (path === "/setup/claim") return claim(req, env);
       if (path === "/setup/admin/signin") return signIn(req, env, true);
       if (path.startsWith("/setup/admin/")) return adminPost(req, env, path);
       return userPost(req, env, path);
