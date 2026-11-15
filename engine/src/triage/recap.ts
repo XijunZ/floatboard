@@ -4,7 +4,7 @@ import type { Env } from "../env";
 import { nowISO } from "../env";
 import { logEvent } from "../lib/runlog";
 import { decrypt } from "../lib/crypto";
-import { askStructured, makeClient } from "../lib/llm";
+import { askStructured, chosenModel, makeClient } from "../lib/llm";
 import { recapKeys } from "../sources/fathom";
 import type { Message } from "../sources/types";
 
@@ -99,7 +99,8 @@ export async function processRecap(env: Env, userId: string, raw: Message, fetch
     const s = await env.DB.prepare("SELECT groups, group_notes, my_rules FROM settings WHERE user_id=?").bind(userId)
       .first<{ groups: string | null; group_notes: string | null; my_rules: string | null }>();
     const ctx: RecapContext = { name: u.name ?? undefined, groups: JSON.parse(s?.groups ?? "[]"), groupNotes: JSON.parse(s?.group_notes ?? "{}"), myRules: s?.my_rules ?? "" };
-    const res = await summariseRecap(m, makeClient(await decrypt(env, u.anthropic_key_enc), fetchFn), ctx);
+    const res = await summariseRecap(m, makeClient(await decrypt(env, u.anthropic_key_enc), fetchFn,
+      { env, userId, job: "recap", model: await chosenModel(env, userId, "recap") }), ctx);
     if (res.ok) r = res.recap;
     else if (!opts.rawOnUnusable) return { status: "unusable", reason: res.reason };
     else {

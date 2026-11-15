@@ -7,7 +7,7 @@
 import type { Budget } from "../lib/budget";
 import { decrypt } from "../lib/crypto";
 import { type Env, nowISO } from "../env";
-import { makeClient } from "../lib/llm";
+import { chosenModel, makeClient } from "../lib/llm";
 import { draftLink, draftText, replyMime, replySubject } from "./mime";
 import { firstName, pickReplyTarget, replyPrompt, writeReply } from "./reply";
 import { logEvent } from "../lib/runlog";
@@ -144,7 +144,7 @@ async function makeDraft(c: Ctx, req: DraftRequest): Promise<Outcome & { sourceI
 
     const me = own.displayName ? firstName(own.displayName) : undefined;
     const them = firstName(pick.target.from);
-    const client = makeClient(apiKey, c.calls.wrap(c.fetchFn));
+    const client = makeClient(apiKey, c.calls.wrap(c.fetchFn), { env: c.env, userId: c.userId, job: "reply", model: await chosenModel(c.env, c.userId, "reply") });
     const reply = await writeReply(client, replyPrompt(thread.messages, pick.target, req.notes, { me, them }));
     if (!reply.ok) return { error: reply.reason, sourceId };
 

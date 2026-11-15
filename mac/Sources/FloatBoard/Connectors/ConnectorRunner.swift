@@ -50,8 +50,10 @@ final class ConnectorRunner {
         healthTimer = t
         // Every 5 minutes, matching the engine's schedule, so new tasks reach the board soon after the engine finds them.
         timer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.trigger("timer") }
+            MainActor.assumeIsolated { self?.trigger("timer"); self?.localTick() }
         }
+        // Mac only mode: the engine on this Mac runs its schedule on the same 5 minutes (first one shortly after launch).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.localTick() }
         // While a delivered reply draft waits for its answer, sync its connector every 15 seconds (each such sync asks the
         // engine to work on it first). A request with no answer fails after 10 minutes (a local read, checked here too).
         let e = Timer(timeInterval: ConnectorSync.replyDraftPollInterval, repeats: true) { [weak self] _ in
@@ -104,7 +106,7 @@ final class ConnectorRunner {
     /// The phone step alone (actions, then the board if it changed) for each connector not already syncing. With
     /// `skipUnknown`, only engines known to have the phone app. Actions that queued engine events start a sync to send them.
     private func phoneTick(skipUnknown: Bool) {
-        for info in store.connectors {
+        for info in store.connectors where info.id != LocalMode.connectorID {
             let id = info.id
             let support = ConnectorSync.phoneSupport[id]
             if support == false || (skipUnknown && support == nil) || running.contains(id) || phoneRunning.contains(id) { continue }
@@ -119,6 +121,15 @@ final class ConnectorRunner {
     }
 
     /// Reads unread WhatsApp chats for each connection that has screening on, and sends new ones to its engine.
+    /// One schedule run of the engine on this Mac (Mac only mode), then a sync so its new tasks reach the board.
+    func localTick() {
+        guard LocalMode.isOn(store: store) else { return }
+        Task { @MainActor in
+            await LocalMode.tick(store: store)
+            trigger("local", only: [LocalMode.connectorID])
+        }
+    }
+
     func whatsappTick() {
         for info in store.connectors where WhatsAppSync.isOn(connector: info.id, store: store) && !whatsappRunning.contains(info.id) {
             guard let client = ConnectorAccounts.client(for: info, store: store) else { continue }

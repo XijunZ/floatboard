@@ -1,6 +1,6 @@
 import { SKILL } from "../triage/classify";
 import { type Env, json, nowISO } from "../env";
-import { HAIKU, SONNET } from "../lib/llm";
+import { DEFAULT_MODEL, HAIKU, MODELS, SONNET, costEstimate, type Job } from "../lib/llm";
 import { route } from "../lib/router";
 import { readJSON } from "../lib/http";
 import { Budget, CALLS_PER_INVOCATION } from "../lib/budget";
@@ -154,6 +154,9 @@ export const SCHEMA: Field[] = [
   { "key": "ai_footer", "label": "End reply drafts with \"Assisted by AI\"", "kind": "bool", "help": "Adds an italic Assisted by AI line at the end of every reply draft." },
   { "key": "alerts_on", "label": "Send urgent tasks to your phone", "kind": "bool" },
   { "key": "critical_hours", "label": "Critical means due within (hours)", "kind": "int" },
+  { "key": "model_judge", "label": "Judge messages and learn with", "kind": "choice", "options": ["Haiku", "Sonnet"], "help": "Haiku is fast and costs very little. Sonnet is more careful and costs about 20 times more." },
+  { "key": "model_recap", "label": "Summarise meetings with", "kind": "choice", "options": ["Haiku", "Sonnet"] },
+  { "key": "model_reply", "label": "Write reply drafts with", "kind": "choice", "options": ["Haiku", "Sonnet"] },
   { "key": "learn_at", "label": "Learn from my corrections every", "kind": "choice", "options": ["50", "100"], "help": "Number of corrections before your learned preferences are updated." },
 ];
 
@@ -164,9 +167,13 @@ function valuesOf(s: any): Record<string, unknown> {
     ignore_senders: JSON.parse(s?.ignore_senders ?? "[]"), allow_senders: JSON.parse(s?.allow_senders ?? "[]"),
     unread_only: !!(s?.unread_only ?? 1), mark_read_on_done: !!(s?.mark_read_on_done ?? 1), ai_footer: !!(s?.ai_footer ?? 0), alerts_on: !!(s?.alerts_on ?? 1),
     critical_hours: s?.critical_hours ?? 24, learn_at: s?.learn_at ?? null, groups: JSON.parse(s?.groups ?? "[]"),
+    model_judge: modelName(s?.model_judge, "judge"), model_recap: modelName(s?.model_recap, "recap"), model_reply: modelName(s?.model_reply, "reply"),
     time_zone: s?.time_zone ?? DEFAULT_TIME_ZONE,
   };
 }
+
+/** "Haiku" or "Sonnet": what the app shows for a job's model (the default when none was chosen). */
+const modelName = (v: string | null | undefined, job: Job) => { const k = (v ?? DEFAULT_MODEL[job]).toLowerCase(); return k[0].toUpperCase() + k.slice(1); };
 
 /** A whole number given as a number or a numeric string ("50"); anything else is null. */
 function wholeNumber(v: unknown): number | null {
@@ -204,6 +211,11 @@ function toColumns(values: Record<string, any>): { error: string } | { set: stri
         const n = wholeNumber(v);
         if (n === null || n < 1 || n > 720) return { error: "critical_hours must be a whole number of hours (1-720)" };
         set.push("critical_hours=?"); vals.push(n); break;
+      }
+      case "model_judge": case "model_recap": case "model_reply": {
+        const m = typeof v === "string" ? v.trim().toLowerCase() : "";
+        if (!MODELS[m]) return { error: `${k} must be Haiku or Sonnet` };
+        set.push(`${k}=?`); vals.push(m); break;
       }
       case "learn_at": {
         const n = wholeNumber(v);
@@ -303,6 +315,8 @@ route("GET", "/v2/status", async (_req, env, user) => {
     sources: await listSources(env, user.id),
     // Which keys the engine holds (never the keys), for the Mac's Keys section.
     keys: await keyStatus(env, user.id),
+    // Last 30 days of Claude use per job, as a monthly estimate in US dollars (and what each model would cost).
+    ai_cost: await costEstimate(env, user.id),
   });
 });
 

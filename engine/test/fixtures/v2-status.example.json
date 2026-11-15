@@ -12,6 +12,9 @@
     { "key": "ai_footer", "label": "End reply drafts with \"Assisted by AI\"", "kind": "bool", "help": "Adds an italic Assisted by AI line at the end of every reply draft." },
     { "key": "alerts_on", "label": "Send urgent tasks to your phone", "kind": "bool" },
     { "key": "critical_hours", "label": "Critical means due within (hours)", "kind": "int" },
+    { "key": "model_judge", "label": "Judge messages and learn with", "kind": "choice", "options": ["Haiku", "Sonnet"], "help": "Haiku is fast and costs very little. Sonnet is more careful and costs about 20 times more." },
+    { "key": "model_recap", "label": "Summarise meetings with", "kind": "choice", "options": ["Haiku", "Sonnet"] },
+    { "key": "model_reply", "label": "Write reply drafts with", "kind": "choice", "options": ["Haiku", "Sonnet"] },
     { "key": "learn_at", "label": "Learn from my corrections every", "kind": "choice", "options": ["50", "100"], "help": "Number of corrections before your learned preferences are updated." }
   ],
   "needs_attention": ["me@example.com isn't connected — 2 finished emails weren't marked read. Reconnect it in the setup page."],
@@ -20,5 +23,6 @@
   "last_run_error": null,
   "oldest_unprocessed_event": null,
   "db_size_bytes": 1400000,
-  "keys": { "claude": true, "google_client_id": "123-example.apps.googleusercontent.com" }
+  "keys": { "claude": true, "google_client_id": "123-example.apps.googleusercontent.com", "fathom": false },
+  "ai_cost": { "judge": { "calls": 420, "usd": 0.31, "usd_if": { "haiku": 0.31, "sonnet": 6.2 } } }
 }

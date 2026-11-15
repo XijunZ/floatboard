@@ -139,9 +139,9 @@ struct AccountsView: View {
                 Text("""
                 Steps (console.cloud.google.com):
                 1. Create a new project (any name, e.g. "FloatBoard").
-                2. APIs & Services → Library → Google Calendar API → Enable.
+                2. APIs & Services → Library → enable the Gmail API and the Google Calendar API.
                 3. Google Auth Platform (OAuth consent screen) → Get started: app name FloatBoard, External, your email.
-                4. Audience → Test users → add each Google account you'll connect.
+                4. Audience → Publish app, so it says In production (otherwise sign-ins expire after 7 days).
                 5. Clients → Create client → Application type: Desktop app → Create. Copy the client ID and secret here.
                 """)
                 .font(.system(size: 11))

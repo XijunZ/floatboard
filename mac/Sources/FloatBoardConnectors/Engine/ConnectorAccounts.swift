@@ -49,7 +49,7 @@ public enum ConnectLink {
 
 /// Adding and removing connectors: the address goes in the database, the key in the credentials file.
 public enum ConnectorAccounts {
-    static func credentialName(_ id: String) -> String { "connector-key:\(id)" }
+    public static func credentialName(_ id: String) -> String { "connector-key:\(id)" }
 
     public static func key(for id: String) throws -> String? { try Credentials.get(credentialName(id)) }
 
@@ -92,6 +92,7 @@ public enum ConnectorAccounts {
     @MainActor
     public static func client(for info: ConnectorInfo, store: Store) -> ConnectorClient? {
         guard !info.baseURL.isEmpty else { return nil }
+        if info.id == LocalMode.connectorID { return LocalMode.client(store: store) }
         guard let url = URL(string: info.baseURL), ConnectLink.isAllowed(url) else {
             // Host only: the full address can carry a path or token.
             report(store, info.id, .error, "The connector's address must start with https://; not syncing",

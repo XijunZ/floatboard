@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { FeedbackExample } from "./classify";
 import { type Env, nowISO } from "../env";
 import { logEvent } from "../lib/runlog";
-import { askStructured, makeClient } from "../lib/llm";
+import { askStructured, chosenModel, makeClient } from "../lib/llm";
 import { decrypt } from "../lib/crypto";
 import { Budget } from "../lib/budget";
 
@@ -121,7 +121,8 @@ export async function maybeConsolidateForUser(env: Env, userId: string, fetchFn?
     if (calls.remaining < 1) return false;
     const learnAt = await learnAtFor(env, userId);
     if ((await pendingCorrections(env, userId, learnAt)).length < learnAt) return false; // no call spent
-    return await maybeConsolidate(env, userId, makeClient(await decrypt(env, u.anthropic_key_enc), calls.wrap(fetchFn)));
+    return await maybeConsolidate(env, userId, makeClient(await decrypt(env, u.anthropic_key_enc), calls.wrap(fetchFn),
+      { env, userId, job: "learn", model: await chosenModel(env, userId, "learn") }));
   } catch (e) {
     console.warn("consolidate failed:", (e as Error).message);
     await learnTrace(env, userId, "learning failed; will retry", (e as Error).message);

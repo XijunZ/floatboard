@@ -89,7 +89,22 @@ final class Google: ObservableObject {
 
     // MARK: Connect an account
 
-    func connect() {
+    /// Gmail screening uses the same Google client as Calendar: the Mac signs in (with Gmail access) and hands the
+    /// sign-in to the engine that screens (docs/architecture.md C9). `gmail` receives (address, refresh token).
+    static let gmailScopes = "https://www.googleapis.com/auth/gmail.modify openid email"
+    private var gmailHandler: ((String, String) async throws -> Void)?
+
+    func connectGmail(_ handler: @escaping (String, String) async throws -> Void) {
+        gmailHandler = handler
+        connect(scope: Self.gmailScopes)
+    }
+
+    /// The client ID and secret, for handing a Gmail sign-in to an engine.
+    var clientSecret: String? { GoogleCredentials.get("client-secret") }
+
+    func connect(scope: String? = nil) {
+        if scope == nil { gmailHandler = nil }
+        let scope = scope ?? Self.scopes
         guard isConfigured, let secret = GoogleCredentials.get("client-secret") else {
             fail("Add the client ID and secret first."); return
         }
@@ -139,7 +154,7 @@ final class Google: ObservableObject {
                     .init(name: "client_id", value: self.clientID),
                     .init(name: "redirect_uri", value: "http://127.0.0.1:\(port)"),
                     .init(name: "response_type", value: "code"),
-                    .init(name: "scope", value: Self.scopes),
+                    .init(name: "scope", value: scope),
                     .init(name: "code_challenge", value: challenge),
                     .init(name: "code_challenge_method", value: "S256"),
                     .init(name: "access_type", value: "offline"),
@@ -164,6 +179,12 @@ final class Google: ObservableObject {
                   let idToken = json["id_token"] as? String,
                   let email = Self.email(fromIDToken: idToken) else {
                 fail("Google didn't return what we need: \(json["error_description"] ?? json["error"] ?? "unknown")")
+                return
+            }
+            if let gmail = gmailHandler {
+                gmailHandler = nil
+                do { try await gmail(email, refresh); status = "Gmail \(email) connected." }
+                catch { fail("Signed in to \(email), but the engine didn't take it: \(error)") }
                 return
             }
             guard GoogleCredentials.set(refresh, "refresh:\(email)") else {

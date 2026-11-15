@@ -23,6 +23,12 @@ public enum LocalData {
         return supportDirectory.appendingPathComponent("board.sqlite")
     }
 
+    /// The engine's own database in Mac only mode (`screening.sqlite`, beside the board, never the board itself):
+    /// follows `FLOATBOARD_DB`, so checks use a scratch one.
+    public static var screeningDatabase: URL {
+        database.deletingLastPathComponent().appendingPathComponent("screening.sqlite")
+    }
+
     /// The private credentials file (owner read/write only): `FLOATBOARD_CREDS`, else `<support>/google-credentials.json`.
     public static var credentials: URL {
         if let p = env(credentialsEnv) { return URL(fileURLWithPath: p) }
