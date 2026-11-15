@@ -118,6 +118,7 @@ public enum LocalMode {
             }
             for c in online(store) {
                 WhatsAppSync.move(from: c.id, to: connectorID, store: store)
+                WeChatSync.move(from: c.id, to: connectorID, store: store)
                 await pauseInputs(of: c, store: store)
             }
         }
@@ -140,6 +141,7 @@ public enum LocalMode {
         }
         try copySettings(from: connectorID, to: to.id, store: store)
         WhatsAppSync.move(from: connectorID, to: to.id, store: store)
+        WeChatSync.move(from: connectorID, to: to.id, store: store)
         try store.removeConnector(id: connectorID)
         store.reload()
         await resumeInputs(of: to, store: store)

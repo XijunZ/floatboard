@@ -28,7 +28,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .mode: "Where screening runs."
         case .connections: "Where tasks come from, your phone, and where tasks and alerts go."
         case .rules: "What FloatBoard follows, and what it has learned."
-        case .keys: "Every key, kept in this Mac's Keychain."
+        case .keys: "Every key, kept privately on this Mac."
         }
     }
 }
@@ -570,7 +570,7 @@ struct KeysSection: View {
             if engines(store).isEmpty { Text("No engine connected.").font(.system(size: 11)).foregroundStyle(.secondary) }
         }
         Text(Credentials.usesFile
-             ? "Keys are kept in a private file on this Mac (this build isn't signed with a certificate, so the Keychain would ask again after every update)."
+             ? "Keys are kept in a private file on this Mac that only your account can read (builds without an Apple Developer ID would otherwise make the Keychain ask for your password after every update)."
              : "Keys are kept in this Mac's Keychain. Your engines get only the ones they need.")
             .font(.system(size: 10)).foregroundStyle(.secondary)
         if let message { Text(message).font(.system(size: 11)).foregroundStyle(.secondary) }

@@ -25,21 +25,21 @@ public enum CredentialsError: Error, CustomStringConvertible, Equatable {
 public enum Credentials {
     /// The file used when `FLOATBOARD_CREDS` is set, and the old file that is moved into the Keychain otherwise.
     public static var url: URL { LocalData.credentials }
-    /// True when the secrets live in a file: in checks (`FLOATBOARD_CREDS`), and in builds signed ad-hoc, where the
-    /// Keychain would ask for permission again after every rebuild. Builds signed with a certificate (such as the local
-    /// "FloatBoard Local Signing" one, see build-app.sh) keep the Keychain's permission across rebuilds.
+    /// True when the secrets live in the private file: in checks (`FLOATBOARD_CREDS`), and in every build without an Apple
+    /// Developer team (built from source, ad-hoc or with a local certificate). For those, macOS ties Keychain access to
+    /// the exact build, so each rebuild would ask for the Keychain password again and hold the app at launch.
     public static var usesFile: Bool {
-        ProcessInfo.processInfo.environment[LocalData.credentialsEnv] != nil || !signedWithCertificate
+        ProcessInfo.processInfo.environment[LocalData.credentialsEnv] != nil || !hasTeamID
     }
 
-    /// Whether this running app is signed with a certificate (not ad-hoc and not unsigned).
-    public static let signedWithCertificate: Bool = {
+    /// Whether this running app is signed by an Apple Developer team (Developer ID builds).
+    public static let hasTeamID: Bool = {
         var code: SecCode?, staticCode: SecStaticCode?, info: CFDictionary?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
               SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
               SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
               let dict = info as? [String: Any] else { return false }
-        return !((dict[kSecCodeInfoCertificates as String] as? [Any]) ?? []).isEmpty
+        return !((dict[kSecCodeInfoTeamIdentifier as String] as? String) ?? "").isEmpty
     }()
     static let service = "FloatBoard", account = "credentials"
 
@@ -62,6 +62,14 @@ public enum Credentials {
     public static func all() throws -> [String: String] {
         if let cache { return cache }
         if usesFile {
+            if !fileExists, ProcessInfo.processInfo.environment[LocalData.credentialsEnv] == nil,
+               let data = try Keychain.read(service: service, account: account) {
+                // Keys kept in the Keychain by an earlier build move back to the private file, once.
+                let dict = try decode(data)
+                try save(dict)
+                Keychain.delete(service: service, account: account)
+                return dict
+            }
             guard fileExists else { return [:] }
             let dict = try decode(try readFile())
             cache = dict
@@ -153,6 +161,11 @@ enum Keychain {
             st = SecItemAdd(add as CFDictionary, nil)
         }
         guard st == errSecSuccess else { throw CredentialsError.unwritable("Keychain: \(message(st))") }
+    }
+
+    static func delete(service: String, account: String) {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        SecItemDelete(q as CFDictionary)
     }
 
     static func message(_ st: OSStatus) -> String {

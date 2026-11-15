@@ -34,7 +34,7 @@ flowchart LR
   end
   subgraph Mac["Your Mac"]
     M1["board.sqlite (truth)"]
-    M2["Keychain item FloatBoard / credentials (secrets)"]
+    M2["google-credentials.json, or the Keychain for Developer ID builds (secrets)"]
     M3["Backups/"]
     M4["FloatBoard.log"]
     M5["mac/scripts/local.env"]
@@ -77,7 +77,7 @@ All paths come from `LocalData` (`mac/Sources/FloatBoardCore/LocalData.swift`). 
 | Item | Path (override) | Holds | Owner / source of truth | Personal? | Created by | Sync (direction) | Backup |
 |---|---|---|---|---|---|---|---|
 | Board database | `<support>/board.sqlite` (`FLOATBOARD_DB`) | Cards, history, groups, connectors and their settings, outbox, corrections, Activity log (see section 2). | **The app. This is the truth.** | Yes | The app, on first launch (schema in `DB.swift`, upgraded in place). | Proposals in from the engine; events and settings out to it (section 4). | Tiered snapshots in `Backups/`. |
-| Credentials (Keychain) | macOS Keychain, service `FloatBoard`, account `credentials`, one JSON list of name → secret. An older `<support>/google-credentials.json` is moved in on first launch and then deleted. `FLOATBOARD_CREDS` (checks) uses a file instead | `connector-key:<id>` (each engine's user key); optional Google Calendar sign-in (`client-id`, `client-secret`, `refresh:<email>`). Owner read/write only (0600). | The app | Yes (secrets) | The app, when you add a connector or sign in to Calendar. | None. The engine key is only sent as the `Authorization` header. | **Not backed up.** If lost, open the engine's setup page and press *Connect to FloatBoard* again. |
+| Credentials | `<support>/google-credentials.json` (owner read/write only), one JSON list of name → secret; builds signed with an Apple Developer ID keep it in the Keychain instead (service `FloatBoard`, account `credentials`). Builds without a Developer team use the file because macOS would ask for the Keychain password after every rebuild. `FLOATBOARD_CREDS` (checks) points at a scratch file | `connector-key:<id>` (each engine's user key); optional Google Calendar sign-in (`client-id`, `client-secret`, `refresh:<email>`). Owner read/write only (0600). | The app | Yes (secrets) | The app, when you add a connector or sign in to Calendar. | None. The engine key is only sent as the `Authorization` header. | **Not backed up.** If lost, open the engine's setup page and press *Connect to FloatBoard* again. |
 | Backups folder | `<support>/Backups/` (`FLOATBOARD_BACKUPS`; none when only `FLOATBOARD_DB` is set) | `board-<yyyyMMdd-HHmmss>-<reason>.sqlite`: verified copies of the board. | The app | Yes (copies of the board) | The app: at launch, every 6 hours, before a schema upgrade, a re-check or a restore. | None (local only). | Daily 14, weekly 8, monthly 12; pre-migrate / pre-recheck / pre-restore kept 90 days. |
 | Engine archives | `<support>/archives/` (beside `Backups/`; follows `FLOATBOARD_BACKUPS`, none when only `FLOATBOARD_DB` is set) | `engine-<connector>-<yyyy-MM-dd>.jsonl`: old engine rows (`board_log` and `items`) saved by *Archive old data to this Mac*, one canonical JSON line per row (`{"row":{...},"table":"board_log"|"items"}`). Each run's lines are hashed (SHA-256) and confirmed with the engine before it deletes them. | The app (the engine no longer has these rows) | Yes (task titles, email subjects and senders) | The app, when you press Archive in the Settings. | One way: engine to Mac, then deleted on the engine. | Not rotated or pruned: kept until you delete them. Not part of `Backups/`. |
 | Diagnostic log | `~/Library/Logs/FloatBoard.log` (no override) | Window-avoider lines: time, window sizes, state. | The app | No (no task text) | The app, when it moves windows clear of the bar. | None | None |
@@ -356,7 +356,7 @@ erDiagram
 
 ## 4. The flows between them
 
-All traffic is HTTPS + JSON under `/v2`, started by the app, authenticated with the user key from the app's credentials (Keychain).
+All traffic is HTTPS + JSON under `/v2`, started by the app, authenticated with the user key from the app's credentials.
 
 | Flow | Direction | Endpoint | What travels | Durability |
 |---|---|---|---|---|
@@ -410,7 +410,7 @@ How each proposal kind lands in the board:
 | **settings_version** | whole number, starts at 1 in the app | App (`connectors.settings_version`, +1 on every settings change and every learned update) | Sent with `PUT /v2/settings`; the engine keeps the highest and reports it back (`connectors.engine_settings_version`). |
 | **Proposals cursor** | `<created>\|<item id>\|<rowid high-water mark>`, e.g. `2026-01-01T09:00:00.000Z\|<uuid>\|42`. Opaque to the app. | Engine | `GET /v2/proposals?after=`; saved in `connectors.cursor` only after the page is applied. Items up to 2 minutes behind the cursor that committed late are re-sent; the app skips duplicates. |
 | **Connector id** | lower-case letters, digits and dashes from the connector name (e.g. `email`) | App | `cards.connector`, `outbox.connector`, actor `connector:<id>`, credentials name `connector-key:<id>`. |
-| **User key** | random secret | Engine (`/setup/admin` invite) | `Authorization` for `/v2`; the engine stores only its sha256 (`users.key_hash`), the app stores it in its credentials (Keychain). |
+| **User key** | random secret | Engine (`/setup/admin` invite) | `Authorization` for `/v2`; the engine stores only its sha256 (`users.key_hash`), the app stores it in its credentials. |
 
 ## 6. Personal data inventory
 

@@ -33,6 +33,7 @@ final class ConnectorRunner {
     private var phoneTimer: Timer?
     private var whatsappTimer: Timer?
     private var whatsappRunning = Set<String>()
+    private var wechatRunning = Set<String>()
     private var boardWatch: AnyCancellable?
     /// Connectors whose phone step is running (a full sync may still start: it does the phone step too, and actions apply once).
     private var phoneRunning = Set<String>()
@@ -139,6 +140,17 @@ final class ConnectorRunner {
             Task { @MainActor in
                 await WhatsAppSync.tick(connector: id, store: store, client: client)
                 whatsappRunning.remove(id)
+                NotificationCenter.default.post(name: .floatBoardWhatsAppRead, object: nil)
+            }
+        }
+        // WeChat (from macOS's notifications) on the same 5 minutes.
+        for info in store.connectors where WeChatSync.isOn(connector: info.id, store: store) && !wechatRunning.contains(info.id) {
+            guard let client = ConnectorAccounts.client(for: info, store: store) else { continue }
+            let id = info.id
+            wechatRunning.insert(id)
+            Task { @MainActor in
+                await WeChatSync.tick(connector: id, store: store, client: client)
+                wechatRunning.remove(id)
                 NotificationCenter.default.post(name: .floatBoardWhatsAppRead, object: nil)
             }
         }

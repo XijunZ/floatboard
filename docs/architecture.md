@@ -397,4 +397,6 @@ Where the build differs from the plan above, and why:
   switch.
 - **Feedback (C10)** has no hourly retry on accounts already using the free plan's 5 schedules; waiting messages are
   retried with each new one.
-
+- **Keys (C9)** live in the Mac's private credentials file (owner-only), not the Keychain, for every build without an
+  Apple Developer ID: macOS ties Keychain access to the exact build for those, so each rebuild asked for the Keychain
+  password and held the app at launch. Builds signed with a Developer ID use the Keychain.
