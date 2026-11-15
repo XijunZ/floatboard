@@ -39,4 +39,5 @@ banned in practice; the WhatsApp Business API, which only works for business num
 Not supported. The Weixin service agreement forbids plug-ins and unauthorised third-party tools (§8.2.1.4), reading or
 controlling the app's data or interface (§8.2.1.6) and reverse engineering (§8.2.1.2), with account bans as a penalty
 (§8.5.1). WeChat 4.x encrypts its local messages, and web or bot logins would sign out the Mac app. Reading macOS's own
-notification history (where WeChat's banners land) is being looked at separately.
+notification history (where WeChat's banners land) was tried on 15 Nov 2026: macOS 26 keeps it closed to other apps, even
+with Full Disk Access (and each attempt asks the person to allow access to another app's data), so it was removed.

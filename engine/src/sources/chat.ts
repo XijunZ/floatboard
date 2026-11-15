@@ -4,7 +4,7 @@ import type { Message, Source, SourceRow } from "./types";
 type Stored = { row_key: string; app: string; chat_name: string; is_group: number; muted: number; senders: string; transcript: string; link: string; received: string };
 type Cursor = { received: string; key: string };
 
-const APP_NAMES: Record<string, string> = { whatsapp: "WhatsApp", wechat: "WeChat" };
+const APP_NAMES: Record<string, string> = { whatsapp: "WhatsApp" };
 
 /**
  * The chats the Mac sent (chat_rows), as messages for the triage run. Nothing here calls the chat app. A row is marked

@@ -44,8 +44,7 @@ describe("chats from the Mac", () => {
 
   it("refuses_unknown_apps_and_needs_the_key", async () => {
     const u = await newUser("C2");
-    expect((await send(u.key, [chat()], "telegram")).status).toBe(400);
-    expect((await send(u.key, [chat()], "wechat")).json()).resolves.toMatchObject({ stored: 0, skipped: 1 }); // a WhatsApp key is not a WeChat chat
+    expect((await send(u.key, [chat()], "wechat")).status).toBe(400);
     expect((await call("/v2/chats", { method: "POST", body: JSON.stringify({ app: "whatsapp", chats: [] }) })).status).toBe(401);
   });
 
@@ -102,18 +101,5 @@ describe("chats from the Mac", () => {
     expect(seen[0].messages[0].content).toContain("Chat: School parents (group chat, MUTED by the person: apply the muted-chat rule)");
     expect(seen[0].system).toContain("## Muted chats (stricter)");
     expect((await env.DB.prepare("SELECT muted FROM chat_rows WHERE user_id=?").bind(u.id).first<any>()).muted).toBe(1);
-  });
-});
-
-describe("wechat from the Mac's notifications", () => {
-  it("a_wechat_ask_becomes_a_task_judged_as_a_chat", async () => {
-    const u = await keyed("W1");
-    const r = await send(u.key, [chat({ key: "wx:Anna:2026-11-13T09:12:00Z", link: "weixin://", transcript: "[2026-11-13 09:12] Anna: Please send the deck" })], "wechat");
-    expect(await r.json()).toMatchObject({ stored: 1 });
-    const seen: any[] = [];
-    await runUser(env as any, u.id, { kinds: ["wechat"], fetchFn: claude({ action_required: true, title: "Send Anna the deck", why: "She asked" }, seen) });
-    expect(seen[0].messages[0].content).toContain("WeChat");
-    const item = await env.DB.prepare("SELECT title, link FROM items WHERE user_id=? AND kind='action'").bind(u.id).first<any>();
-    expect(item).toMatchObject({ title: "Send Anna the deck", link: "weixin://" });
   });
 });

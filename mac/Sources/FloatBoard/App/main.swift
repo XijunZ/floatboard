@@ -75,13 +75,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        if let i = args.firstIndex(of: "--wechat-probe"), i + 1 < args.count {
-            // Support: whether macOS's notification history can be read and what shape it has. Counts and field names
-            // only, never any message text.
-            try? WeChatNotifications.probeSummary().write(toFile: args[i + 1], atomically: true, encoding: .utf8) // try?-ok: support tool; no file means it failed
-            NSApp.terminate(nil)
-            return
-        }
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
             Snapshot.run(dir: args[i + 1], store: store, google: google)
             NSApp.terminate(nil)

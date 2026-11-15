@@ -332,7 +332,7 @@ route("GET", "/v2/status", async (_req, env, user) => {
   });
 });
 
-const SOURCE_KINDS = ["gmail", "outlook_web", "fathom", "whatsapp", "wechat"];
+const SOURCE_KINDS = ["gmail", "outlook_web", "fathom", "whatsapp"];
 
 /** The user's inputs: Gmail inboxes, Outlook, Fathom and chat apps, oldest first. No secrets. */
 async function listSources(env: Env, userId: string) {

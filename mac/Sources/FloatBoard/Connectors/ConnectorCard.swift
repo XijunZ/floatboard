@@ -128,7 +128,6 @@ struct EngineInputsCard: View {
             }
             ForEach(engineInputs(status)) { inputRow($0) }
             WhatsAppInputRow(info: info, openRules: { ui.settingsSection = .rules })
-            WeChatInputRow(info: info)
             if let inputError {
                 Label(inputError, systemImage: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(.orange)
             }
@@ -141,7 +140,7 @@ struct EngineInputsCard: View {
 
     /// The engine's own inputs; WhatsApp has its own row (it is read on this Mac).
     private func engineInputs(_ status: ConnectorStatus?) -> [EngineSource] {
-        (status?.sources ?? []).filter { $0.kind != "whatsapp" && $0.kind != "wechat" }
+        (status?.sources ?? []).filter { $0.kind != "whatsapp" }
     }
 
     private func inputRow(_ s: EngineSource) -> some View {
@@ -183,7 +182,7 @@ struct EngineInputsCard: View {
             Button("Outlook (Chrome extension)…") { guide = .outlook }
             Button("Fathom meeting notes…") { guide = .fathom }
             Divider()
-            Button("WhatsApp and WeChat: use their switches above") {}.disabled(true)
+            Button("WhatsApp: use its switch above") {}.disabled(true)
         } label: { Text("Add an input…").font(.system(size: 11)) }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .disabled(info.baseURL.isEmpty)
@@ -290,76 +289,6 @@ struct WhatsAppInputRow: View {
             (\(URL(string: info.baseURL)?.host ?? "your engine")) and to Claude, which turns the ones that need you into tasks.
 
             macOS may ask you to allow FloatBoard in Full Disk Access.
-            """
-        a.addButton(withTitle: "Turn on"); a.addButton(withTitle: "Cancel")
-        NSApp.activate()
-        return a.runModal() == .alertFirstButtonReturn
-    }
-}
-
-// MARK: - WeChat (from macOS's notifications on this Mac)
-
-struct WeChatInputRow: View {
-    @EnvironmentObject var store: Store
-    let info: ConnectorInfo
-    @State private var on = false
-    @State private var st: WeChatSync.Status?
-    @State private var found: String?
-
-    var body: some View {
-        SourceRow(icon: "message", name: "WeChat", detail: "This Mac (WeChat's notifications)",
-                  state: state, problem: on && st?.error != nil,
-                  isOn: Binding(get: { on }, set: { v in
-                      if v, !confirmOn() { return }
-                      on = v
-                      WeChatSync.setOn(v, connector: info.id, store: store)
-                      st = WeChatSync.status[info.id]
-                      if v { probe(); NotificationCenter.default.post(name: .floatBoardWhatsAppNow, object: nil) }
-                  })) {
-            Button("Read now") { NotificationCenter.default.post(name: .floatBoardWhatsAppNow, object: nil) }.disabled(!on)
-            Button("Notification settings…") {
-                if let u = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(u) }
-            }
-            Button("Full Disk Access settings…") {
-                if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(u) }
-            }
-        }
-        .onAppear { on = WeChatSync.isOn(connector: info.id, store: store); st = WeChatSync.status[info.id] }
-        .onReceive(NotificationCenter.default.publisher(for: .floatBoardWhatsAppRead)) { _ in st = WeChatSync.status[info.id] }
-    }
-
-    private var state: String {
-        guard on else { return "Off" }
-        if let e = st?.error { return e }
-        if let found, st?.lastRead == nil { return found }
-        guard let read = st?.lastRead else { return "Reading…" }
-        return (st?.lastSent ?? 0) == 0 ? "Read \(ConnectorHealth.time(read)) · no new messages to check"
-            : "Read \(ConnectorHealth.time(read)) · \(st!.lastSent) chat\(st!.lastSent == 1 ? "" : "s") checked for tasks"
-    }
-
-    /// Says straight away whether macOS holds any WeChat notifications to read (a count, never their text).
-    private func probe() {
-        do {
-            let n = try WeChatNotifications.recentCount()
-            found = n == 0 ? "No WeChat notifications from the last 7 days: check that WeChat shows notifications with message previews"
-                : "Found \(n) WeChat notification\(n == 1 ? "" : "s") from the last 7 days"
-            store.activity("connector:\(info.id)", n == 0 ? .warning : .info, found!)
-        } catch {
-            found = (error as? WeChatNotifications.ReadError)?.description ?? "\(error)"
-            store.activity("connector:\(info.id)", .warning, "WeChat: \(found!)")
-        }
-    }
-
-    private func confirmOn() -> Bool {
-        let a = NSAlert()
-        a.messageText = "Screen WeChat for tasks?"
-        a.informativeText = """
-            Every 5 minutes FloatBoard reads the WeChat notifications macOS has stored on this Mac (who wrote and the preview \
-            text). It never opens, logs in to or touches WeChat, and never sends anything on WeChat.
-
-            It sees only chats that show notifications with message previews: muted chats and hidden previews are not seen. \
-            New messages go to your engine (\(info.id == LocalMode.connectorID ? "on this Mac" : URL(string: info.baseURL)?.host ?? "your engine")) \
-            and to the AI model you chose, which turns the ones that need you into tasks.
             """
         a.addButton(withTitle: "Turn on"); a.addButton(withTitle: "Cancel")
         NSApp.activate()
