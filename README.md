@@ -76,6 +76,14 @@ Restore with **Help, Restore from backup...**. Restoring first takes a pre-resto
 is wrong, a warning appears on the bar and in Activity; **Dismiss** hides one until it happens again. Nothing is ever
 silently swallowed: the `check-silent.sh` script enforces that.
 
+## Updates
+
+FloatBoard checks this repository on GitHub when it starts and once a day (Settings › Mode › Updates, or Help › Check
+for Updates…). **Update now** runs in the folder the app was built from: it pulls the new code, updates your online engine
+if this Mac deploys one (database changes first, then the new code), rebuilds the app and reopens it. It refuses to run
+when that folder has changes that aren't committed or commits that aren't on GitHub. You can let it install updates
+automatically when FloatBoard starts. The log is in `~/Library/Logs/FloatBoard-update.log`.
+
 ## Build and check
 
 ```
