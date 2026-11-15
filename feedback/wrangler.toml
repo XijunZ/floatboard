@@ -13,7 +13,8 @@ migrations_dir = "migrations"
 GITHUB_REPO = "your-name/floatboard-feedback"
 
 [triggers]
-# Hourly: retry messages that couldn't be filed on GitHub yet.
+# Hourly: retry messages that couldn't be filed on GitHub yet. Optional: free accounts allow 5 crons in all; without
+# one, waiting messages are retried on each new message.
 crons = ["0 * * * *"]
 
 [observability]

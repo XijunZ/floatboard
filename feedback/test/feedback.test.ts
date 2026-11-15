@@ -94,3 +94,16 @@ describe("feedback", () => {
     expect(t.endsWith("…")).toBe(true);
   });
 });
+
+describe("retry without a cron", () => {
+  it("a_new_message_retries_older_waiting_ones", async () => {
+    githubUp = false;
+    await send(msg({ text: "first" }));
+    githubUp = true;
+    const waits: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => waits.push(p), passThroughOnException() {} } as unknown as ExecutionContext;
+    await worker.fetch(new Request(BASE + "/feedback", { method: "POST", body: JSON.stringify(msg({ text: "second" })) }), env as any, ctx);
+    await Promise.all(waits);
+    expect((await rows()).every((r) => r.issue_url?.startsWith("https://github.com/"))).toBe(true);
+  });
+});

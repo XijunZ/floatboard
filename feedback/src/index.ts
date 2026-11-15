@@ -4,8 +4,8 @@
  * POST /feedback  {install_id, text, app_version, os, diagnostics?} from Help › Send Feedback… in the Mac app.
  *   Every message is stored first, then filed as an issue in a PRIVATE GitHub repository, and announced on ntfy.
  *   At most 5 messages a day per install, 5,000 characters each. Nothing a person writes is made public.
- * Hourly: messages not filed yet are tried again. Three failures in a row send one ntfy alert, so feedback never
- * sits unseen.
+ * Messages not filed yet are tried again on every new message, and hourly when the account has a free cron slot
+ * (Cloudflare's free plan allows 5 per account). Three failures in a row send one ntfy alert, so feedback never sits unseen.
  */
 
 export interface Env {
@@ -113,7 +113,7 @@ export async function file(env: Env, r: Row): Promise<boolean> {
   return false;
 }
 
-async function receive(req: Request, env: Env): Promise<Response> {
+async function receive(req: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const len = Number(req.headers.get("Content-Length") ?? "0");
   if (len > MAX_BODY) return json({ error: "the message is too large" }, 413);
   const raw = await req.text();
@@ -131,23 +131,25 @@ async function receive(req: Request, env: Env): Promise<Response> {
     .bind(row.id, row.install_id, row.received, row.text, row.app_version, row.os, row.diagnostics).run();
   // Stored: the person gets "sent" even if GitHub is down (the hourly run files it later).
   await Promise.all([file(env, row), ntfy(env, "FloatBoard feedback", row.text)]);
+  // Older messages still waiting for GitHub get another try (in the background).
+  ctx?.waitUntil(retry(env, row.id));
   return json({ ok: true, id: row.id });
 }
 
-/** Hourly: file what is still waiting, oldest first. */
-export async function retry(env: Env): Promise<number> {
-  const { results } = await env.DB.prepare("SELECT * FROM feedback WHERE issue_url IS NULL ORDER BY received LIMIT 20").all<Row>();
+/** Files what is still waiting, oldest first (`skip`: a message just tried). */
+export async function retry(env: Env, skip = ""): Promise<number> {
+  const { results } = await env.DB.prepare("SELECT * FROM feedback WHERE issue_url IS NULL AND id<>? ORDER BY received LIMIT 20").bind(skip).all<Row>();
   let filed = 0;
   for (const r of results) if (await file(env, r)) filed++;
   return filed;
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/feedback") {
       if (req.method !== "POST") return json({ error: "use POST" }, 405);
-      return receive(req, env);
+      return receive(req, env, ctx);
     }
     if (url.pathname === "/") return json({ ok: true, service: "floatboard-feedback" });
     return json({ error: "not found" }, 404);
