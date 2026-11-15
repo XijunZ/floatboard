@@ -7,7 +7,7 @@ public struct HealthProblem: Equatable {
     public let since: Date
     public init(id: String, message: String, since: Date) { self.id = id; self.message = message; self.since = since }
 
-    /// Problems about the app itself (Activity window) rather than one connector (Connectors tab).
+    /// Problems about the app itself (Activity window) rather than one connector (Settings › Mode).
     public var isAppWide: Bool { id == "errors" || id == "backup" }
 }
 

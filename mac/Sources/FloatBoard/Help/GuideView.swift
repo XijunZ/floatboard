@@ -34,7 +34,7 @@ struct GuideView: View {
                     note("Rename, recolour and reorder groups on the Groups tab.")
                 }
                 section("Icons") {
-                    note("Google Calendar (Connectors tab) is optional and only adds tasks to your calendar and Meet links.")
+                    note("Google Calendar (Settings › Outputs) is optional and only adds tasks to your calendar and Meet links.")
                     icon("calendar.badge.plus", "Add to Google Calendar (choose account, with or without Meet)")
                     icon("calendar.badge.checkmark", "In Google Calendar (shown under the task): click to open the event")
                     icon("video.fill", "Join the Google Meet call")
@@ -49,7 +49,7 @@ struct GuideView: View {
                     icon("magnifyingglass", "Search: highlights matches; Enter jumps to the next")
                 }
                 section("Connector tasks") {
-                    note("Connectors (Connectors tab) suggest tasks. Hover the ✉ chip to see why a task was suggested.")
+                    note("Your engine (Settings › Mode) suggests tasks from your inputs (Settings › Inputs). Hover the ✉ chip to see why a task was suggested.")
                     note("Changing a connector's task, finishing it, or deleting it with “Not an action (teach)” / “Wrong details (teach)” tells the connector, so it learns.")
                     note("If a connector can't be reached, your changes are kept and sent when it's back. A ⚠︎ on the bar means a connector needs attention.")
                     note("Connectors → Settings shows each connector's settings and what FloatBoard has learned about you; edit anything that's wrong.")
@@ -59,8 +59,8 @@ struct GuideView: View {
                 section("Connectors") {
                     note("A connector is an optional add-on that suggests tasks from somewhere else, such as your email. FloatBoard works fully without one.")
                     note("To add one, open its setup page in your browser and press its “Connect to FloatBoard” link. It opens this app and adds the connector.")
-                    note("Connectors tab: each connector has a status line (when it last worked, and how many changes are waiting to send) and a settings form. Edit anything that's wrong and save.")
-                    note("Pair a phone… (Connectors tab) shows a QR code: scan it with your phone's camera to see your board there and move or add tasks. The phone's changes reach this Mac within about 2 minutes.")
+                    note("Settings: Mode shows your engine's status line (when it last worked, and how many changes are waiting to send). Rules & learning holds your rules and what FloatBoard learned, with a history you can restore. Keys holds every key.")
+                    note("Pair a phone… (Settings › Outputs › Phone app) shows a QR code: scan it with your phone's camera to see your board there and move or add tasks. The phone's changes reach this Mac within about 2 minutes.")
                     note("Deleting a task the email sorting made offers four choices: “Not an action” (this should never have been a task) and “Wrong details” both teach the connector; “Duplicate” tells it the same task came in twice, so the gap can be found and fixed, without changing how emails are sorted; “Just delete” tells it nothing.")
                 }
                 section("Activity") {
@@ -69,16 +69,16 @@ struct GuideView: View {
                     note("FloatBoard also watches for quiet problems: a connector that can't be reached, changes stuck waiting, or an old backup. These show as a ⚠︎ on the bar and in Activity.")
                 }
                 section("Re-check") {
-                    note("On the Connectors tab, Re-check asks a connector to look at its recent items again.")
+                    note("In Settings › Mode, the engine's ⋯ › Re-check asks it to look at its recent items again.")
                     note("It never deletes anything. Tasks you haven't touched that no longer look like they need action are withdrawn: hidden from the board, not removed.")
-                    note("Open “Show withdrawn” on the Connectors tab to see them and restore any you want back.")
+                    note("Open “Show withdrawn” in Settings › Inputs to see them and restore any you want back.")
                 }
                 section("Backups") {
                     note("FloatBoard saves a checked copy of your board automatically: daily for 2 weeks, weekly for 2 months, monthly for a year. It also saves one just before an upgrade, a re-check or a restore, and keeps those for 90 days.")
                     note("Help → Restore from backup… brings an earlier copy back. A copy of the current board is saved first, so you can undo it.")
                 }
                 section("Google Calendar (optional)") {
-                    note("Connect a Google account on the Connectors tab only if you want tasks added to your calendar, with or without a Meet link. Nothing else needs it.")
+                    note("Connect a Google account in Settings › Outputs › Calendar only if you want tasks added to your calendar, with or without a Meet link. Nothing else needs it.")
                 }
                 section("Keyboard") {
                     line("⌃⌥N", "New task from anywhere")

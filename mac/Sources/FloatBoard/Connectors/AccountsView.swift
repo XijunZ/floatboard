@@ -71,7 +71,7 @@ struct CalendarMenu: View {
     }
 }
 
-/// Google accounts for adding tasks to Google Calendar, and the one-time Google Cloud set-up (Connectors tab).
+/// Google accounts for adding tasks to Google Calendar, and the one-time Google Cloud set-up (Settings).
 struct AccountsView: View {
     @EnvironmentObject var google: Google
     var showAccounts = true

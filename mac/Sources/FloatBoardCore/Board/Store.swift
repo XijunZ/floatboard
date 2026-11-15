@@ -8,7 +8,7 @@ import SQLite3
 public final class Store: ObservableObject {
     @Published public private(set) var cards: [Card] = []
     @Published public private(set) var areas: [Category] = []
-    /// Online connectors (Connectors tab); reloaded with the board.
+    /// Online connectors (Settings › Mode); reloaded with the board.
     @Published public private(set) var connectors: [ConnectorInfo] = []
     @Published public var lastError: String?
     /// The most recently deleted task (Undo bar and Edit → Undo Delete); cleared by undo or the next app start.

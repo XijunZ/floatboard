@@ -14,7 +14,7 @@ public enum WhatsAppSync {
         public var error: String?
         public var needsAccess = false
     }
-    /// The last tick's outcome per connection, for the Connectors tab.
+    /// The last tick's outcome per connection, for Settings.
     @MainActor public static var status: [String: Status] = [:]
     @MainActor private static var reported: [String: String] = [:]
 

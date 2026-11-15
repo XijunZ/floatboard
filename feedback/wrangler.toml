@@ -1,0 +1,20 @@
+name = "floatboard-feedback"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "floatboard-feedback"
+database_id = "00000000-0000-0000-0000-000000000000" # set by `wrangler d1 create floatboard-feedback`
+migrations_dir = "migrations"
+
+[vars]
+# owner/name of the PRIVATE GitHub repository that receives each message as an issue.
+GITHUB_REPO = "your-name/floatboard-feedback"
+
+[triggers]
+# Hourly: retry messages that couldn't be filed on GitHub yet.
+crons = ["0 * * * *"]
+
+[observability]
+enabled = true

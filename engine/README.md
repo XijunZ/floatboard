@@ -61,32 +61,31 @@ Check it is up: `curl -s -o /dev/null -w "%{http_code}" <your-engine>/v2/status`
 ## 5. The engine's setup page
 
 Open `<your-engine>/setup/admin` and sign in with the **admin key** to create your user (just a name). That gives you
-an invite link and a user key. Then open `<your-engine>/setup` and sign in with your **user key**. The setup page holds
-only secrets and connections (rules, groups and lists live in the FloatBoard app). Work down it:
+an invite link and a user key. Then open `<your-engine>/setup` and sign in with your **user key**.
 
-### Google Cloud (read email)
+### Connect to FloatBoard (first)
+Press **Connect to FloatBoard** at the bottom of the setup page. It opens the app on this Mac and adds the engine (the
+address goes in the app's database, the key in the Mac's Keychain). The app then opens **Settings › Keys**. If it does
+not appear, sign out of the setup page and sign in again to get the link.
 
-1. Go to <https://console.cloud.google.com> and create a project.
-2. **APIs & Services, Library**: enable the **Gmail API** (and the **Google Calendar API** if you also want the app's optional calendar feature).
-3. **Google Auth Platform, Get started**: app name FloatBoard, External, your email.
-4. **Audience**: press **Publish app** so the status is **In production**. If you leave it in Testing, Google expires every
-   sign-in after **7 days** and you must reconnect each week. You will see a one-time "unverified app" warning when you
-   connect; that is expected for your own app: choose **Advanced**, then continue.
-5. **Clients, Create client**: type **Web application** (not Desktop). Add this exact **Authorized redirect URI**:
-   `<your-engine>/setup/google/callback`
-6. Scopes needed: `gmail.modify` and `openid email`.
-7. On the setup page, paste the **Client ID** and **Client secret** under "Google Cloud client", then press
-   **Connect a Gmail account** and sign in. Repeat for each inbox.
+### Keys (in the Mac app: Settings › Keys)
+- **Claude key**: create one at <https://console.anthropic.com>, paste it, press Save. The Mac keeps it in its Keychain
+  and sends it to your engine, which stores it encrypted and never sends it back. The engine uses a small, cheap Claude
+  model: a few cents per hundred emails after the free newsletter and ads filter.
+- **Google client for Gmail**: the steps are in the app under "How to make the Google client", and here:
+  1. Go to <https://console.cloud.google.com> and create a project.
+  2. **APIs & Services, Library**: enable the **Gmail API**.
+  3. **Google Auth Platform, Get started**: app name FloatBoard, External, your email.
+  4. **Audience**: press **Publish app** so the status is **In production**. If you leave it in Testing, Google expires
+     every sign-in after **7 days** and you must reconnect each week. You will see a one-time "unverified app" warning
+     when you connect; that is expected for your own app: choose **Advanced**, then continue.
+  5. **Clients, Create client**: type **Web application** (not Desktop). Add this exact **Authorized redirect URI**:
+     `<your-engine>/setup/google/callback` (the app shows it with a Copy button). Scopes used: `gmail.modify`, `openid email`.
+  6. Paste the **Client ID** and **Client secret** in the app and press Save.
 
-### Claude key
-Create an API key at <https://console.anthropic.com>, then paste it under "Claude API key". It is stored encrypted on
-your engine, not on your Mac. The engine uses a small, cheap Claude model: a few cents per hundred emails after the free
-newsletter and ads filter.
-
-### Connect to FloatBoard
-Press **Connect to FloatBoard** at the bottom of the setup page. It opens the app on this Mac and adds the engine as a
-connector (the address goes in the app's database, the key in its private credentials file). If it does not appear,
-sign out of the setup page and sign in again to get the link.
+### Gmail inboxes (setup page)
+Back on the setup page, press **Connect a Gmail account** and sign in. Repeat for each inbox. (In the app:
+Settings › Inputs › Add an input › Gmail shows the same steps.)
 
 ## 6. Fathom meeting notes (optional)
 

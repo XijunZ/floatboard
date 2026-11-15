@@ -182,7 +182,7 @@ final class Google: ObservableObject {
     private func accessToken(for email: String) async throws -> String {
         if let t = tokens[email], t.expires > Date() { return t.token }
         guard let refresh = GoogleCredentials.get("refresh:\(email)"), let secret = GoogleCredentials.get("client-secret") else {
-            throw GoogleError("\(email) isn't connected any more. Reconnect it in the Google Calendar section of the Connectors tab.")
+            throw GoogleError("\(email) isn't connected any more. Reconnect it in Settings › Outputs › Calendar.")
         }
         let json = try await Self.postForm("https://oauth2.googleapis.com/token", [
             "client_id": clientID, "client_secret": secret,
