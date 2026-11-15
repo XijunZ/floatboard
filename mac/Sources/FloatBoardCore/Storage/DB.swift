@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 9
+    public static let schemaVersion = 10
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -81,6 +81,17 @@ public final class DB {
             ALTER TABLE cards ADD COLUMN watch_person TEXT NOT NULL DEFAULT '';
             ALTER TABLE cards ADD COLUMN watch_contact TEXT NOT NULL DEFAULT '';
             ALTER TABLE cards ADD COLUMN watch_since REAL;
+
+            """
+        }
+        if version < 10 {
+            // 9 -> 10: versions of your rules and of what FloatBoard learned (docs/architecture.md, C8).
+            sql += """
+            CREATE TABLE instructions(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, connector TEXT NOT NULL, part TEXT NOT NULL, text TEXT NOT NULL,
+                source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL
+            );
+            CREATE INDEX instructions_part ON instructions(connector, part, at);
 
             """
         }
@@ -179,6 +190,12 @@ public final class DB {
         settings_version INTEGER, restored_at REAL, PRIMARY KEY(id, removed_at)
     );
     CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+    -- Every version of your rules and of what FloatBoard learned; source: start, you, learning, restore.
+    CREATE TABLE instructions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, connector TEXT NOT NULL, part TEXT NOT NULL, text TEXT NOT NULL,
+        source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL
+    );
+    CREATE INDEX instructions_part ON instructions(connector, part, at);
 
     """
 

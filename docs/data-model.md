@@ -34,7 +34,7 @@ flowchart LR
   end
   subgraph Mac["Your Mac"]
     M1["board.sqlite (truth)"]
-    M2["google-credentials.json (secrets)"]
+    M2["Keychain item FloatBoard / credentials (secrets)"]
     M3["Backups/"]
     M4["FloatBoard.log"]
     M5["mac/scripts/local.env"]
@@ -77,7 +77,7 @@ All paths come from `LocalData` (`mac/Sources/FloatBoardCore/LocalData.swift`). 
 | Item | Path (override) | Holds | Owner / source of truth | Personal? | Created by | Sync (direction) | Backup |
 |---|---|---|---|---|---|---|---|
 | Board database | `<support>/board.sqlite` (`FLOATBOARD_DB`) | Cards, history, groups, connectors and their settings, outbox, corrections, Activity log (see section 2). | **The app. This is the truth.** | Yes | The app, on first launch (schema in `DB.swift`, upgraded in place). | Proposals in from the engine; events and settings out to it (section 4). | Tiered snapshots in `Backups/`. |
-| Credentials file | `<support>/google-credentials.json` (`FLOATBOARD_CREDS`) | `connector-key:<id>` (each engine's user key); optional Google Calendar sign-in (`client-id`, `client-secret`, `refresh:<email>`). Owner read/write only (0600). | The app | Yes (secrets) | The app, when you add a connector or sign in to Calendar. | None. The engine key is only sent as the `Authorization` header. | **Not backed up.** If lost, open the engine's setup page and press *Connect to FloatBoard* again. |
+| Credentials (Keychain) | macOS Keychain, service `FloatBoard`, account `credentials`, one JSON list of name → secret. An older `<support>/google-credentials.json` is moved in on first launch and then deleted. `FLOATBOARD_CREDS` (checks) uses a file instead | `connector-key:<id>` (each engine's user key); optional Google Calendar sign-in (`client-id`, `client-secret`, `refresh:<email>`). Owner read/write only (0600). | The app | Yes (secrets) | The app, when you add a connector or sign in to Calendar. | None. The engine key is only sent as the `Authorization` header. | **Not backed up.** If lost, open the engine's setup page and press *Connect to FloatBoard* again. |
 | Backups folder | `<support>/Backups/` (`FLOATBOARD_BACKUPS`; none when only `FLOATBOARD_DB` is set) | `board-<yyyyMMdd-HHmmss>-<reason>.sqlite`: verified copies of the board. | The app | Yes (copies of the board) | The app: at launch, every 6 hours, before a schema upgrade, a re-check or a restore. | None (local only). | Daily 14, weekly 8, monthly 12; pre-migrate / pre-recheck / pre-restore kept 90 days. |
 | Engine archives | `<support>/archives/` (beside `Backups/`; follows `FLOATBOARD_BACKUPS`, none when only `FLOATBOARD_DB` is set) | `engine-<connector>-<yyyy-MM-dd>.jsonl`: old engine rows (`board_log` and `items`) saved by *Archive old data to this Mac*, one canonical JSON line per row (`{"row":{...},"table":"board_log"|"items"}`). Each run's lines are hashed (SHA-256) and confirmed with the engine before it deletes them. | The app (the engine no longer has these rows) | Yes (task titles, email subjects and senders) | The app, when you press Archive in the Connectors tab. | One way: engine to Mac, then deleted on the engine. | Not rotated or pruned: kept until you delete them. Not part of `Backups/`. |
 | Diagnostic log | `~/Library/Logs/FloatBoard.log` (no override) | Window-avoider lines: time, window sizes, state. | The app | No (no task text) | The app, when it moves windows clear of the bar. | None | None |
@@ -111,6 +111,7 @@ Every table, schema version 8 (`mac/Sources/FloatBoardCore/DB.swift`, fixture `m
 | **Outbox change** | `outbox` | One thing a connector still has to be told, written in the same transaction as the board change. | `uuid` (travels to the engine as `app_events.uuid`), `connector`, `kind` (done / deleted / changed / correction / settings / draft_reply), `payload_json`, `created`, `attempts`, `next_try`, `last_error`, `sent`, `detached` + `detach_reason` (no_connector / removed). |
 | **Connector** | `connectors` | An engine this board talks to, plus **your settings for it** (the truth; the engine holds a copy). | `id` (from the connector name, e.g. `email`), `name`, `base_url`, `capabilities_json`, `cursor` (proposals cursor), `settings_json` (group notes, rules, lists, learned, default group, auto-add ...), `settings_version`, `engine_settings_version`, `last_ok`, `unreachable_since`, `status_json` (last `/v2/status`). The key is in the credentials file, not here. |
 | **Archived connector settings** | `connector_archive` | A removed connector's settings, restored if the same id is added again. | (`id`, `removed_at`), `name`, `base_url`, `settings_json`, `settings_version`, `restored_at`. |
+| **Instruction version** | `instructions` | Every version of your own rules (`my_rules`), your WhatsApp rules (`chat_rules`) and what FloatBoard learned (`learned`), per connector. Nothing is overwritten; Settings › Rules & learning shows the log and restores any version. | `id`, `connector`, `part`, `text`, `source` (`start`, `you`, `learning`, `restore`), `note`, `at`. |
 | **Meta value** | `meta` | Small key/value facts: `first_launch_at`, `connector_added:<id>`, `connected_since:<id>`, `pushed_time_zone:<id>` (device time zone last sent to that engine), `user_removed:<id>`, `health_open`, `health_ack` (watchdog state). | `key`, `value`. |
 | (SQLite internal) | `sqlite_sequence` | SQLite's own counter for `AUTOINCREMENT` ids. | `name`, `seq`. |
 | **Proposal** (not a table) | arrives over `/v2/proposals` | A suggestion from a connector. Applied to `cards` / `corrections` / `connectors.settings_json`; the original is kept in `cards.proposal_json`. | `id`, `kind` (task / summary / learned / withdraw / correction / draft), `source_key`, content, `provenance` (section 4). |
@@ -354,7 +355,7 @@ erDiagram
 
 ## 4. The flows between them
 
-All traffic is HTTPS + JSON under `/v2`, started by the app, authenticated with the user key from the credentials file.
+All traffic is HTTPS + JSON under `/v2`, started by the app, authenticated with the user key from the app's credentials (Keychain).
 
 | Flow | Direction | Endpoint | What travels | Durability |
 |---|---|---|---|---|
@@ -408,7 +409,7 @@ How each proposal kind lands in the board:
 | **settings_version** | whole number, starts at 1 in the app | App (`connectors.settings_version`, +1 on every settings change and every learned update) | Sent with `PUT /v2/settings`; the engine keeps the highest and reports it back (`connectors.engine_settings_version`). |
 | **Proposals cursor** | `<created>\|<item id>\|<rowid high-water mark>`, e.g. `2026-01-01T09:00:00.000Z\|<uuid>\|42`. Opaque to the app. | Engine | `GET /v2/proposals?after=`; saved in `connectors.cursor` only after the page is applied. Items up to 2 minutes behind the cursor that committed late are re-sent; the app skips duplicates. |
 | **Connector id** | lower-case letters, digits and dashes from the connector name (e.g. `email`) | App | `cards.connector`, `outbox.connector`, actor `connector:<id>`, credentials name `connector-key:<id>`. |
-| **User key** | random secret | Engine (`/setup/admin` invite) | `Authorization` for `/v2`; the engine stores only its sha256 (`users.key_hash`), the app stores it in the credentials file. |
+| **User key** | random secret | Engine (`/setup/admin` invite) | `Authorization` for `/v2`; the engine stores only its sha256 (`users.key_hash`), the app stores it in its credentials (Keychain). |
 
 ## 6. Personal data inventory
 
@@ -419,6 +420,7 @@ How each proposal kind lands in the board:
 | Board `corrections` | `proposed_json`, `detail` | Email-derived text | Kept forever (rebuilds learning). |
 | Board `outbox` | `payload_json` (source key, verdict, changed titles, draft `notes`) | Email-derived text | Kept after sending (no pruning today). |
 | Board `connectors`, `connector_archive` | `settings_json` (group notes, own rules, sender lists, learned preferences), `base_url` | Preferences, addresses | Until removed; archived copy kept. |
+| Board `instructions` | Every version of your rules and learned preferences | Preferences | Kept for good (restorable). |
 | Board `activity` | `detail` (titles are left out of change details; errors may quote text) | Diagnostics | Pruned after 90 days. |
 | Board `areas` | `name` | Your group names | Until you delete the group. |
 | `Backups/` | Whole board | All of the above | 14 daily, 8 weekly, 12 monthly; special snapshots 90 days. |

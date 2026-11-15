@@ -157,7 +157,7 @@ private func draftProposal(id: String, mid: String, sent: String = "2026-11-07T1
     do {
         let fresh = root.appendingPathComponent("fresh8.sqlite")
         _ = try DB(url: fresh)
-        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("schema-v9.json"))) as? [[Any]] ?? []
+        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("schema-v10.json"))) as? [[Any]] ?? []
         let expected = raw.map { $0.map { $0 as? String } }
         let freshRows = norm(rows(fresh, masterSQL))
         check(!expected.isEmpty && freshRows == norm(rows(v7, masterSQL)) && freshRows == norm(expected),

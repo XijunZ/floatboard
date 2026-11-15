@@ -404,17 +404,18 @@ public final class Store: ObservableObject {
         let json = try db.query("SELECT settings_json FROM connectors WHERE id=?", [connector]) { DB.text($0, 0) }.first ?? ""
         var dict = try Self.settingsDict(json, connector)
         let old = dict["learned"] as? String ?? ""
-        guard old != text else { return false }
-        dict["learned"] = text
+        // Your edits since learning last wrote win over this run (Instructions.mergeLearned).
+        let base = try lastLearnedBase(connector: connector) ?? old
+        let merged = Instructions.mergeLearned(base: base, current: old, incoming: text)
+        guard old != merged else { return false }
+        dict["learned"] = merged
         let data = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         // A new version: the next settings push carries this text, so an older local copy can never overwrite it.
         try db.run("UPDATE connectors SET settings_json=?, settings_version=settings_version+1 WHERE id=?",
                    [String(decoding: data, as: UTF8.self), connector])
-        func lines(_ s: String) -> [String] { s.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
-        let (o, n) = (lines(old), lines(text))
-        let diff = n.filter { !o.contains($0) }.map { "+" + $0 } + o.filter { !n.contains($0) }.map { "-" + $0 }
-        activity("reconciler", .info, "Learned: " + (diff.isEmpty ? "(wording changed)" : diff.joined(separator: " ")),
-                 detail: text, trace: trace)
+        let note = merged == text ? "" : "kept your own edits to what was learned"
+        try recordInstructions(connector: connector, part: "learned", old: old, new: merged, source: .learning, note: note, at: Date())
+        activity("reconciler", .info, "Learned: " + Instructions.summary(old, merged), detail: merged, trace: trace)
         return true
     }
 

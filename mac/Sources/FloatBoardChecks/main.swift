@@ -518,9 +518,10 @@ MainActor.assumeIsolated {
         let r11 = try Reconciler.apply([prop("pl2", nil, kind: .learned, learned: "Prefers short titles\nAlways High for Anna")],
                                        connector: "rc", store: store, defaultGroup: "Personal", autoAdd: true)
         let lrows = store.trace("pl2")
-        check(r11.learnedUpdates == 1 && lrows.contains { $0.message.hasPrefix("Learned:") && $0.message.contains("+Always High for Anna")
-              && $0.message.contains("-Ignore newsletters") && !$0.message.contains("+Prefers") }, "learned_saved_and_logged")
+        check(r11.learnedUpdates == 1 && lrows.contains { $0.message.hasPrefix("Learned:") && $0.message.contains("+ Always High for Anna")
+              && $0.message.contains("− Ignore newsletters") && !$0.message.contains("+ Prefers") }, "learned_saved_and_logged")
         try store.db.run("UPDATE connectors SET settings_json=? WHERE id='rc'", ["{\"other\":\"keep\",\"learned\":\"x\"}"])
+        try store.db.run("DELETE FROM instructions WHERE connector='rc'") // a raw edit has no history: start afresh
         store.setLearned(connector: "rc", text: "y")
         let sj = (try? store.db.query("SELECT settings_json FROM connectors WHERE id='rc'") { DB.text($0, 0) })?.first ?? "" // try?-ok: failed query fails the check
         check(sj.contains("\"other\"") && sj.contains("\"learned\":\"y\""), "set_learned_preserves_other_settings_keys")
@@ -719,6 +720,7 @@ await phoneChecks()
 await whatsappChecks()
 await inputsChecks()
 await watchChecks()
+await instructionsChecks()
 oneTaskChecks()
 phoneLinksChecks()
 await linkEmailChecks()
