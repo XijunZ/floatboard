@@ -44,3 +44,18 @@ import FloatBoardCore
     do { _ = try WeChatNotifications.newChats(folder: missing, cursors: [:]) ; check(false, "wechat_missing_folder_is_reported") }
     catch { check(error is WeChatNotifications.ReadError, "wechat_missing_folder_is_reported") }
 }
+
+/// Updates: what GitHub's comparison means for this build.
+@MainActor func updateChecks() {
+    let built = "aaa", head = "bbb"
+    check(UpdateCheck.decide(built: "abc", compare: nil, head: "abc") == .upToDate, "update_same_commit_is_up_to_date")
+    let ahead: [String: Any] = ["status": "ahead", "ahead_by": 2, "commits": [["commit": ["message": "First change\n\nbody"]], ["commit": ["message": "Second change"]]]]
+    check(UpdateCheck.decide(built: built, compare: ahead, head: head) == .available(.init(head: head, count: 2, messages: ["Second change", "First change"])),
+          "update_available_lists_changes_newest_first")
+    if case .unknown = UpdateCheck.decide(built: built, compare: nil, head: head) { check(true, "update_unknown_when_build_is_not_on_github") }
+    else { check(false, "update_unknown_when_build_is_not_on_github") }
+    if case .unknown = UpdateCheck.decide(built: built, compare: ["status": "diverged"], head: head) { check(true, "update_refused_when_build_has_local_commits") }
+    else { check(false, "update_refused_when_build_has_local_commits") }
+    if case .unknown = UpdateCheck.decide(built: "", compare: nil, head: head) { check(true, "update_unknown_without_a_build_commit") }
+    else { check(false, "update_unknown_without_a_build_commit") }
+}

@@ -158,6 +158,7 @@ struct ModeSection: View {
                 .disabled(pasted.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
+        UpdatesBlock()
         HStack {
             Button("Copy diagnostics") { DiagnosticsCopy.copy(store: store) }
             Text("A support summary (no keys, email text or task titles) to paste to whoever is helping.")
@@ -601,3 +602,43 @@ struct KeysSection: View {
         }
     }
 }
+
+/// Updates: this build's version, what GitHub has, and the buttons (Settings › Mode).
+struct UpdatesBlock: View {
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        SettingsBlock(title: "Updates", help: "FloatBoard checks GitHub when it starts and once a day. Updating pulls the code, updates your online engine (if this Mac deploys it) and rebuilds the app, which then reopens.") {
+            HStack(spacing: 8) {
+                Text("This version: \(updater.built.isEmpty ? "unknown" : String(updater.built.prefix(7)))").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(stateText).font(.system(size: 11)).foregroundStyle(stateIsProblem ? Color.orange : Color.secondary)
+            }
+            if case .available(let a) = updater.state {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(a.messages, id: \.self) { Text("• " + $0).font(.system(size: 11)).lineLimit(1) }
+                }
+            }
+            HStack {
+                Button("Check now") { Task { await updater.check() } }.disabled(isBusy)
+                if case .available = updater.state { Button("Update now") { updater.update() }.keyboardShortcut(.defaultAction).disabled(isBusy) }
+                Toggle("Install updates automatically when FloatBoard starts", isOn: Binding(get: { updater.autoInstall }, set: { updater.autoInstall = $0 }))
+                    .toggleStyle(.checkbox).font(.system(size: 11))
+            }
+        }
+    }
+
+    private var isBusy: Bool { if case .updating = updater.state { return true }; return updater.state == .checking }
+    private var stateIsProblem: Bool { if case .failed = updater.state { return true }; if case .unknown = updater.state { return true }; return false }
+    private var stateText: String {
+        switch updater.state {
+        case .idle: return updater.lastChecked == nil ? "Not checked yet" : ""
+        case .checking: return "Checking…"
+        case .upToDate: return "Up to date" + (updater.lastChecked.map { " (checked \(Fmt.clock($0)))" } ?? "")
+        case .available(let a): return "\(a.count) change\(a.count == 1 ? "" : "s") available"
+        case .updating(let m): return m
+        case .failed(let why): return "Didn't update: \(why)"
+        case .unknown(let why): return why
+        }
+    }
+}
+
