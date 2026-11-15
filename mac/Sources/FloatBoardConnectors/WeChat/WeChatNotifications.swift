@@ -82,6 +82,9 @@ public enum WeChatNotifications {
         return out.joined(separator: "\n")
     }
 
+    /// WeChat is screened strictly (the person's choice): only one-to-one chats are sent, and each is marked like a muted
+    /// chat so the engine applies its stricter rule (only something clearly asked of the person becomes a task). Group
+    /// chats (a sender other than the chat in "Name: text") are skipped here and never leave the Mac.
     static func chats(_ notes: [Note], cursors: [String: Double], zone: TimeZone) -> [WhatsAppLocal.Chat] {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.timeZone = zone; f.dateFormat = "yyyy-MM-dd HH:mm"
         let iso = ISO8601DateFormatter()
@@ -90,9 +93,10 @@ public enum WeChatNotifications {
             let fresh = all.filter { $0.stamp > (cursors[chat] ?? 0) }.sorted { $0.stamp < $1.stamp }.suffix(perChat)
             guard let newest = fresh.last else { continue }
             let senders = Array(Set(fresh.map { $0.sender.isEmpty ? chat : $0.sender })).sorted()
-            let group = fresh.contains { !$0.sender.isEmpty && $0.sender != chat }
+            let group = all.contains { !$0.sender.isEmpty && $0.sender != chat }
+            if group { continue }
             let lines = fresh.map { "[\(f.string(from: $0.at))] \($0.sender.isEmpty ? chat : $0.sender): \($0.text)" }
-            out.append(WhatsAppLocal.Chat(key: "wx:\(chat):\(iso.string(from: newest.at))", chatID: chat, name: chat, group: group, muted: false,
+            out.append(WhatsAppLocal.Chat(key: "wx:\(chat):\(iso.string(from: newest.at))", chatID: chat, name: chat, group: false, muted: true,
                                           senders: senders, transcript: lines.joined(separator: "\n"), link: "weixin://",
                                           received: newest.at, newest: newest.stamp))
         }

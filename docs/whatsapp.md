@@ -43,8 +43,9 @@ account bans as a penalty (§8.5.1), and WeChat 4.x encrypts its local messages.
 Instead it reads **macOS's own notification history**: when a WeChat message arrives, macOS stores the notification it
 shows (chat name and preview text) in `~/Library/Group Containers/group.com.apple.usernoted/db2/db`. Every 5 minutes
 FloatBoard copies that database (as with WhatsApp), takes WeChat's notifications (`com.tencent.xinwechat`), groups them
-per chat (in groups the sender is taken from "Name: text") and sends new ones to the engine, which judges them like
-WhatsApp chats. Turn it on in Settings › Connections › Inputs › WeChat.
+per chat and sends new ones to the engine. Strict by choice: only one-to-one chats are sent (a group chat, recognised by
+"Name: text" from someone other than the chat, never leaves the Mac), and each is judged with the muted-chat rule, so
+only something clearly asked of the person becomes a task. Turn it on in Settings › Connections › Inputs › WeChat.
 
 - Needs **Full Disk Access** for FloatBoard (System Settings › Privacy & Security › Full Disk Access): macOS's notification
   history belongs to macOS, which the narrower "access data from other apps" permission doesn't cover.
