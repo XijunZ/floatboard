@@ -43,7 +43,11 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(SettingsSection.allCases) { s in
                     Button { ui.settingsSection = s } label: {
-                        Label(s.title, systemImage: s.icon)
+                        HStack(spacing: 8) {
+                            // Fixed-width icon column, so every title starts at the same place.
+                            Image(systemName: s.icon).frame(width: 20, alignment: .center)
+                            Text(s.title)
+                        }
                             .font(.system(size: 12, weight: ui.settingsSection == s ? .semibold : .regular))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 5).padding(.horizontal, 8)
