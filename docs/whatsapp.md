@@ -16,7 +16,7 @@ engine › Inputs › **WhatsApp** switch).
    - only messages from the last 7 days, at most 30 per chat, and never the same message twice;
    - messages with no words (stickers, reactions, emoji only, "ok", "thanks", a bare photo) are dropped.
 3. The chats left go to your engine (`POST /v2/chats`), with up to 3 earlier messages as context. Claude judges each chat
-   with the shared chat rulebook (`connectors/email/src/skills/chat-triage.md`) plus your own rules (Settings ›
+   with the shared chat rulebook (`engine/src/skills/chat-triage.md`) plus your own rules (Settings ›
    **Your own WhatsApp rules**), your groups and your past corrections. At most one task per chat.
 4. A task links back to the chat: one-to-one chats open in WhatsApp (on the phone as `wa.me/<number>`); groups open
    WhatsApp. Deleting a wrong task teaches FloatBoard like an email task does.

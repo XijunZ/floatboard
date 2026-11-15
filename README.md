@@ -13,10 +13,10 @@ To do / Doing / Done board with groups, due dates, importance and timestamps.
 
 | Folder | What it is |
 |---|---|
-| `app/` | The Mac app (Swift). `FloatBoardCore` is the offline board, database, backups and health checks. |
-| `connectors/email/` | An optional email connector: a Cloudflare Worker you run yourself. It also serves the phone app (Android and iPhone). See its [README](connectors/email/README.md). |
-| `connectors/outlook-web/` | Build plan for an Outlook on the web connector (a Chrome extension). See [PLAN.md](connectors/outlook-web/PLAN.md). |
-| `docs/` | The data model: every local data location and how each data point links into which field ([data-model.md](docs/data-model.md)). |
+| `mac/` | The Mac app (Swift). `FloatBoardCore` is the offline board, database, backups and health checks; `FloatBoardConnectors` talks to the engine and reads WhatsApp; `FloatBoard` is the user interface; `FloatBoardChecks` is the test suite. |
+| `engine/` | The optional engine: a Cloudflare Worker you run yourself that turns email, meeting notes, Outlook and WhatsApp messages into suggested tasks. It also serves the phone app (Android and iPhone). See its [README](engine/README.md). |
+| `outlook-extension/` | Optional Chrome extension that reads unread Outlook on the web emails for the engine. See its [README](outlook-extension/README.md). |
+| `docs/` | [data-model.md](docs/data-model.md) (every place data lives and how it links up), [phone-app.md](docs/phone-app.md), [whatsapp.md](docs/whatsapp.md). |
 
 ## Using the app
 
@@ -64,7 +64,7 @@ silently swallowed: the `check-silent.sh` script enforces that.
 ## Build and check
 
 ```
-cd app
+cd mac
 ./scripts/build-app.sh        # builds, signs ad-hoc, installs to /Applications
 swift build -c release        # build only
 ```
@@ -72,7 +72,7 @@ swift build -c release        # build only
 Checks never touch your real data. `FloatBoardChecks` refuses to run unless all three scratch paths are set:
 
 ```
-cd app
+cd mac
 scratch=$(mktemp -d)
 FLOATBOARD_DB=$scratch/board.sqlite FLOATBOARD_CREDS=$scratch/creds.json FLOATBOARD_BACKUPS=$scratch/Backups \
   swift run FloatBoardChecks
