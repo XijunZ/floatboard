@@ -7,15 +7,15 @@ own Cloudflare account, never in this repository. The app's database on your Mac
 your tasks; the email engine only proposes.
 
 Two checks keep this page honest: `FloatBoardChecks` fails if a table of the board database is not named here, and the
-engine test `connectors/email/test/data-model.test.ts` fails if a table created by the migrations (and not dropped
+engine test `engine/test/api/data-model.test.ts` fails if a table created by the migrations (and not dropped
 later) is not named here. If you add a table, add it to this page.
 
 Words used below:
 
 | Word | Meaning |
 |---|---|
-| **App** | The FloatBoard Mac app (`app/`). |
-| **Engine** | The optional email connector (`connectors/email/`): a Cloudflare Worker plus a D1 (SQLite) database, run in *your* Cloudflare account. |
+| **App** | The FloatBoard Mac app (`mac/`). |
+| **Engine** | The optional email connector (`engine/`): a Cloudflare Worker plus a D1 (SQLite) database, run in *your* Cloudflare account. |
 | **Board** | The app's database, `board.sqlite`. |
 | **Proposal** | Something the engine suggests to the app (a task, a meeting summary, learned preferences ...). |
 | **Event** | Something the app tells the engine (a task was done, deleted, changed ...). |
@@ -28,8 +28,8 @@ Words used below:
 ```mermaid
 flowchart LR
   subgraph Code["Code: this repository (GitHub)"]
-    C1["app/ (Swift)"]
-    C2["connectors/email/ (Worker + migrations)"]
+    C1["mac/ (Swift)"]
+    C2["engine/ (Worker + migrations)"]
     C3["*.example templates, docs/"]
   end
   subgraph Mac["Your Mac"]
@@ -37,7 +37,7 @@ flowchart LR
     M2["google-credentials.json (secrets)"]
     M3["Backups/"]
     M4["FloatBoard.log"]
-    M5["app/scripts/local.env"]
+    M5["mac/scripts/local.env"]
   end
   subgraph CF["Your Cloudflare"]
     F1["D1 database 'floatboard'"]
@@ -56,22 +56,22 @@ for which the repository holds only an `.example` template with placeholders.
 
 | Item | Holds | Personal? | Notes |
 |---|---|---|---|
-| `app/` | The Mac app's source, checks and fixtures (`app/Tests/Fixtures/*.json`, made-up values only). | No | |
-| `app/Sources/FloatBoardCore/LocalData.swift` | The list of every local location the app uses and its override variable. | No | The boundary in code: the app writes nowhere else. |
-| `app/scripts/local.env.example` | Template for `app/scripts/local.env`. | No | Placeholders only. |
-| `connectors/email/` | Engine source, `migrations/*.sql` (the D1 schema, applied in order), tests with fake values. | No | |
-| `connectors/email/wrangler.toml` | Deploy config with a zeroed `database_id`. | No | |
-| `connectors/email/wrangler.local.toml.example` | Template for your own deploy config. | No | Placeholders only. |
-| `connectors/email/.dev.vars.example` | Names of the engine's secrets, empty values. | No | `.dev.vars` (local dev secrets) is git-ignored. |
-| `connectors/email/src/skills/email-triage.md` | The shared triage skill every engine uses. | No | Nothing personal; your own rules live in the board. |
-| `docs/`, `connectors/outlook-web/PLAN.md` | This page and the Outlook connector build plan. | No | |
+| `mac/` | The Mac app's source, checks and fixtures (`mac/Tests/Fixtures/*.json`, made-up values only). | No | |
+| `mac/Sources/FloatBoardCore/LocalData.swift` | The list of every local location the app uses and its override variable. | No | The boundary in code: the app writes nowhere else. |
+| `mac/scripts/local.env.example` | Template for `mac/scripts/local.env`. | No | Placeholders only. |
+| `engine/` | Engine source, `migrations/*.sql` (the D1 schema, applied in order), tests with fake values. | No | |
+| `engine/wrangler.toml` | Deploy config with a zeroed `database_id`. | No | |
+| `engine/wrangler.local.toml.example` | Template for your own deploy config. | No | Placeholders only. |
+| `engine/.dev.vars.example` | Names of the engine's secrets, empty values. | No | `.dev.vars` (local dev secrets) is git-ignored. |
+| `engine/src/skills/email-triage.md` | The shared triage skill every engine uses. | No | Nothing personal; your own rules live in the board. |
+| `docs/` | This page and the other guides. | No | |
 
-Git ignores: `app/scripts/local.env`, `connectors/email/wrangler.local.toml`, `connectors/email/.dev.vars`,
+Git ignores: `mac/scripts/local.env`, `engine/wrangler.local.toml`, `engine/.dev.vars`,
 `node_modules`, `.wrangler/`, `.build/`, `build/`, `dist/`.
 
 ### 1b. Your Mac
 
-All paths come from `LocalData` (`app/Sources/FloatBoardCore/LocalData.swift`). `<support>` is
+All paths come from `LocalData` (`mac/Sources/FloatBoardCore/LocalData.swift`). `<support>` is
 `~/Library/Application Support/FloatBoard/`.
 
 | Item | Path (override) | Holds | Owner / source of truth | Personal? | Created by | Sync (direction) | Backup |
@@ -81,7 +81,7 @@ All paths come from `LocalData` (`app/Sources/FloatBoardCore/LocalData.swift`). 
 | Backups folder | `<support>/Backups/` (`FLOATBOARD_BACKUPS`; none when only `FLOATBOARD_DB` is set) | `board-<yyyyMMdd-HHmmss>-<reason>.sqlite`: verified copies of the board. | The app | Yes (copies of the board) | The app: at launch, every 6 hours, before a schema upgrade, a re-check or a restore. | None (local only). | Daily 14, weekly 8, monthly 12; pre-migrate / pre-recheck / pre-restore kept 90 days. |
 | Engine archives | `<support>/archives/` (beside `Backups/`; follows `FLOATBOARD_BACKUPS`, none when only `FLOATBOARD_DB` is set) | `engine-<connector>-<yyyy-MM-dd>.jsonl`: old engine rows (`board_log` and `items`) saved by *Archive old data to this Mac*, one canonical JSON line per row (`{"row":{...},"table":"board_log"|"items"}`). Each run's lines are hashed (SHA-256) and confirmed with the engine before it deletes them. | The app (the engine no longer has these rows) | Yes (task titles, email subjects and senders) | The app, when you press Archive in the Connectors tab. | One way: engine to Mac, then deleted on the engine. | Not rotated or pruned: kept until you delete them. Not part of `Backups/`. |
 | Diagnostic log | `~/Library/Logs/FloatBoard.log` (no override) | Window-avoider lines: time, window sizes, state. | The app | No (no task text) | The app, when it moves windows clear of the bar. | None | None |
-| Build settings | `app/scripts/local.env` (from `local.env.example`) | `BUNDLE_ID`. | You | Yes (your identifier) | You, by copying the template. | None | Your own |
+| Build settings | `mac/scripts/local.env` (from `local.env.example`) | `BUNDLE_ID`. | You | Yes (your identifier) | You, by copying the template. | None | Your own |
 | macOS preferences | `~/Library/Preferences/<bundle id>.plist` | Device settings: `barConfig` (+ `barConfig.broken`), `boardPinned`, `avoidWindows`, `axPrompted`, `googleAccounts` (Calendar account addresses). | The app | `googleAccounts` only | The app | None | None (device settings, not user data) |
 | CSV export | `~/Downloads/` | Cards and history, when you choose *Export to CSV*. | You | Yes | You | None | Your own |
 
@@ -92,13 +92,13 @@ All paths come from `LocalData` (`app/Sources/FloatBoardCore/LocalData.swift`). 
 | D1 database `floatboard` | Your Cloudflare account | Engine working state per user: inboxes, proposals (`items`), events from the app, a versioned **copy** of your settings, corrections for learning, run logs, setup sessions (section 3). | The engine for its working state; **a copy** for settings and corrections (the app holds the truth). | Yes | `npx wrangler d1 create floatboard`, then `migrations apply`. | Proposals down to the app; events and settings up from it. | Cloudflare D1 point-in-time restore. Nothing user-authored lives only here. |
 | Worker secrets | Worker settings in Cloudflare | `ENC_KEY` (encrypts stored tokens and keys), `ADMIN_KEY`. | You | Yes (secrets) | `npx wrangler secret put NAME`. | None | Your password manager (at least `ADMIN_KEY`). Losing `ENC_KEY` makes stored tokens unreadable: reconnect inboxes. |
 | Per-user secrets in D1 | `users`, `sources`, `google_clients` columns ending `_enc` | Claude key, Gmail refresh tokens, Google client secret, Fathom key and webhook secret, all AES-GCM encrypted with `ENC_KEY`. | The engine | Yes (secrets) | The engine's `/setup` page. | Never leave the engine. | With the D1 database. |
-| Deploy config | `connectors/email/wrangler.local.toml` on the deployer's machine (from the `.example`) | Your real `database_id`, `workers_dev` choice. | You | Yes (account ids) | You, by copying the template. | Used by `wrangler ... --config wrangler.local.toml`. | Your own |
+| Deploy config | `engine/wrangler.local.toml` on the deployer's machine (from the `.example`) | Your real `database_id`, `workers_dev` choice. | You | Yes (account ids) | You, by copying the template. | Used by `wrangler ... --config wrangler.local.toml`. | Your own |
 
 ---
 
 ## 2. Ontology: the app (board.sqlite)
 
-Every table, schema version 8 (`app/Sources/FloatBoardCore/DB.swift`, fixture `app/Tests/Fixtures/schema-v8.json`).
+Every table, schema version 8 (`mac/Sources/FloatBoardCore/DB.swift`, fixture `mac/Tests/Fixtures/schema-v8.json`).
 
 | Entity | Table | Meaning | Key fields |
 |---|---|---|---|
@@ -205,7 +205,7 @@ erDiagram
 
 ## 3. Ontology: the engine (D1)
 
-Every table left by `connectors/email/migrations/*.sql` applied in order. Every row is scoped by `user_id` (one engine
+Every table left by `engine/migrations/*.sql` applied in order. Every row is scoped by `user_id` (one engine
 can serve several people; each person's data is separate). `meeting_tasks` (0001) was dropped in 0017 and no longer exists.
 
 | Entity | Table | Meaning | Key fields |

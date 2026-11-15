@@ -2,8 +2,8 @@
 build/
 .DS_Store
 dist/
-connectors/email/wrangler.local.toml
-connectors/email/node_modules
+engine/wrangler.local.toml
+engine/node_modules
 
 # Personal values, never committed
-app/scripts/local.env
+mac/scripts/local.env

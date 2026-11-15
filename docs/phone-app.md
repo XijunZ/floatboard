@@ -68,14 +68,14 @@ second channel, so alerts no longer depend on Telegram.
 ## Tasks
 
 ### Task 1: ntfy alerts (engine)
-Migration `0025_ntfy.sql`: `users.ntfy_topic TEXT`. `src/alerts.ts`: `alertFor(env, userId)` fans out to channels
+Migration `0025_ntfy.sql`: `users.ntfy_topic TEXT`. `src/reminders/alerts.ts`: `alertFor(env, userId)` fans out to channels
 (moves the Telegram sender behind it); `sendNtfy`. Setup page section with turn on / new topic / turn off and a "Send a
 test alert" button. Tests: `ntfy_alert_sends_title_priority_click`, `alert_fanout_one_channel_failing_still_sends_others`,
 `ntfy_off_sends_nothing`, `setup_turns_ntfy_on_and_shows_topic_once_per_page`.
 
 ### Task 2: Pairing, passkeys and sessions (engine)
 Migration `0026_phone_app.sql`: `app_devices`, `app_credentials`, `app_sessions`, `app_pairings`, `app_challenges`.
-`src/app/auth.ts`, routes `/v2/app/pair` (user key), `/app/api/pair/options|finish`, `/app/api/login/options|finish`,
+`src/phone/auth.ts`, routes `/v2/app/pair` (user key), `/app/api/pair/options|finish`, `/app/api/login/options|finish`,
 `/app/api/logout`, `/app/api/me`. Setup page "Phones" list with Remove. Tests: pairing code single use and 10-minute
 expiry; finish with a valid registration creates device + credential + session cookie flags; login with assertion
 renews session; revoked device's session refused; session older than 90 days refused; cookie not accepted on /v2;
@@ -88,13 +88,13 @@ Migration `0027_board_mirror.sql`: `board_snapshots`, `phone_actions`. Routes `P
 user's session can't read or act; caps (500 cards, 200 pending actions, title 200 chars).
 
 ### Task 4: Web Push (engine)
-Migration `0028_web_push.sql`: `app_push`, `app_keys`. `src/app/webpush.ts`: VAPID keys on first use; `encrypt` per
+Migration `0028_web_push.sql`: `app_push`, `app_keys`. `src/phone/webpush.ts`: VAPID keys on first use; `encrypt` per
 RFC 8291; `sendPush`. Routes `GET /app/api/push/key`, `POST|DELETE /app/api/push/subscribe`, `POST /app/api/push/test`.
 Alert fan-out includes push. Tests: RFC 8291 example vector; VAPID JWT verifies with the public key; 410 deletes the
 subscription; fan-out pushes to every device of that user only.
 
 ### Task 5: The phone app (engine-served PWA)
-`src/app/page.ts` (HTML/CSS/JS as strings), `manifest.webmanifest`, `sw.js`, icons (SVG + 180/192/512 PNG). Screens:
+`src/phone/page.ts` (HTML/CSS/JS as strings), `manifest.webmanifest`, `sw.js`, icons (SVG + 180/192/512 PNG). Screens:
 pair, sign in, board (tabs To do / Doing / Watch / Done today; tap a task for its actions; add), settings (notifications
 on/off, test notification, sign out, how to install on Android / iPhone). Light and dark. Tests: routes return the right
 content types, CSP header, service worker scope `/app/`, manifest fields.
@@ -214,8 +214,8 @@ Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (
   notifications but lost its subscription subscribes again quietly; Settings shows "Notifications are off on this
   phone" with Turn on otherwise.
 - **Scope.** The task sheet says "Edit details on your Mac"; Settings says in one line what is Mac only.
-- Queue logic is pure functions in `src/app/sync-logic.ts`, embedded in `/app/app.js` and tested as is
-  (`test/phone-sync.test.ts`). Layout checked in headless Chrome at 360, 390 and 430 px, light and dark, long, CJK and
+- Queue logic is pure functions in `src/phone/sync-logic.ts`, embedded in `/app/app.js` and tested as is
+  (`test/phone/phone-sync.test.ts`). Layout checked in headless Chrome at 360, 390 and 430 px, light and dark, long, CJK and
   unbroken titles, 34 tasks in one tab (titles clamp at 3 lines on the list, full in the sheet).
 
 ## Database size: warning and archive to the Mac (built)
