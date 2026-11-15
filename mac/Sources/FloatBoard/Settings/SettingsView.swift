@@ -620,6 +620,7 @@ struct UpdatesBlock: View {
             }
             HStack {
                 Button("Check now") { Task { await updater.check() } }.disabled(isBusy)
+                // Only when GitHub has something newer than this version.
                 if case .available = updater.state { Button("Update now") { updater.update() }.keyboardShortcut(.defaultAction).disabled(isBusy) }
                 Toggle("Install updates automatically when FloatBoard starts", isOn: Binding(get: { updater.autoInstall }, set: { updater.autoInstall = $0 }))
                     .toggleStyle(.checkbox).font(.system(size: 11))
@@ -631,7 +632,7 @@ struct UpdatesBlock: View {
     private var stateIsProblem: Bool { if case .failed = updater.state { return true }; if case .unknown = updater.state { return true }; return false }
     private var stateText: String {
         switch updater.state {
-        case .idle: return updater.lastChecked == nil ? "Not checked yet" : ""
+        case .idle: return updater.lastChecked == nil ? "Checking shortly…" : ""
         case .checking: return "Checking…"
         case .upToDate: return "Up to date" + (updater.lastChecked.map { " (checked \(Fmt.clock($0)))" } ?? "")
         case .available(let a): return "\(a.count) change\(a.count == 1 ? "" : "s") available"
