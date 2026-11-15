@@ -26,10 +26,10 @@ import FloatBoardConnectors
     }
     /// A healthy connector (synced a minute ago, connected for 10 h, engine ran a minute ago) with overrides.
     func connector(_ id: String = "h1", url: String = "https://h1.example/path", unreachable: Date? = nil, statusJSON: String? = nil,
-                   connectedSince: Date? = nil) {
+                   connectedSince: Date? = nil, lastOK: Date? = nil) {
         store.performForTest {
             try store.db.run("INSERT OR REPLACE INTO connectors(id,name,base_url,settings_json,status_json,last_ok,unreachable_since) VALUES(?,?,?,?,?,?,?)",
-                             [id, id.uppercased(), url, "{}", statusJSON ?? status(runOK: .some(ago(60))), ago(60), unreachable])
+                             [id, id.uppercased(), url, "{}", statusJSON ?? status(runOK: .some(ago(60))), lastOK ?? ago(60), unreachable])
             try store.db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)",
                              ["connected_since:\(id)", String((connectedSince ?? ago(10 * h)).timeIntervalSince1970)])
         }
@@ -59,6 +59,9 @@ import FloatBoardConnectors
         let waitingFresh = ids()
         reset(); connector(statusJSON: status(runOK: .some(ago(3 * h))))
         let stalled = ids()
+        // A Mac that slept 3 hours: its saved status is from before the sleep, the engine ran fine then. No alarm.
+        reset(); connector(statusJSON: status(runOK: .some(ago(3 * h + 60))), lastOK: ago(3 * h))
+        check(ids() == [], "health_no_stall_alarm_after_the_mac_slept")
         reset(); connector(statusJSON: status(runOK: .some(nil)), connectedSince: ago(3 * h))
         let stalledMissing = ids()
         reset(); connector(statusJSON: status(runOK: .some(nil)), connectedSince: ago(1 * h))

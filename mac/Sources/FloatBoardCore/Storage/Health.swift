@@ -79,11 +79,12 @@ public enum Health {
             let safe = Redact.attention(line)
             out.append(HealthProblem(id: "attention:\(c.id):\(stableHash(normalise(safe)))", message: "\(c.name): \(safe)", since: c.lastOK ?? now))
         }
-        // Engine stall: only judged while the connector is reachable (otherwise the status is just old).
+        // Engine stall: only judged while the connector is reachable, and against when the status was last fetched (a Mac
+        // that slept has an old status: the engine kept running meanwhile, so "now" would raise a false alarm).
         if c.unreachableSince == nil {
             let runOK = status["last_run_ok"] as? String
             if let runOK {
-                if let d = parseDate(runOK), now.timeIntervalSince(d) > 2 * hour {
+                if let d = parseDate(runOK), (c.lastOK ?? now).timeIntervalSince(d) > 2 * hour {
                     out.append(HealthProblem(id: "engine-stalled:\(c.id)", message: "\(c.name)'s engine hasn't finished a run for over 2 hours", since: d))
                 }
             } else if let connected = connectedSince(c.id, store), now.timeIntervalSince(connected) > 2 * hour {
