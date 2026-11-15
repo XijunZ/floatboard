@@ -33,22 +33,26 @@ export class ChatSource implements Source {
       .bind(nowISO(), this.row.user_id, messageId).run();
   }
 
-  private toMessage(r: Stored): Message {
-    const app = APP_NAMES[r.app] ?? r.app;
-    return {
-      messageId: r.row_key,
-      sourceId: this.row.id,
-      from: r.is_group ? `${r.chat_name} (${app} group)` : `${r.chat_name} (${app})`,
-      fromName: r.chat_name,
-      to: [], cc: [],
-      subject: `${app}${r.is_group ? " group" : ""}: ${r.chat_name}`,
-      date: r.received,
-      sentAt: r.received,
-      labels: ["UNREAD"],
-      headers: {},
-      text: r.transcript,
-      link: r.link,
-      chat: { app, group: !!r.is_group, muted: !!r.muted, name: r.chat_name, senders: r.senders },
-    };
-  }
+  private toMessage(r: Stored): Message { return chatMessage(r, this.row.id); }
+
+}
+
+/** A stored chat as a message for judging. */
+export function chatMessage(r: Stored, sourceId: string): Message {
+  const app = APP_NAMES[r.app] ?? r.app;
+  return {
+    messageId: r.row_key,
+    sourceId: sourceId,
+    from: r.is_group ? `${r.chat_name} (${app} group)` : `${r.chat_name} (${app})`,
+    fromName: r.chat_name,
+    to: [], cc: [],
+    subject: `${app}${r.is_group ? " group" : ""}: ${r.chat_name}`,
+    date: r.received,
+    sentAt: r.received,
+    labels: ["UNREAD"],
+    headers: {},
+    text: r.transcript,
+    link: r.link,
+    chat: { app, group: !!r.is_group, muted: !!r.muted, name: r.chat_name, senders: r.senders },
+  };
 }

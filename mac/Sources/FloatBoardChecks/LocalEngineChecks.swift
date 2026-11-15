@@ -107,3 +107,60 @@ import FloatBoardCore
         check(LocalMode.isOn(store: store), "mac_only_again_reuses_its_engine")
     } catch { check(false, "mac_only: \(error)") }
 }
+
+/// "On this Mac": judging with Apple's model (faked here) through the engine inside the app, and the comparison.
+@MainActor func onDeviceChecks() async {
+    guard (try? LocalEngine.bundledScript()) != nil else { return } // try?-ok: reported by localEngineChecks
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-ondevice-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: temp cleanup
+    let store: Store
+    do { store = Store(db: try DB(url: root.appendingPathComponent("board.sqlite"))) } catch { check(false, "ondevice setup: \(error)"); return }
+    final class Seen: @unchecked Sendable { var device: [String] = []; var claude = 0 }
+    let seen = Seen()
+    let realModel = ProcessInfo.processInfo.environment["FLOATBOARD_REAL_ONDEVICE"] == "1" // a manual run against Apple's model
+    if !realModel { OnDeviceModel.answerOverride = { instructions, prompt in
+        seen.device.append(instructions)
+        return "```json\n{\"action_required\":true,\"title\":\"Reply to Anna\",\"why\":\"She asked\",\"due\":null,\"has_time\":false,\"importance\":1,\"group\":null,\"urgent\":false}\n```"
+    } }
+    LocalMode.transportOverride = { req in
+        if req.url?.host == "api.anthropic.com" {
+            seen.claude += 1
+            let text = #"{"action_required":false,"title":"","why":"","due":null,"has_time":false,"importance":1,"group":null,"urgent":false}"#
+            let body: [String: Any] = ["id": "m", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "stop_reason": "end_turn",
+                                       "stop_sequence": NSNull(), "content": [["type": "text", "text": text]], "usage": ["input_tokens": 1, "output_tokens": 1]]
+            return (try JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: ["content-type": "application/json"])!)
+        }
+        return (Data("{}".utf8), HTTPURLResponse(url: req.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+    }
+    LocalMode.resetForTesting()
+    defer { LocalMode.transportOverride = nil; OnDeviceModel.answerOverride = nil; LocalMode.resetForTesting() }
+    do {
+        try Keys.setClaude("sk-od", store: store)
+        try await LocalMode.enable(store: store)
+        guard let info = store.connectors.first(where: { $0.id == LocalMode.connectorID }),
+              let client = ConnectorAccounts.client(for: info, store: store) else { check(false, "ondevice client"); return }
+        _ = await Keys.push(connector: info.id, store: store, client: client)
+        let st = try await client.status()
+        check(st.schema.first { $0.key == "model_judge" }?.options?.contains("On this Mac") == true, "on_this_mac_offered_in_mac_only_mode")
+        try await client.putSettings(values: ["model_judge": .string("On this Mac")], version: 50)
+        let chat = #"{"app":"whatsapp","chats":[{"key":"wa:447700900999@s.whatsapp.net:OD1","name":"Anna","group":false,"senders":["Anna"],"transcript":"[2026-11-13 09:12] Anna: Can you call me back?","link":"","received":"2026-11-13T09:12:00Z"}]}"#
+        var r = URLRequest(url: URL(string: LocalMode.address + "/v2/chats")!)
+        r.httpMethod = "POST"; r.httpBody = Data(chat.utf8)
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.setValue("Bearer \(try ConnectorAccounts.key(for: info.id) ?? "")", forHTTPHeaderField: "Authorization")
+        _ = try await LocalMode.handle(r)
+        await LocalMode.tick(store: store)
+        let page = try await client.proposals(after: nil)
+        if realModel {
+            // Apple's model: its answers must be usable (whether it calls something a task is what Compare measures).
+            let c0 = try await client.compareModels(limit: 5)
+            print("REAL on-device: proposals \(page.items.count), compare n=\(c0.n) agree=\(c0.agree) unusable=\(c0.unusable ?? -1)")
+            check(c0.unusable == 0 && seen.claude == 1, "on_this_mac_real_model_answers_are_usable")
+            return
+        }
+        check(page.items.contains { $0.title == "Reply to Anna" } && seen.device.first?.contains("JSON schema") == true && seen.claude == 0,
+              "on_this_mac_judges_without_claude")
+        let c = try await client.compareModels(limit: 5)
+        check(c.n == 1 && c.agree == 0 && seen.claude == 1, "comparison_runs_both_and_counts_agreement: n=\(c.n) agree=\(c.agree) claude=\(seen.claude) \(c.note ?? "")")
+    } catch { check(false, "on_this_mac: \(error)") }
+}

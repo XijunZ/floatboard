@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "node vercel/build.mjs",
+  "outputDirectory": "vercel/public",
+  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/api/engine" }],
+  "crons": [{ "path": "/api/cron", "schedule": "*/5 * * * *" }]
+}

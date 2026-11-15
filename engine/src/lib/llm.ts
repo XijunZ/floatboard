@@ -8,18 +8,24 @@ export const HAIKU = "claude-haiku-5-5";
 export const SONNET = "claude-sonnet-5-5";
 
 /** The models a person can choose for each job (Settings › Rules & learning › AI model). */
-export const MODELS: Record<string, string> = { haiku: HAIKU, sonnet: SONNET };
+export const ON_DEVICE = "on-device";
+export const MODELS: Record<string, string> = { haiku: HAIKU, sonnet: SONNET, "on this mac": ON_DEVICE };
+/** "On this Mac" (Apple's on-device model) exists only in the engine inside the Mac app, and only for judging. */
+export const onDeviceAllowed = (env: Env, job: Job) => env.ON_DEVICE === "1" && job === "judge";
 /** List prices in US dollars per million tokens (prompts under 100K tokens), for the app's cost estimate. */
-export const PRICES: Record<string, { input: number; output: number }> = { [HAIKU]: { input: 0.10, output: 0.50 }, [SONNET]: { input: 2, output: 10 } };
-export type Job = "judge" | "recap" | "learn" | "reply";
-export const DEFAULT_MODEL: Record<Job, "haiku" | "sonnet"> = { judge: "haiku", recap: "haiku", learn: "haiku", reply: "sonnet" };
-const COLUMN: Record<Job, string | null> = { judge: "model_judge", recap: "model_recap", learn: "model_judge", reply: "model_reply" };
+export const PRICES: Record<string, { input: number; output: number }> = { [HAIKU]: { input: 0.10, output: 0.50 }, [SONNET]: { input: 2, output: 10 },
+  [ON_DEVICE]: { input: 0, output: 0 } };
+export type Job = "judge" | "recap" | "learn" | "reply" | "compare";
+export const DEFAULT_MODEL: Record<Job, "haiku" | "sonnet"> = { judge: "haiku", recap: "haiku", learn: "haiku", reply: "sonnet", compare: "haiku" };
+const COLUMN: Record<Job, string | null> = { judge: "model_judge", recap: "model_recap", learn: "model_judge", reply: "model_reply", compare: null };
 
 /** The model id the person chose for `job` (or its default). */
 export async function chosenModel(env: Env, userId: string, job: Job): Promise<string> {
   const col = COLUMN[job];
   const v = col ? (await env.DB.prepare(`SELECT ${col} AS m FROM settings WHERE user_id=?`).bind(userId).first<{ m: string | null }>())?.m : null;
-  return MODELS[(v ?? DEFAULT_MODEL[job]).toLowerCase()] ?? MODELS[DEFAULT_MODEL[job]];
+  const id = MODELS[(v ?? DEFAULT_MODEL[job]).toLowerCase()];
+  if (!id || (id === ON_DEVICE && !onDeviceAllowed(env, job))) return MODELS[DEFAULT_MODEL[job]];
+  return id;
 }
 
 export type Meter = { env: Env; userId: string; job: Job; model: string };
@@ -71,7 +77,10 @@ export async function costEstimate(env: Env, userId: string) {
     const j = (jobs[r.job] ??= { calls: 0, usd: 0, usd_if: {} });
     j.calls += r.calls;
     j.usd += price(r.model, r.i, r.o);
-    for (const [k, id] of Object.entries(MODELS)) j.usd_if[k] = (j.usd_if[k] ?? 0) + price(id, r.i, r.o);
+    for (const [k, id] of Object.entries(MODELS)) {
+      if (id === ON_DEVICE && !onDeviceAllowed(env, r.job as Job)) continue;
+      j.usd_if[k] = (j.usd_if[k] ?? 0) + price(id, r.i, r.o);
+    }
   }
   const round = (n: number) => Math.round(n * 100) / 100;
   return Object.fromEntries(Object.entries(jobs).map(([k, v]) => [k, { calls: v.calls, usd: round(v.usd),

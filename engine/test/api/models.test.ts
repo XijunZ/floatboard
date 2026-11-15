@@ -52,3 +52,21 @@ describe("model choice and cost", () => {
     expect(bad.status).toBe(400);
   });
 });
+
+describe("on this mac", () => {
+  it("only_offered_by_the_engine_inside_the_mac_app_and_only_for_judging", async () => {
+    const { schemaFor } = await import("../../src/routes/v2");
+    const { chosenModel, ON_DEVICE } = await import("../../src/lib/llm");
+    const online = schemaFor(env as any).find((f) => f.key === "model_judge")!;
+    expect(online.options).toEqual(["Haiku", "Sonnet"]);
+    const mac = { ...(env as any), ON_DEVICE: "1" };
+    expect(schemaFor(mac).find((f) => f.key === "model_judge")!.options).toEqual(["Haiku", "Sonnet", "On this Mac"]);
+    const u = await keyed("OD");
+    await env.DB.prepare("UPDATE settings SET model_judge='on this mac', model_reply='on this mac' WHERE user_id=?").bind(u.id).run();
+    expect(await chosenModel(mac, u.id, "judge")).toBe(ON_DEVICE);
+    expect(await chosenModel(mac, u.id, "reply")).toBe(SONNET); // never for drafts
+    expect(await chosenModel(env as any, u.id, "judge")).toBe(HAIKU); // online: falls back
+    const r = await call("/v2/models/compare", { key: u.key, method: "POST", body: "{}" });
+    expect(r.status).toBe(400);
+  });
+});
