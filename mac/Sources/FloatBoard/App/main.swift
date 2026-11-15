@@ -121,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         connectors = ConnectorRunner(store: store)
         connectors.start()
+        Updater.shared.start(store: store)
         NotificationCenter.default.addObserver(forName: .floatBoardShowActivity, object: nil, queue: .main) { [weak self] n in
             MainActor.assumeIsolated { if n.object as? String == "open" { self?.showActivity() } }
         }
@@ -265,6 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             add(m, "FloatBoard Guide", #selector(showGuide), "?", target: self)
             add(m, "Activity…", #selector(showActivity), "a", [.command, .option], target: self)
             add(m, "Send Feedback…", #selector(showFeedback), target: self)
+            add(m, "Check for Updates…", #selector(checkForUpdates), target: self)
             m.addItem(.separator())
             add(m, "Restore from backup…", #selector(restoreBackup), target: self)
         }
@@ -402,6 +404,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func barSettings() { ui.tab = .bar; ui.quickAdding = false; expand() }
     @objc func showSettings() { ui.tab = .settings; ui.quickAdding = false; expand() }
     @objc func showFeedback() { FeedbackWindow.show(store: store) }
+    @objc func checkForUpdates() {
+        ui.settingsSection = .mode; showSettings()
+        Task { await Updater.shared.check() }
+    }
     @objc func manageGroups() { ui.tab = .groups; ui.quickAdding = false; expand() }
 
     private func showError(_ title: String, _ error: Error) {
@@ -425,6 +431,10 @@ extension AppDelegate: NSMenuDelegate {
             menu.addItem(item("Put board back above the bar", #selector(resetBoard)))
         }
 
+        if case .available(let a) = Updater.shared.state {
+            menu.addItem(.separator())
+            menu.addItem(item("Update available (\(a.count) change\(a.count == 1 ? "" : "s"))…", #selector(checkForUpdates)))
+        }
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "Set up"))
         menu.addItem(item("Bar…", #selector(barSettings)))

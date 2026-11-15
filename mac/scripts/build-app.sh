@@ -7,6 +7,10 @@ cd "$(dirname "$0")/.."
 BUNDLE_ID=com.example.floatboard
 FEEDBACK_URL=""
 [ -f scripts/local.env ] && . scripts/local.env
+# What this build is, for "Check for Updates": its commit, its source folder, and the GitHub repository it came from.
+SOURCE_DIR="$(cd .. && pwd)"
+BUILD_COMMIT="$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
+GITHUB_REPO="$(git -C "$SOURCE_DIR" remote get-url origin 2>/dev/null | sed -nE 's#.*github\.com[:/]([^/]+/[^/.]+)(\.git)?$#\1#p')"
 swift build -c release
 APP=build/FloatBoard.app
 rm -rf "$APP"
@@ -39,6 +43,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   </dict></array>
   <key>NSHighResolutionCapable</key><true/>
   <key>FloatBoardFeedbackURL</key><string>${FEEDBACK_URL}</string>
+  <key>FloatBoardCommit</key><string>${BUILD_COMMIT}</string>
+  <key>FloatBoardSourceDir</key><string>${SOURCE_DIR}</string>
+  <key>FloatBoardRepo</key><string>${GITHUB_REPO}</string>
 </dict></plist>
 PLIST
 # Sign with the local "FloatBoard Local Signing" certificate if present, so macOS keeps the
