@@ -16,7 +16,8 @@ To do / Doing / Done board with groups, due dates, importance and timestamps.
 | `mac/` | The Mac app (Swift). `FloatBoardCore` is the offline board, database, backups and health checks; `FloatBoardConnectors` talks to the engine and reads WhatsApp; `FloatBoard` is the user interface; `FloatBoardChecks` is the test suite. |
 | `engine/` | The optional engine: a Cloudflare Worker you run yourself that turns email, meeting notes, Outlook and WhatsApp messages into suggested tasks. It also serves the phone app (Android and iPhone). See its [README](engine/README.md). |
 | `outlook-extension/` | Optional Chrome extension that reads unread Outlook on the web emails for the engine. See its [README](outlook-extension/README.md). |
-| `docs/` | [data-model.md](docs/data-model.md) (every place data lives and how it links up), [phone-app.md](docs/phone-app.md), [whatsapp.md](docs/whatsapp.md). |
+| `feedback/` | The small service that receives Help › Send Feedback… and files each message as a private GitHub issue. Run by whoever hands out FloatBoard. See its [README](feedback/README.md). |
+| `docs/` | [data-model.md](docs/data-model.md) (every place data lives and how it links up), [phone-app.md](docs/phone-app.md), [whatsapp.md](docs/whatsapp.md), [architecture.md](docs/architecture.md) (how the pieces fit, and where it is going). |
 
 ## Using the app
 

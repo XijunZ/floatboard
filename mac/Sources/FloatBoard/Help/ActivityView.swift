@@ -7,7 +7,7 @@ extension Notification.Name {
     static let floatBoardShowActivity = Notification.Name("FloatBoardShowActivity")
 }
 
-/// Copies a support dump to the clipboard (Connectors tab and Activity window).
+/// Copies a support dump to the clipboard (Settings and Activity window).
 @MainActor
 enum DiagnosticsCopy {
     static func copy(store: Store) {

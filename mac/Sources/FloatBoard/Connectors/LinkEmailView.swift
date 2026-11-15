@@ -57,7 +57,7 @@ struct LinkEmailSearch: View {
         searching = true; error = nil; problems = []
         defer { searching = false; searched = true }
         let clients = store.connectors.compactMap { info in ConnectorAccounts.client(for: info, store: store).map { (info.id, $0) } }
-        guard !clients.isEmpty else { hits = []; error = "Connect the email engine first (Connectors tab)."; return }
+        guard !clients.isEmpty else { hits = []; error = "Connect your engine first (Settings › Mode)."; return }
         var found: [(String, EmailHit)] = []
         var failures: [String] = []
         for (id, client) in clients {

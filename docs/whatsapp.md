@@ -29,7 +29,7 @@ FloatBoard never logs in to WhatsApp, never uses a linked-device slot, never run
 WhatsApp app and never sends anything. WhatsApp's terms forbid accessing its *Services* through automated or
 unauthorised means and reverse engineering them; reading a file on your own Mac involves no WhatsApp service at all,
 and WhatsApp cannot see it. It is not an official integration: a WhatsApp update can change the file, in which case
-the Connectors tab says the database couldn't be read and nothing is sent.
+Settings › Inputs says the database couldn't be read and nothing is sent.
 
 Rejected: WhatsApp Web automation (Baileys, whatsapp-web.js), which is the automated access the terms forbid and is
 banned in practice; the WhatsApp Business API, which only works for business numbers.

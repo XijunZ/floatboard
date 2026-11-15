@@ -11,7 +11,7 @@ extension Notification.Name {
     static let floatBoardWhatsAppRead = Notification.Name("FloatBoardWhatsAppRead")
 }
 
-/// What the Connectors tab and the bar say about a connector's health.
+/// What Settings and the bar say about a connector's health.
 @MainActor
 enum ConnectorHealth {
     static let unreadableStatus = "Couldn't read this connector's status"

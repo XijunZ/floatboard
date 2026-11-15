@@ -29,7 +29,7 @@ second channel, so alerts no longer depend on Telegram.
 
 ## Decisions
 
-1. **Sign-in: passkey + device session.** The Mac's Connectors tab shows "Pair a phone": a QR code of
+1. **Sign-in: passkey + device session.** The Mac's Settings › Outputs › Phone app shows "Pair a phone": a QR code of
    `<engine>/app/#pair=<code>` (random 32 bytes, valid 10 minutes, one use, stored hashed). The phone opens it, the user
    taps "Set up this phone", and a passkey is created (WebAuthn, resident key, user verification required, attestation
    "none"). The engine then sets a session cookie `fb_session` (random 32 bytes, stored hashed; HttpOnly, Secure,
@@ -102,7 +102,7 @@ content types, CSP header, service worker scope `/app/`, manifest fields.
 ### Task 6: Mac app
 `ConnectorClient`: `pairPhone`, `putBoard`, `phoneActions`, `ackPhoneActions` (404 = engine without the phone app:
 skipped quietly). `ConnectorSync`: push the board (only when its hash changed) and apply phone actions. A 2-minute
-phone-actions poll and a 10-second debounced push after local changes. Connectors tab: "Pair a phone…" sheet with QR
+phone-actions poll and a 10-second debounced push after local changes. Settings › Outputs: "Pair a phone…" sheet with QR
 (CoreImage) and the address. Checks: actions applied once and acked; add creates a To do task in the named group (or the
 first); done on a connector card queues the connector event; unknown id acked and logged; board payload has only open
 tasks + done today.
@@ -224,7 +224,7 @@ Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (
   always ("Database: 1.4 MB of 500 MB"); above 250 MB a warning points to the Mac's archive button (D1 free limit is
   500 MB per database). `GET /v2/status` carries it as `db_size_bytes` (a number, or null when D1 doesn't say). It is the
   whole engine database, all users.
-- **Archive old data to this Mac** (Mac app, Connectors tab, per connector and per user): the card shows the engine's
+- **Archive old data to this Mac** (Mac app, Settings › Mode, the engine's ⋯ menu, per user): the card shows the engine's
   database size and "Archive old data to this Mac…". The sheet offers a cut-off of 3, 6 (default) or 12 months
   (never less than 92 days back), says in two lines what happens, and shows progress and the result ("Saved 1,234
   entries to engine-email-2026-11-12.jsonl; removed from the engine."), with Show in Finder.

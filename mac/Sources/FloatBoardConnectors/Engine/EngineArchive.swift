@@ -2,7 +2,7 @@ import CryptoKit
 import FloatBoardCore
 import Foundation
 
-/// "Archive old data to this Mac" (Connectors tab): moves an engine's old change log and old email task records into a
+/// "Archive old data to this Mac" (Settings): moves an engine's old change log and old email task records into a
 /// file on this Mac, then has the engine delete exactly those rows (docs/phone-app.md, last section).
 ///
 /// One run: page `GET /v2/archive` until the cursor ends (nothing is written if any page fails); append the run's

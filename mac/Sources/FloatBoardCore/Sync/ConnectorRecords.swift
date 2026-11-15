@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-/// One row of the `connectors` table, as the Connectors tab shows it. The connector's key is not here:
+/// One row of the `connectors` table, as Settings shows it. The connector's key is not here:
 /// it lives in the credentials file (FloatBoardConnectors), never in the database.
 public struct ConnectorInfo: Identifiable, Equatable {
     public var id: String

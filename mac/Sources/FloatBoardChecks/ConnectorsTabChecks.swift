@@ -3,7 +3,7 @@ import FloatBoardCore
 import Foundation
 import SQLite3
 
-/// Checks for the Connectors tab's data side: connect links, settings saves, removing a connector.
+/// Checks for Settings's data side: connect links, settings saves, removing a connector.
 @MainActor func connectorsTabChecks(_ store: Store) {
     // connect_link_parsed
     func parsed(_ s: String) -> (url: URL, key: String, name: String)? { URL(string: s).flatMap(ConnectLink.parse) }

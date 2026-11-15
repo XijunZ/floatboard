@@ -9,7 +9,7 @@ import Network
 /// delivered reply draft waits for its answer (that connector only), and when the
 /// network comes back. The phone step alone runs every 2 minutes and 10 seconds after local board changes.
 /// One sync at a time per connector. The sync itself is `ConnectorSync` (Connectors target).
-/// Which connectors are being re-checked right now (read by the Connectors tab to disable the button and show progress).
+/// Which connectors are being re-checked right now (read by Settings to disable the button and show progress).
 @MainActor
 final class RecheckState: ObservableObject {
     static let shared = RecheckState()
@@ -138,7 +138,7 @@ final class ConnectorRunner {
         trigger("board open")
     }
 
-    /// Syncs every connector (or those in `only`) that has an address and a key (added from the Connectors tab).
+    /// Syncs every connector (or those in `only`) that has an address and a key (added from Settings).
     func trigger(_ reason: String, only: Set<String>? = nil) {
         store.expireReplyDrafts(now: Date())
         for info in store.connectors where only?.contains(info.id) ?? true {

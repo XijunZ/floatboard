@@ -26,7 +26,7 @@ database_id = "00000000-0000-0000-0000-000000000000" # yours: printed by `npx wr
 migrations_dir = "migrations"
 
 [triggers]
-crons = ["0 * * * *"]
+crons = ["*/5 * * * *"]
 
 [observability]
 enabled = true

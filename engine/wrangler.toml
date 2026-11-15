@@ -16,7 +16,7 @@ database_id = "00000000-0000-0000-0000-000000000000" # set by `wrangler d1 creat
 migrations_dir = "migrations"
 
 [triggers]
-# Hourly: reading email and housekeeping. Every 15 minutes: due reminders only (src/index.ts tells them apart).
+# One schedule, every 5 minutes: reading, due reminders and Watch replies (src/index.ts decides which jobs each run does).
 crons = ["*/5 * * * *"]
 
 [observability]
