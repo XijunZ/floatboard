@@ -34,9 +34,20 @@ Settings › Inputs says the database couldn't be read and nothing is sent.
 Rejected: WhatsApp Web automation (Baileys, whatsapp-web.js), which is the automated access the terms forbid and is
 banned in practice; the WhatsApp Business API, which only works for business numbers.
 
-## WeChat
+## WeChat (from macOS's notifications)
 
-Not supported. The Weixin service agreement forbids plug-ins and unauthorised third-party tools (§8.2.1.4), reading or
-controlling the app's data or interface (§8.2.1.6) and reverse engineering (§8.2.1.2), with account bans as a penalty
-(§8.5.1). WeChat 4.x encrypts its local messages, and web or bot logins would sign out the Mac app. Reading macOS's own
-notification history (where WeChat's banners land) is being looked at separately.
+FloatBoard never reads WeChat itself: the Weixin service agreement forbids plug-ins and unauthorised third-party tools
+(§8.2.1.4), reading or controlling the app's data or interface (§8.2.1.6) and reverse engineering (§8.2.1.2), with
+account bans as a penalty (§8.5.1), and WeChat 4.x encrypts its local messages.
+
+Instead it reads **macOS's own notification history**: when a WeChat message arrives, macOS stores the notification it
+shows (chat name and preview text) in `~/Library/Group Containers/group.com.apple.usernoted/db2/db`. Every 5 minutes
+FloatBoard copies that database (as with WhatsApp), takes WeChat's notifications (`com.tencent.xinwechat`), groups them
+per chat (in groups the sender is taken from "Name: text") and sends new ones to the engine, which judges them like
+WhatsApp chats. Turn it on in Settings › Connections › Inputs › WeChat.
+
+- Needs **Full Disk Access** for FloatBoard (System Settings › Privacy & Security › Full Disk Access): macOS's notification
+  history belongs to macOS, which the narrower "access data from other apps" permission doesn't cover.
+- It sees only chats that show notifications with message previews: chats muted in WeChat, hidden previews, and
+  notifications cleared within 5 minutes are not seen.
+- It never opens, signs in to or sends anything on WeChat.
