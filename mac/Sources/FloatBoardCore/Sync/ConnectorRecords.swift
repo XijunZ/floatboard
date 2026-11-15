@@ -173,7 +173,8 @@ extension Store {
     /// Merges `values` into the connector's stored settings (keys not given, such as "learned" or "default_group", are
     /// kept), bumps settings_version and queues a `settings` outbox row, all in one transaction. Refuses (and logs) when
     /// the connector no longer exists or its stored settings can't be read, so nothing stored is ever lost.
-    public func saveConnectorSettings(connector id: String, values: [String: Any], now: Date = Date()) throws {
+    public func saveConnectorSettings(connector id: String, values: [String: Any], now: Date = Date(),
+                                      source: Instructions.Source = .you, note: String = "") throws {
         for (k, v) in values where !JSONSerialization.isValidJSONObject(["v": v]) { throw ConnectorRecordError.unsavable(k) }
         guard let json = try db.query("SELECT settings_json FROM connectors WHERE id=?", [id], { DB.text($0, 0) }).first else {
             activity("connector:\(id)", .warning, "Settings not saved: the connector was removed")
@@ -191,6 +192,7 @@ extension Store {
                 throw ConnectorRecordError.unreadableStored(id)
             }
         }
+        let before = dict
         for (k, v) in values { dict[k] = v }
         let merged = dict
         try performThrowing {
@@ -198,6 +200,11 @@ extension Store {
             let data = try JSONSerialization.data(withJSONObject: merged, options: [.sortedKeys])
             try db.run("UPDATE connectors SET settings_json=?, settings_version=settings_version+1 WHERE id=?",
                        [String(decoding: data, as: UTF8.self), id])
+            for part in Instructions.parts {
+                guard let new = values[part] as? String else { continue }
+                try recordInstructions(connector: id, part: part, old: before[part] as? String ?? "", new: new,
+                                       source: source, note: note, at: now)
+            }
             let version = try db.query("SELECT settings_version FROM connectors WHERE id=?", [id]) { DB.int($0, 0) }.first ?? 0
             let uuid = UUID().uuidString
             try insertOutbox(uuid, id, .settings, ["version": String(version), "at": String(now.timeIntervalSince1970)], now)

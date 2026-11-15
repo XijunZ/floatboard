@@ -31,6 +31,12 @@
  ],
  [
   "index",
+  "instructions_part",
+  "instructions",
+  "CREATE INDEX instructions_part ON instructions(connector, part, at)"
+ ],
+ [
+  "index",
   "sqlite_autoindex_areas_1",
   "areas",
   null
@@ -112,6 +118,12 @@
   "events",
   "events",
   "CREATE TABLE events(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    card_id INTEGER NOT NULL REFERENCES cards(id),\n    at REAL NOT NULL,\n    kind TEXT NOT NULL,\n    from_status TEXT,\n    to_status TEXT\n, actor TEXT NOT NULL DEFAULT 'user', uuid TEXT)"
+ ],
+ [
+  "table",
+  "instructions",
+  "instructions",
+  "CREATE TABLE instructions(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, connector TEXT NOT NULL, part TEXT NOT NULL, text TEXT NOT NULL,\n    source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL\n)"
  ],
  [
   "table",
