@@ -357,7 +357,8 @@ struct WeChatInputRow: View {
             Every 5 minutes FloatBoard reads the WeChat notifications macOS has stored on this Mac (who wrote and the preview \
             text). It never opens, logs in to or touches WeChat, and never sends anything on WeChat.
 
-            It sees only chats that show notifications with message previews: muted chats and hidden previews are not seen. \
+            Strict: only one-to-one chats are sent (group chats never leave this Mac), and only messages clearly asking you to \
+            do something become tasks. It sees only chats that show notifications with message previews. \
             New messages go to your engine (\(info.id == LocalMode.connectorID ? "on this Mac" : URL(string: info.baseURL)?.host ?? "your engine")) \
             and to the AI model you chose, which turns the ones that need you into tasks.
             """

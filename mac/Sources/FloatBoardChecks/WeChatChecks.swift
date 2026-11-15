@@ -33,11 +33,10 @@ import FloatBoardCore
     do {
         let chats = try WeChatNotifications.newChats(folder: dir, cursors: [:], now: now, zone: TimeZone(identifier: "UTC")!)
         let anna = chats.first { $0.name == "Anna" }, school = chats.first { $0.name == "School parents" }
-        check(chats.count == 2 && anna?.transcript.components(separatedBy: "\n").count == 2 && anna?.group == false
+        check(chats.count == 1 && anna?.transcript.components(separatedBy: "\n").count == 2 && anna?.group == false && anna?.muted == true
               && anna?.key.hasPrefix("wx:Anna:") == true && anna?.link == "weixin://", "wechat_notifications_grouped_per_chat_only_wechat_last_7_days")
-        check(school?.group == true && school?.senders == ["Mrs Lee"] && school?.transcript.contains("Mrs Lee: Please bring the form") == true,
-              "wechat_group_sender_taken_from_the_text")
-        let again = try WeChatNotifications.newChats(folder: dir, cursors: ["Anna": anna!.newest, "School parents": school!.newest], now: now)
+        check(school == nil, "wechat_group_chats_are_not_sent")
+        let again = try WeChatNotifications.newChats(folder: dir, cursors: ["Anna": anna!.newest], now: now)
         check(again.isEmpty, "wechat_nothing_sent_twice")
         check(try WeChatNotifications.recentCount(folder: dir, now: now) == 3, "wechat_recent_count")
     } catch { check(false, "wechat: \(error)") }
