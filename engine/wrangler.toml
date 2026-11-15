@@ -3,10 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# The email-triage skill (src/skills/*.md) is bundled as text.
+# The skills (src/skills/*.md) and the phone app's scripts (src/phone/files/*.client.js) are bundled as text.
 [[rules]]
 type = "Text"
-globs = ["**/*.md"]
+globs = ["**/*.md", "**/*.client.js"]
 fallthrough = true
 
 [[d1_databases]]

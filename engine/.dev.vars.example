@@ -1,3 +1,5 @@
-# Secrets the engine needs (set with `npx wrangler secret put NAME`; see README.md).
+# The engine's two secrets. The Deploy to Cloudflare button asks for them; `npm run setup` makes them for you.
+# ENC_KEY: any long random text (40 or more characters). It encrypts the keys your engine keeps.
 ENC_KEY=
+# ADMIN_KEY: a password you choose (20 or more characters). You type it once, on the setup page, to make the engine yours.
 ADMIN_KEY=

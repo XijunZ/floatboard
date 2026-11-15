@@ -41,7 +41,7 @@ await build({
   conditions: ["worker", "browser", "import", "default"],
   target: "es2022",
   outfile: out,
-  loader: { ".md": "text" },
+  loader: { ".md": "text", ".client.js": "text" },
   plugins: [migrations, nodeStubs],
   legalComments: "none",
   logLevel: "warning",

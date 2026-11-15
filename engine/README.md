@@ -1,98 +1,79 @@
-# FloatBoard email connector
+# FloatBoard engine
 
-An **optional** connector for the FloatBoard app. It is a small Cloudflare Worker (with a D1 database) that you run
-on your own free Cloudflare account. Every 5 minutes, even when your Mac is off, it reads your Gmail, uses Claude to turn
-emails that need *your* action into task suggestions, adds meeting-note summaries to your meeting tasks, and can
-send urgent actions and due reminders to your phone. The FloatBoard app stays the source of truth: it pulls
-suggestions from the engine and sends your changes back.
+The **optional** online engine for FloatBoard ("Always on" in the app's Settings › Mode). It is a small Cloudflare
+Worker with a D1 database that you run on your own free Cloudflare account. Every 5 minutes, even when your Mac is off,
+it reads your inputs (Gmail, Fathom meeting notes, Outlook, WhatsApp sent by your Mac), uses Claude to turn what needs
+*your* action into task suggestions, sends urgent tasks and due reminders to your phone, and serves the phone app.
+The FloatBoard Mac app stays the source of truth: it pulls suggestions from the engine and sends your changes back.
 
-Each person runs **their own** engine, so nobody else holds your email data. Setup takes about 20 minutes. You need
-a Mac with FloatBoard installed, a terminal, and Node.js 20 or newer (`node --version`).
+Don't need it 24/7? Choose **Mac only** in the app instead: the same engine runs inside the app, with no online service.
+
+Each person runs **their own** engine, so nobody else holds your data.
 
 Tests: `npm test` (runs locally in the Workers runtime with fake Google/Claude/push services).
 
 ---
 
-## 1. Get the code
+## Set up: pick one
+
+### A. No terminal: the Deploy button (about 5 minutes)
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/<owner>/FloatBoard/tree/main/engine)
+
+1. Press the button (if it shows `<owner>`, use the address of the repository you are reading). Sign in to Cloudflare
+   (free) and to GitHub. It copies the code into your GitHub, creates the database and deploys.
+2. It asks for two secrets. Type two long random passwords (your password manager can make them):
+   **ENC_KEY** encrypts what the engine keeps; **ADMIN_KEY** is the password you use in the next step. Keep both.
+3. Open your engine's address followed by `/setup` (the button shows the address, e.g.
+   `https://floatboard.<you>.workers.dev/setup`). It says **Make this engine yours**: type your name and the admin key.
+4. Press **Connect to FloatBoard**. The Mac app opens Settings › Keys: paste your Claude key and set up your Google
+   client there, then add Gmail in Settings › Inputs.
+
+Updates: the copy in your GitHub redeploys whenever you update it (Cloudflare's GitHub connection does this).
+
+### B. One command (a terminal and Node.js 20 or newer)
 
 ```bash
 git clone https://github.com/<owner>/FloatBoard.git
 cd FloatBoard/engine
-npm install
+npm ci
+npm run setup
 ```
 
-## 2. Cloudflare (free)
+It signs you in to Cloudflare, creates the database and its tables, makes both secrets (the admin key is copied to
+your clipboard), deploys, and opens the **Make this engine yours** page. Then do step 4 above. Running it again is
+safe: whatever exists is kept. `npm run setup -- --dry-run` shows what it would do.
 
-1. Create a free account at <https://dash.cloudflare.com/sign-up>.
-2. Log in from the terminal (opens your browser):
-   ```bash
-   npx wrangler login
-   ```
-3. Create the database and copy the `database_id` it prints into `wrangler.toml` (replace the zeros):
-   ```bash
-   npx wrangler d1 create floatboard
-   ```
-4. Create the tables:
-   ```bash
-   npx wrangler d1 migrations apply floatboard --remote
-   ```
+Updates: `git pull && npm ci && npm run update` (applies database changes, then deploys, in that order).
 
-## 3. Secrets
+### Manual set-up
 
-Values are generated on your Mac and sent straight to Cloudflare. You never see them, except the admin key, which is
-copied to your clipboard.
+If you prefer to run each step yourself, see the steps below the "Code layout" section ("Manual set-up, step by step").
 
-```bash
-openssl rand -base64 32 | npx wrangler secret put ENC_KEY
-openssl rand -hex 32 | tee >(pbcopy) | npx wrangler secret put ADMIN_KEY      # admin key -> clipboard
-```
+## After set-up: keys and Gmail (in the Mac app)
 
-Paste the admin key into your password manager now. You need it to create your user and to invite other people.
-
-## 4. Deploy
-
-```bash
-npx wrangler deploy
-```
-
-It prints your engine's address, e.g. `https://floatboard.<your-subdomain>.workers.dev` (called `<your-engine>` below).
-Check it is up: `curl -s -o /dev/null -w "%{http_code}" <your-engine>/v2/status` should print `401` (it needs a key).
-
-## 5. The engine's setup page
-
-Open `<your-engine>/setup/admin` and sign in with the **admin key** to create your user (just a name). That gives you
-an invite link and a user key. Then open `<your-engine>/setup` and sign in with your **user key**.
-
-### Connect to FloatBoard (first)
-Press **Connect to FloatBoard** at the bottom of the setup page. It opens the app on this Mac and adds the engine (the
-address goes in the app's database, the key in the Mac's Keychain). The app then opens **Settings › Keys**. If it does
-not appear, sign out of the setup page and sign in again to get the link.
-
-### Keys (in the Mac app: Settings › Keys)
-- **Claude key**: create one at <https://console.anthropic.com>, paste it, press Save. The Mac keeps it in its Keychain
-  and sends it to your engine, which stores it encrypted and never sends it back. The engine uses a small, cheap Claude
-  model: a few cents per hundred emails after the free newsletter and ads filter.
-- **Google client for Gmail**: the steps are in the app under "How to make the Google client", and here:
-  1. Go to <https://console.cloud.google.com> and create a project.
-  2. **APIs & Services, Library**: enable the **Gmail API**.
+- **Settings › Keys › Claude key**: create one at <https://console.anthropic.com>, paste it, press Save. The Mac keeps it
+  in its Keychain and sends it to your engine, which stores it encrypted and never sends it back. You choose the model
+  per job in Settings › Rules & learning › AI model (Haiku by default: a few cents per hundred emails).
+- **Settings › Keys › Google client** (once, about 5 minutes; the steps are in the app):
+  1. <https://console.cloud.google.com>: create a project.
+  2. **APIs & Services, Library**: enable the **Gmail API** and the **Google Calendar API**.
   3. **Google Auth Platform, Get started**: app name FloatBoard, External, your email.
-  4. **Audience**: press **Publish app** so the status is **In production**. If you leave it in Testing, Google expires
-     every sign-in after **7 days** and you must reconnect each week. You will see a one-time "unverified app" warning
-     when you connect; that is expected for your own app: choose **Advanced**, then continue.
-  5. **Clients, Create client**: type **Web application** (not Desktop). Add this exact **Authorized redirect URI**:
-     `<your-engine>/setup/google/callback` (the app shows it with a Copy button). Scopes used: `gmail.modify`, `openid email`.
-  6. Paste the **Client ID** and **Client secret** in the app and press Save.
+  4. **Audience**: press **Publish app** so it says **In production** (in Testing, Google expires sign-ins after 7 days).
+  5. **Clients, Create client**: type **Desktop app**. Paste the Client ID and secret in the app (or import its JSON file).
+- **Settings › Inputs › Add an input › Gmail inbox › Sign in with Google**: pick the inbox. Google warns that the app
+  is unverified: it is your own app, so choose **Advanced**, then continue. The Mac hands the sign-in to your engine.
 
-### Gmail inboxes (setup page)
-Back on the setup page, press **Connect a Gmail account** and sign in. Repeat for each inbox. (In the app:
-Settings › Inputs › Add an input › Gmail shows the same steps.)
+The engine's setup page (`<your-engine>/setup`, sign in with your user key) is still where you invite people, set up
+the Fathom webhook, the Outlook extension, ntfy and phones. (It can also connect Gmail with a *Web application* client
+whose redirect is `<your-engine>/setup/google/callback`; the Mac's sign-in above makes that unnecessary.)
 
-## 6. Fathom meeting notes (optional)
+## Fathom meeting notes (optional)
 
 Recap emails from Fathom are matched to your meeting tasks automatically. For faster notes, create the webhook address
 under "Fathom meeting recaps" on the setup page and paste it into Fathom's webhook settings.
 
-## 7. Phone alerts with the ntfy app (optional)
+## Phone alerts with the ntfy app (optional)
 
 The phone app in step 8 shows notifications by itself. ntfy is a second way, useful where Google's push service is blocked.
 
@@ -104,7 +85,7 @@ the topic name can read the alerts, so ntfy alerts carry only the task title and
 phone app; never the sender, the reason or the email text. **New topic** replaces a leaked topic; **Turn off** stops them. `alerts_on = false` in
 settings silences all channels.
 
-## 8. Phone app (optional)
+## Phone app (optional)
 
 The engine also serves a small phone app at `<your-engine>/app`: your board (To do, Doing, Watch, Done today), with a
 tap to move a task, open its link or add a new one, and lock-screen notifications for urgent tasks. It is a web app you
@@ -134,10 +115,9 @@ app's settings signs out only that device.
 
 Open `<your-engine>/setup/admin`, sign in with the admin key, enter a name and press **Create invite**. Send them the link
 (shown once). Opening it on their Mac connects their FloatBoard to your engine with their own private data. The
-`key=` part is also how they sign in to `/setup`. Each person's Google client is stored with their own account, so on
-their `/setup` page they paste a Google Cloud client too: their own (step 5 above), or the same Client ID and secret as
-yours (add their Gmail address as a test user if your Google app is still in Testing). Anyone who prefers not to share your engine can run their own
-engine instead.
+`key=` part is also how they sign in to `/setup`. They set their own keys in their Mac app (Settings › Keys): their own
+Google client, or the same Client ID and secret as yours. Anyone who prefers not to share your engine can run their own
+engine, or use Mac only.
 
 ## How emails are judged and how it learns
 
@@ -157,7 +137,7 @@ corrections arrive or a day later.
 ## Updating
 
 ```bash
-git pull && npm install && npx wrangler d1 migrations apply floatboard --remote && npx wrangler deploy
+git pull && npm ci && npm run update      # database changes first, then the new code
 ```
 
 ---
@@ -179,6 +159,23 @@ git pull && npm install && npx wrangler d1 migrations apply floatboard --remote 
 | `migrations/` | The D1 database schema, applied in order. |
 | `test/` | Tests, in the same folders as the code they test (`test/api/` covers `src/routes/`). |
 
+## Manual set-up, step by step
+
+What `npm run setup` does, if you prefer to run each step yourself (Node.js 20 or newer):
+
+```bash
+git clone https://github.com/<owner>/FloatBoard.git && cd FloatBoard/engine && npm ci
+npx wrangler login                                   # opens your browser; a free Cloudflare account is enough
+npx wrangler d1 create floatboard                    # copy the database_id it prints
+cp wrangler.local.toml.example wrangler.local.toml   # paste the database_id there
+npx wrangler d1 migrations apply floatboard --remote --config wrangler.local.toml
+openssl rand -base64 32 | npx wrangler secret put ENC_KEY --config wrangler.local.toml
+openssl rand -hex 32 | tee >(pbcopy) | npx wrangler secret put ADMIN_KEY --config wrangler.local.toml   # admin key -> clipboard
+npx wrangler deploy --config wrangler.local.toml     # prints your engine's address
+```
+
+Then open `<your-engine>/setup` (**Make this engine yours**, with the admin key) and continue with "After set-up" above.
+
 ## Troubleshooting
 
 Start in the app: **Help, Activity...** (select a row, **Show trace**) and the **Connectors** tab status line.
@@ -191,7 +188,7 @@ Start in the app: **Help, Activity...** (select a row, **Show trace**) and the *
 | Watchdog: "<connector> has never synced" | The connect link was opened but the first sync never worked. Open the setup page, press **Connect to FloatBoard** again, or check the address in the Connectors tab. |
 | Watchdog: "no verified backup" / "newest verified backup is over 36 hours old" | Backups are not being made or are damaged. Check free disk space and Activity for a backup error, then restart the app (it backs up at launch). |
 | Watchdog: "Couldn't read <connector>'s status" | The engine sent something the app could not understand, usually after a version mismatch. Update the engine (see Updating) and the app to the same version. |
-| Setup page: inbox "needs attention", sign-in expired or revoked | Press **Reconnect** for that inbox. If it happens every 7 days, the Google app is still in Testing: set it to **In production** (step 5.4). |
+| Setup page: inbox "needs attention", sign-in expired or revoked | Press **Reconnect** for that inbox. If it happens every 7 days, the Google app is still in Testing: set it to **In production** (After set-up, step 4). |
 | "The engine didn't accept this key." | Wrong user key or admin key. Re-check, or create a new invite. |
 | Google sign-in shows `redirect_uri_mismatch` (after **Connect a Gmail account**) | Saving the client doesn't check the redirect; Google does at sign-in. In the Google client, the redirect URI must be exactly `<your-engine>/setup/google/callback`, and the client type must be **Web application**. Fix it there, then connect again. |
 | "Learning paused: ..." | A learning update would have removed most of your learned preferences, so it was refused. Review them in the app (Connectors, settings); learning tries again after new corrections or a day later. |

@@ -9,6 +9,20 @@ To do / Doing / Done board with groups, due dates, importance and timestamps.
 - **The app works alone.** Connectors are optional add-ons that suggest tasks from outside sources. If you never
   add one, nothing changes.
 
+## Three ways to use it
+
+Your board always lives only on your Mac. Choose how much screening you want (Settings › Mode); you can switch any time.
+
+| | **Board only** | **Mac only** | **Always on** |
+|---|---|---|---|
+| Board, bar, groups, Watch, Mac reminders, Calendar | ✓ | ✓ | ✓ |
+| Gmail, Fathom and WhatsApp turned into tasks by Claude | | ✓ while the Mac is awake | ✓ every 5 minutes, 24/7 |
+| Outlook (Chrome extension), phone app, phone alerts | | | ✓ |
+| Needs | nothing | a Claude key | a free Cloudflare account ([one-click set-up](engine/README.md)) and a Claude key |
+
+You choose the Claude model for each job and see what it costs (Settings › Rules & learning › AI model). Keys stay in
+your Mac's Keychain; nothing goes through anyone else's server.
+
 ## Repository layout
 
 | Folder | What it is |

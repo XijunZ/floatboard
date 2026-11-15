@@ -4,8 +4,10 @@ let cached: { raw: string; key: CryptoKey } | null = null;
 
 async function key(env: Env): Promise<CryptoKey> {
   if (cached?.raw === env.ENC_KEY) return cached.key;
-  // ENC_KEY: base64 secret; derive a 256-bit AES key from it.
-  const raw = await crypto.subtle.digest("SHA-256", Uint8Array.from(atob(env.ENC_KEY), (c) => c.charCodeAt(0)));
+  // ENC_KEY: any long secret text (base64, as older set-ups made it, is read as its bytes); derive a 256-bit AES key.
+  let bytes: Uint8Array;
+  try { bytes = Uint8Array.from(atob(env.ENC_KEY), (c) => c.charCodeAt(0)); } catch { bytes = new TextEncoder().encode(env.ENC_KEY); }
+  const raw = await crypto.subtle.digest("SHA-256", bytes);
   const k = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
   cached = { raw: env.ENC_KEY, key: k };
   return k;
