@@ -5,7 +5,7 @@ import { decrypt } from "../lib/crypto";
 import { type Env, nowISO } from "../env";
 import { logEvent } from "../lib/runlog";
 import { DEFAULT_RECAP_SENDERS, prefilter, senderAddress } from "./filter";
-import { makeClient } from "../lib/llm";
+import { chosenModel, makeClient } from "../lib/llm";
 import { processEvents } from "../email/events";
 import { pendingCorrections } from "./learn";
 import { processRecap } from "./recap";
@@ -118,7 +118,8 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
     await finish(0, "Add your Claude key in FloatBoard › Settings › Keys to start reading email.", "no_key");
     return { processed: 0, done: true };
   }
-  const client = makeClient(await decrypt(env, user.anthropic_key_enc), calls.wrap(opts.fetchFn));
+  const client = makeClient(await decrypt(env, user.anthropic_key_enc), calls.wrap(opts.fetchFn),
+    { env, userId, job: "judge", model: await chosenModel(env, userId, "judge") });
   const s = await env.DB.prepare("SELECT * FROM settings WHERE user_id=?").bind(userId).first<any>();
   const unreadOnly = !!(s?.unread_only ?? 1);
   const rules = { ignore: JSON.parse(s?.ignore_senders ?? "[]"), allow: JSON.parse(s?.allow_senders ?? "[]"), recapSenders: DEFAULT_RECAP_SENDERS, unreadOnly };

@@ -13,6 +13,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/FloatBoard "$APP/Contents/MacOS/FloatBoard"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# The engine for Mac only mode (built from ../engine when Node is available; else Mac only mode is unavailable).
+if command -v node >/dev/null && [ -d ../engine/node_modules ]; then (cd ../engine && node local/build.mjs >/dev/null); fi
+if [ -f Resources/engine.js ]; then cp Resources/engine.js "$APP/Contents/Resources/engine.js"
+else echo "note: Resources/engine.js missing (run 'npm ci && npm run build:mac' in engine/); Mac only mode will be unavailable"; fi
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

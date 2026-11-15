@@ -81,6 +81,8 @@ public struct ConnectorStatus: Codable, Equatable {
     public var sources: [EngineSource] = []
     /// Which keys the engine holds (never the keys); nil from older engines.
     public var keys: EngineKeys?
+    /// Last 30 days of Claude use per job ("judge", "recap", "learn", "reply"), as a monthly estimate in US dollars.
+    public var aiCost: [String: JobCost] = [:]
 
     public init(settingsVersion: Int = 0, schema: [SettingField] = [], needsAttention: [String] = [], waiting: Int = 0,
                 lastRunOK: String? = nil, lastRunError: String? = nil, oldestUnprocessedEvent: String? = nil, dbSizeBytes: Int? = nil) {
@@ -92,7 +94,7 @@ public struct ConnectorStatus: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case settingsVersion = "settings_version", schema, needsAttention = "needs_attention", waiting
         case lastRunOK = "last_run_ok", lastRunError = "last_run_error", oldestUnprocessedEvent = "oldest_unprocessed_event"
-        case dbSizeBytes = "db_size_bytes", sources, keys
+        case dbSizeBytes = "db_size_bytes", sources, keys, aiCost = "ai_cost"
     }
 
     public init(from d: Decoder) throws {
@@ -107,6 +109,7 @@ public struct ConnectorStatus: Codable, Equatable {
         dbSizeBytes = try c.decodeIfPresent(Int.self, forKey: .dbSizeBytes)
         sources = try c.decodeIfPresent([EngineSource].self, forKey: .sources) ?? []
         keys = try c.decodeIfPresent(EngineKeys.self, forKey: .keys)
+        aiCost = try c.decodeIfPresent([String: JobCost].self, forKey: .aiCost) ?? [:]
     }
 }
 
@@ -114,8 +117,25 @@ public struct ConnectorStatus: Codable, Equatable {
 public struct EngineKeys: Codable, Equatable, Sendable {
     public var claude: Bool
     public var googleClientID: String?
-    public init(claude: Bool, googleClientID: String?) { self.claude = claude; self.googleClientID = googleClientID }
-    enum CodingKeys: String, CodingKey { case claude, googleClientID = "google_client_id" }
+    public var fathom: Bool
+    public init(claude: Bool, googleClientID: String?, fathom: Bool = false) {
+        self.claude = claude; self.googleClientID = googleClientID; self.fathom = fathom
+    }
+    enum CodingKeys: String, CodingKey { case claude, googleClientID = "google_client_id", fathom }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        claude = try c.decode(Bool.self, forKey: .claude)
+        googleClientID = try c.decodeIfPresent(String.self, forKey: .googleClientID)
+        fathom = try c.decodeIfPresent(Bool.self, forKey: .fathom) ?? false
+    }
+}
+
+/// One job's Claude use over the last 30 days: calls, what it cost, and what each model would have cost.
+public struct JobCost: Codable, Equatable, Sendable {
+    public var calls: Int
+    public var usd: Double
+    public var usdIf: [String: Double]
+    enum CodingKeys: String, CodingKey { case calls, usd, usdIf = "usd_if" }
 }
 
 /// One shared rulebook (read-only in the app).
@@ -289,6 +309,18 @@ public struct ConnectorClient {
         let data = try await call("PUT", "/v2/keys", body: try JSONSerialization.data(withJSONObject: body))
         struct Out: Decodable { let keys: EngineKeys }
         do { return try JSONDecoder().decode(Out.self, from: data).keys } catch { throw ConnectorError.badResponse("\(error)") }
+    }
+
+    /// A Gmail inbox signed in on this Mac, handed to the engine (it checks the sign-in before keeping it).
+    public func addGmail(address: String, refreshToken: String, clientID: String, clientSecret: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["address": address, "refresh_token": refreshToken,
+                                                               "client_id": clientID, "client_secret": clientSecret])
+        _ = try await call("POST", "/v2/gmail", body: body)
+    }
+
+    /// Sends the Fathom API key ("" removes it).
+    public func setFathomKey(_ key: String) async throws {
+        _ = try await call("PUT", "/v2/keys", body: try JSONSerialization.data(withJSONObject: ["fathom_key": key]))
     }
 
     /// The shared rulebooks the engine follows.

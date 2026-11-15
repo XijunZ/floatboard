@@ -7,3 +7,6 @@ engine/node_modules
 
 # Personal values, never committed
 mac/scripts/local.env
+
+# Built from engine/ (npm run build:mac); bundled into the app by build-app.sh
+mac/Resources/engine.js

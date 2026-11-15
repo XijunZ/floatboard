@@ -1,8 +1,9 @@
 # FloatBoard architecture
 
 This page is the architecture of record. **Edition 1** is what is built today (7 to 14 Nov 2026). **Edition 2** is a
-change to it (15 Nov 2026): it lists what changes, what stays, and why. **Phase 1 is built** (Settings sections,
-instruction history, keys in the Keychain, feedback); the later phases are not yet.
+change to it (15 Nov 2026): it lists what changes, what stays, and why. **Phases 1 and 2 are built**: Settings
+sections, instruction history, keys in the Keychain, feedback; Mac only mode (the engine runs inside the app),
+Gmail signed in from the Mac, and the choice of Claude model per job.
 
 ---
 

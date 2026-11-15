@@ -307,7 +307,7 @@ struct PhoneAppCard: View {
     @State private var copied = false
 
     var body: some View {
-        if ConnectorSync.phoneSupport[info.id] != false, !info.baseURL.isEmpty {
+        if ConnectorSync.phoneSupport[info.id] != false, !info.baseURL.isEmpty, info.id != LocalMode.connectorID {
             let address = (URL(string: info.baseURL)?.host).map { "\($0)/app" } ?? "\(info.baseURL)/app"
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
