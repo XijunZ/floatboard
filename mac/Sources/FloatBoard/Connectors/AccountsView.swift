@@ -21,7 +21,7 @@ struct CalendarMenu: View {
                 Divider()
             }
             if google.accounts.isEmpty {
-                Button("Connect a Google account…") { ui.tab = .connectors }
+                Button("Connect a Google account…") { ui.tab = .settings; ui.settingsSection = .outputs }
             } else {
                 ForEach(google.accounts, id: \.self) { acct in
                     Menu("Add to \(acct)") {
@@ -75,6 +75,8 @@ struct CalendarMenu: View {
 struct AccountsView: View {
     @EnvironmentObject var google: Google
     var showAccounts = true
+    /// The one-time Google Cloud client set-up (shown under Settings › Keys).
+    var showSetup = true
     @State private var clientID = ""
     @State private var secret = ""
     @State private var setupOpen = false
@@ -110,6 +112,7 @@ struct AccountsView: View {
 
                 }
 
+                if showSetup {
                 DisclosureGroup(isExpanded: Binding(get: { setupOpen || !google.isConfigured }, set: { setupOpen = $0 })) {
                 VStack(alignment: .leading, spacing: 10) {
                 Text(google.isConfigured
@@ -148,6 +151,7 @@ struct AccountsView: View {
                 .padding(.top, 6)
                 } label: {
                     Text("Google Cloud set-up (one-time)").font(.system(size: 13, weight: .semibold))
+                }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

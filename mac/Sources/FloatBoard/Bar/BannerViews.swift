@@ -43,9 +43,9 @@ struct BannerView: View {
             let problems = store.healthProblems
             if !problems.isEmpty {
                 Button {
-                    // Errors and backup problems are explained in Activity; when only connectors are involved, the Connectors tab.
+                    // Errors and backup problems are explained in Activity; when only engines are involved, Settings › Mode.
                     if problems.contains(where: \.isAppWide) { NotificationCenter.default.post(name: .floatBoardShowActivity, object: "open") }
-                    else { ui.tab = .connectors; ui.mode = .expanded }
+                    else { ui.tab = .settings; ui.settingsSection = .mode; ui.mode = .expanded }
                 } label: {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 }

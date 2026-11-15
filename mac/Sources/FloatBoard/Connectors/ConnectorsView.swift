@@ -127,60 +127,6 @@ enum ConnectFlow {
     }
 }
 
-/// Connectors tab: the online services that suggest tasks, plus Google Calendar.
-struct ConnectorsView: View {
-    @EnvironmentObject var store: Store
-    @State private var pasted = ""
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Connectors").font(.system(size: 13, weight: .semibold))
-                    Text("A connector suggests tasks for your board and hears back what you did with them. The board works on its own without any.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                    if store.connectors.isEmpty {
-                        Text("No connectors yet.").font(.system(size: 12)).foregroundStyle(.secondary)
-                    }
-                    ForEach(store.connectors) { c in
-                        ConnectorCard(info: c)
-                        PhoneAppCard(info: c)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Add a connector").font(.system(size: 13, weight: .semibold))
-                    HStack {
-                        TextField("Paste a connect link (floatboard://connect?…)", text: $pasted)
-                            .textFieldStyle(.roundedBorder).frame(width: 420)
-                        Button("Add…") {
-                            let link = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if let u = URL(string: link), ConnectFlow.confirmAndAdd(u, store: store) { pasted = "" }
-                            else if URL(string: link) == nil { ConnectFlow.alert("That isn't a link", "Copy the connect link from the connector's setup page.") }
-                        }
-                        .disabled(pasted.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    Text("The connector's setup page gives you this link; its “Connect to FloatBoard” button opens it directly.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button("Copy diagnostics") { DiagnosticsCopy.copy(store: store) }
-                    Text("Copies a support summary (no keys, email text or task titles) to paste to whoever is helping.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                Divider()
-                WithdrawnList()
-                Divider()
-                AccountsView()
-            }
-            .frame(maxWidth: 760, alignment: .leading)
-            .padding(.bottom, 20)
-            // Fill the window's width so the scroll bar sits at its right edge, not after the 760-wide content.
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
 /// Every card an engine took off the board, whatever connector it came from (even a removed one), each restorable.
 struct WithdrawnList: View {
     @EnvironmentObject var store: Store

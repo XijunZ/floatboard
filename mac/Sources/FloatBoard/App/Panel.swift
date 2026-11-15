@@ -7,19 +7,21 @@ import SwiftUI
 final class UIState: ObservableObject {
     enum Mode { case banner, expanded, minimized, hidden }
     enum Tab: Hashable, CaseIterable {
-        case board, bar, groups, connectors
+        case board, bar, groups, settings
         var title: String {
             switch self {
             case .board: "Board"
             case .bar: "Bar"
             case .groups: "Groups"
-            case .connectors: "Connectors"
+            case .settings: "Settings"
             }
         }
     }
 
     @Published var mode: Mode = .banner
     @Published var tab: Tab = .board
+    /// The open section of the Settings tab.
+    @Published var settingsSection: SettingsSection = .mode
     @Published var hovering = false
     /// Set when the board should open with the "new task" box focused.
     @Published var wantsAddFocus = false

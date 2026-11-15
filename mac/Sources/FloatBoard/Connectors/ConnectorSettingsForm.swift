@@ -4,11 +4,17 @@ import SwiftUI
 
 /// A connector's settings, drawn from the field list (schema) it last reported. Saved to the board's database
 /// (with a new settings version and a queued "settings" change); the next sync sends them to the connector.
-/// "New tasks go to", "Add tasks automatically" and what FloatBoard has learned are always shown.
+/// `keys` picks which settings this form shows, in order (Settings shows them in different sections); nil shows all.
+/// "default_group", "auto_add" and "learned" are the app's own; "*" stands for every engine field no section names.
 struct ConnectorSettingsForm: View {
     @EnvironmentObject var store: Store
     let info: ConnectorInfo
     let schema: [SettingField]
+    var keys: [String]? = nil
+    /// Every key some section shows (so "*" knows what is left over).
+    static let placed: Set<String> = ["default_group", "auto_add", "alerts_on", "critical_hours", "mark_read_on_done", "ai_footer",
+                                      "group_notes", "my_rules", "chat_rules", "ignore_senders", "allow_senders", "unread_only",
+                                      "learned", "learn_at"]
 
     @State private var draft = ConnectorSettingsDraft()
     @State private var message: String?
@@ -18,23 +24,10 @@ struct ConnectorSettingsForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            row("New tasks go to", help: "Used when the connector doesn't pick a group.") {
-                Picker("", selection: textBinding("default_group")) {
-                    ForEach(store.areas) { Text($0.name).tag($0.name) }
-                }
-                .labelsHidden().frame(width: 200)
-            }
-            row("Add tasks automatically", help: "Off: suggestions are not added to the board.") {
-                Toggle("", isOn: flagBinding("auto_add")).toggleStyle(.switch).labelsHidden()
-            }
-            if schema.isEmpty {
-                Text("The connector's own settings appear here after its first sync.")
+            ForEach(shownKeys, id: \.self) { k in item(k) }
+            if schema.isEmpty && (keys ?? []).contains(where: { !ConnectorSettingsDraft.builtIn.contains($0) }) {
+                Text("The engine's own settings appear here after its first sync.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
-            }
-            ForEach(draft.fields, id: \.key) { field($0) }
-            row("What FloatBoard has learned about you",
-                help: "Learned from the tasks you change and delete. Edit or remove anything that's wrong.") {
-                editor("learned")
             }
             HStack {
                 Button("Save settings") { save() }
@@ -53,6 +46,42 @@ struct ConnectorSettingsForm: View {
 
     // MARK: Fields
 
+    /// The keys to show, in order: "*" expands to every engine field no section places.
+    private var shownKeys: [String] {
+        guard let keys else { return ["default_group", "auto_add"] + draft.fields.map(\.key) + ["learned"] }
+        return keys.flatMap { k -> [String] in
+            k == "*" ? draft.fields.map(\.key).filter { !Self.placed.contains($0) } : [k]
+        }
+    }
+
+    @ViewBuilder
+    private func item(_ k: String) -> some View {
+        switch k {
+        case "default_group":
+            row("New tasks go to", help: "Used when the engine doesn't pick a group.") {
+                Picker("", selection: textBinding("default_group")) {
+                    ForEach(store.areas) { Text($0.name).tag($0.name) }
+                }
+                .labelsHidden().frame(width: 200)
+            }
+        case "auto_add":
+            row("Add tasks automatically", help: "Off: suggestions are not added to the board.") {
+                Toggle("", isOn: flagBinding("auto_add")).toggleStyle(.switch).labelsHidden()
+            }
+        case "learned":
+            row("What FloatBoard has learned about you",
+                help: "Learned from the tasks you change and delete. Edit or remove anything that's wrong; your edits win over later learning.") {
+                editor("learned")
+            }
+            InstructionsHistory(info: info, part: "learned")
+        default:
+            if let f = draft.fields.first(where: { $0.key == k }) {
+                field(f)
+                if Instructions.parts.contains(k) { InstructionsHistory(info: info, part: k) }
+            }
+        }
+    }
+
     @ViewBuilder
     private func field(_ f: SettingField) -> some View {
         switch f.kind {
@@ -61,7 +90,7 @@ struct ConnectorSettingsForm: View {
         case "longtext":
             row(f.label, help: f.help) { editor(f.key) }
         case "list":
-            row(f.label, help: [f.help, "One per line."].compactMap { $0 }.joined(separator: " ")) { editor(f.key) }
+            row(f.label, help: (f.help ?? "").lowercased().contains("one per line") ? f.help : [f.help, "One per line."].compactMap { $0 }.joined(separator: " ")) { editor(f.key) }
         case "bool":
             row(f.label, help: f.help) { Toggle("", isOn: flagBinding(f.key)).toggleStyle(.switch).labelsHidden() }
         case "int":
