@@ -48,7 +48,7 @@ function migrate() {
 }
 
 const pending = new Set();
-const env = () => ({ DB, ENC_KEY: host.secret("ENC_KEY"), ADMIN_KEY: host.secret("ADMIN_KEY") });
+const env = () => ({ DB, ENC_KEY: host.secret("ENC_KEY"), ADMIN_KEY: host.secret("ADMIN_KEY"), ON_DEVICE: host.secret("ON_DEVICE") });
 const ctx = { waitUntil(p) { const q = Promise.resolve(p).catch((e) => console.warn("background work failed:", e?.message ?? String(e))); pending.add(q); q.finally(() => pending.delete(q)); },
   passThroughOnException() {} };
 

@@ -318,6 +318,13 @@ public struct ConnectorClient {
         _ = try await call("POST", "/v2/gmail", body: body)
     }
 
+    /// Judges the latest chats with Haiku and with the model on this Mac (Mac only mode): how often they agree.
+    public struct Comparison: Decodable, Sendable { public let n: Int; public let agree: Int; public let unusable: Int?; public let note: String? }
+    public func compareModels(limit: Int = 10) async throws -> Comparison {
+        let data = try await call("POST", "/v2/models/compare", body: try JSONSerialization.data(withJSONObject: ["limit": limit]))
+        do { return try JSONDecoder().decode(Comparison.self, from: data) } catch { throw ConnectorError.badResponse("\(error)") }
+    }
+
     /// Sends the Fathom API key ("" removes it).
     public func setFathomKey(_ key: String) async throws {
         _ = try await call("PUT", "/v2/keys", body: try JSONSerialization.data(withJSONObject: ["fathom_key": key]))

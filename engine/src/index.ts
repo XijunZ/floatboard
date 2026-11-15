@@ -11,6 +11,7 @@ import "./routes/sources";
 import "./routes/v2";
 import "./routes/archive";
 import "./routes/keys";
+import "./routes/models";
 import "./sources/chat-ingest";
 import { handleEmailSearch } from "./email/search";
 import { handleSetup, purgeExpiredSetup } from "./setup/routes";

@@ -46,6 +46,21 @@ safe: whatever exists is kept. `npm run setup -- --dry-run` shows what it would 
 
 Updates: `git pull && npm ci && npm run update` (applies database changes, then deploys, in that order).
 
+### C. Vercel, with a Turso database
+
+For people who already use Vercel. The same engine code runs there; Turso (in Vercel's Marketplace) is its database,
+and it speaks the same SQLite as Cloudflare D1, so nothing behaves differently.
+
+1. In Vercel: **Add New › Project**, import your copy of this repository, set **Root Directory** to `engine`.
+2. **Environment Variables**: `ENC_KEY` and `ADMIN_KEY` (two long random passwords, as in A), and `CRON_SECRET`
+   (any long random text; Vercel uses it to call the schedule).
+3. Deploy. Then **Storage › Marketplace › Turso › Connect** to this project (it adds `TURSO_DATABASE_URL` and
+   `TURSO_AUTH_TOKEN`) and redeploy. The database tables are made on the first request.
+4. Open your Vercel address + `/setup` and continue from step 3 of A.
+
+The 5-minute schedule (vercel.json) needs **Vercel Pro**: the Hobby plan allows one run a day and refuses to deploy a
+more frequent schedule. On Hobby, use A or B (free), or Mac only. Check it locally first: `npm run test:vercel`.
+
 ### Manual set-up
 
 If you prefer to run each step yourself, see the steps below the "Code layout" section ("Manual set-up, step by step").

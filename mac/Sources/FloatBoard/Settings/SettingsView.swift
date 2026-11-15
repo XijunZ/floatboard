@@ -407,12 +407,51 @@ struct AIModelBlock: View {
                 }
             }
             ConnectorSettingsForm(info: info, schema: status?.schema ?? [], keys: ["model_judge", "model_recap", "model_reply"])
+            if info.id == LocalMode.connectorID && OnDeviceModel.isAvailable { OnDeviceCompare(info: info) }
         }
     }
     static func label(_ job: String) -> String {
         switch job { case "judge": "Judging"; case "recap": "Meeting summaries"; case "learn": "Learning"; default: "Reply drafts" }
     }
     static func money(_ usd: Double) -> String { usd < 0.01 ? "under $0.01" : String(format: "$%.2f", usd) }
+}
+
+/// "Compare with Haiku": before choosing On this Mac, see how often it agrees with Haiku on your latest chats.
+struct OnDeviceCompare: View {
+    @EnvironmentObject var store: Store
+    let info: ConnectorInfo
+    @State private var result: String?
+    @State private var running = false
+    private let metaKey = "ondevice.agreement"
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Button(running ? "Comparing…" : "Compare On this Mac with Haiku…") { compare() }.disabled(running).controlSize(.small)
+            Text(result ?? saved ?? "Judges your latest WhatsApp chats with both and shows how often they agree.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+
+    private var saved: String? {
+        try? store.db.query("SELECT value FROM meta WHERE key=?", [metaKey]) { DB.text($0, 0) }.first // try?-ok: nothing saved yet
+    }
+
+    private func compare() {
+        guard ConnectFlow.confirmTwice("Compare with Haiku?", "Your latest 10 WhatsApp chats are judged by both. That is up to 10 Haiku calls (well under $0.01); Apple's model is free.", action: "Compare") else { return }
+        guard let client = ConnectorAccounts.client(for: info, store: store) else { return }
+        running = true
+        Task { @MainActor in
+            defer { running = false }
+            do {
+                let c = try await client.compareModels(limit: 10)
+                let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "d MMM"
+                let text = c.n == 0 ? (c.note ?? "No chats to compare yet.")
+                    : "Agreed with Haiku on \(c.agree) of \(c.n) chats (\(f.string(from: Date())))" + ((c.unusable ?? 0) > 0 ? "; \(c.unusable!) answers unusable" : "")
+                result = text
+                try store.db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", [metaKey, text])
+            } catch { result = "Couldn't compare: \((error as? ConnectorError)?.description ?? "\(error)")" }
+        }
+    }
 }
 
 /// The shared rulebooks the engine follows (read-only): part 1 of your instructions.

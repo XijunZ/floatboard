@@ -2,6 +2,8 @@ export interface Env {
   DB: D1Database;
   ENC_KEY: string;
   ADMIN_KEY: string;
+  /** "1" when the engine runs inside the Mac app and Apple's on-device model is available there. */
+  ON_DEVICE?: string;
 }
 
 export type User = { id: string; name: string };

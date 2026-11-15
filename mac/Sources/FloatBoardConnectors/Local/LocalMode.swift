@@ -29,9 +29,17 @@ public enum LocalMode {
         if let engine { return engine }
         let enc = try secret(encName, store: store) { Data((0..<32).map { _ in UInt8.random(in: 0...255) }).base64EncodedString() }
         let admin = try secret(adminName, store: store) { UUID().uuidString + UUID().uuidString }
-        let transport: LocalEngine.Transport = transportOverride ?? { req in try await URLSession.shared.data(for: req) }
+        let network: LocalEngine.Transport = transportOverride ?? { req in try await URLSession.shared.data(for: req) }
+        // Requests for "On this Mac" go to Apple's on-device model instead of the network.
+        let transport: LocalEngine.Transport = { req in
+            if req.url?.host == "api.anthropic.com", OnDeviceModel.wants(req.httpBody), let body = req.httpBody {
+                let data = try await OnDeviceModel.answer(body)
+                return (data, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: ["content-type": "application/json"])!)
+            }
+            return try await network(req)
+        }
         let e = try LocalEngine(script: try LocalEngine.bundledScript(), databaseURL: LocalData.screeningDatabase,
-                                secrets: ["ENC_KEY": enc, "ADMIN_KEY": admin], transport: transport)
+                                secrets: ["ENC_KEY": enc, "ADMIN_KEY": admin, "ON_DEVICE": OnDeviceModel.isAvailable ? "1" : ""], transport: transport)
         e.log = { [weak store] level, msg in
             guard level != "info" else { return }
             store?.activity("connector:\(connectorID)", level == "error" ? .error : .warning, "Engine on this Mac: \(String(msg.prefix(300)))")

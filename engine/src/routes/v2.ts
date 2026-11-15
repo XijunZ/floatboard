@@ -1,6 +1,6 @@
 import { SKILL } from "../triage/classify";
 import { type Env, json, nowISO } from "../env";
-import { DEFAULT_MODEL, HAIKU, MODELS, SONNET, costEstimate, type Job } from "../lib/llm";
+import { DEFAULT_MODEL, HAIKU, MODELS, ON_DEVICE, SONNET, costEstimate, onDeviceAllowed, type Job } from "../lib/llm";
 import { route } from "../lib/router";
 import { readJSON } from "../lib/http";
 import { Budget, CALLS_PER_INVOCATION } from "../lib/budget";
@@ -142,6 +142,13 @@ route("POST", "/v2/drafts/run", async (_req, env, user) => {
 
 type Field = { key: string; label: string; kind: "text" | "longtext" | "list" | "bool" | "int" | "choice" | "groupNotes"; help?: string; options?: string[] };
 /** Matches the app's binding format; test/fixtures/v2-status.example.json is the shared example. */
+/** The settings as this engine offers them: "On this Mac" is a judging choice only in the engine inside the Mac app. */
+export function schemaFor(env: Env): Field[] {
+  if (env.ON_DEVICE !== "1") return SCHEMA;
+  return SCHEMA.map((f) => f.key === "model_judge" ? { ...f, options: [...(f.options ?? []), "On this Mac"],
+    help: (f.help ?? "") + " On this Mac uses Apple's model on this Mac: free and private, less accurate (compare it first)." } : f);
+}
+
 export const SCHEMA: Field[] = [
   { "key": "group_notes", "label": "What each group means", "kind": "groupNotes", "help": "Claude uses these to put new tasks in the right group." },
   { "key": "my_rules", "label": "Your own rules", "kind": "longtext", "help": "Plain words, one per line. These override the shared email skill." },
@@ -173,7 +180,10 @@ function valuesOf(s: any): Record<string, unknown> {
 }
 
 /** "Haiku" or "Sonnet": what the app shows for a job's model (the default when none was chosen). */
-const modelName = (v: string | null | undefined, job: Job) => { const k = (v ?? DEFAULT_MODEL[job]).toLowerCase(); return k[0].toUpperCase() + k.slice(1); };
+const modelName = (v: string | null | undefined, job: Job) => {
+  const k = (v ?? DEFAULT_MODEL[job]).toLowerCase();
+  return k === "on this mac" ? "On this Mac" : k[0].toUpperCase() + k.slice(1);
+};
 
 /** A whole number given as a number or a numeric string ("50"); anything else is null. */
 function wholeNumber(v: unknown): number | null {
@@ -183,7 +193,7 @@ function wholeNumber(v: unknown): number | null {
 }
 
 /** Validate `values` into column assignments; returns an error message or the SQL pieces. */
-function toColumns(values: Record<string, any>): { error: string } | { set: string[]; vals: unknown[] } {
+function toColumns(values: Record<string, any>, env?: Env): { error: string } | { set: string[]; vals: unknown[] } {
   const set: string[] = [], vals: unknown[] = [];
   const list = (v: unknown) => Array.isArray(v) ? JSON.stringify(v.map(String).map((x) => x.trim().toLowerCase()).filter(Boolean)) : null;
   for (const [k, v] of Object.entries(values)) {
@@ -214,7 +224,9 @@ function toColumns(values: Record<string, any>): { error: string } | { set: stri
       }
       case "model_judge": case "model_recap": case "model_reply": {
         const m = typeof v === "string" ? v.trim().toLowerCase() : "";
-        if (!MODELS[m]) return { error: `${k} must be Haiku or Sonnet` };
+        if (!MODELS[m] || (MODELS[m] === ON_DEVICE && !(env && onDeviceAllowed(env, k === "model_judge" ? "judge" : "reply")))) {
+          return { error: `${k} must be Haiku or Sonnet` };
+        }
         set.push(`${k}=?`); vals.push(m); break;
       }
       case "learn_at": {
@@ -238,7 +250,7 @@ route("PUT", "/v2/settings", async (req, env, user) => {
   const { version, values } = b.body;
   if (!Number.isInteger(version) || version < 0) return json({ error: "version must be a whole number" }, 400);
   if (!isObj(values)) return json({ error: "values must be an object" }, 400);
-  const cols = toColumns(values);
+  const cols = toColumns(values, env);
   if ("error" in cols) return json({ error: cols.error }, 400);
   const cur = await env.DB.prepare("SELECT settings_version FROM settings WHERE user_id=?").bind(user.id).first<{ settings_version: number }>();
   if (!cur) return json({ error: "not found" }, 404);
@@ -306,7 +318,7 @@ route("GET", "/v2/status", async (_req, env, user) => {
   }
   const count = async (sql: string) => (await env.DB.prepare(sql).bind(user.id).first<{ n: number }>())?.n ?? 0;
   return json({
-    settings_version: s?.settings_version ?? 0, schema: SCHEMA, needs_attention,
+    settings_version: s?.settings_version ?? 0, schema: schemaFor(env), needs_attention,
     waiting: await count("SELECT COUNT(*) n FROM app_events WHERE user_id=? AND processed=0"),
     last_run_ok: good?.finished ?? null, last_run_error: run?.error ?? null, oldest_unprocessed_event: oldest?.t ?? null,
     // The whole engine database (all users), so the Mac can offer to archive old data before D1's limit.
