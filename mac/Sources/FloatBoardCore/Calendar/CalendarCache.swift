@@ -134,14 +134,25 @@ public final class CalendarCache {
         events("WHERE e.account=? AND e.calendar_id=? AND e.event_id=?", [account, calendarID, eventID]).first
     }
 
+    /// An event made from a task (C6) is one whose `fb_card` is set, or that a live card points at.
+    /// The one rule for "this is a task's event, not a meeting"; used by `nextMeeting` and `meetings(from:to:)`.
+    private static let notTaskEvent = """
+        e.fb_card IS NULL AND NOT EXISTS (SELECT 1 FROM cards k WHERE k.deleted=0 AND k.gcal_account=e.account AND k.gcal_event=e.event_id)
+        """
+
     /// The earliest-starting timed event that has not ended by `date` (one in progress counts) and is not an all-day event or one made from a task (C6).
     public func nextMeeting(after date: Date) -> CalEvent? {
         let (clause, args) = Self.connectedClause()
         return events("""
-            WHERE e.gone=0 AND c.shown=1\(clause) AND e.all_day=0 AND e.fb_card IS NULL
-            AND NOT EXISTS (SELECT 1 FROM cards k WHERE k.deleted=0 AND k.gcal_account=e.account AND k.gcal_event=e.event_id)
+            WHERE e.gone=0 AND c.shown=1\(clause) AND e.all_day=0 AND \(Self.notTaskEvent)
             AND e.end>? ORDER BY e.start, e.short_id LIMIT 1
             """, args + [date]).first
+    }
+
+    /// Like `events(from:to:)` but without events made from tasks (C6): what the phone's Today list shows.
+    public func meetings(from: Date, to: Date) -> [CalEvent] {
+        let (clause, args) = Self.connectedClause()
+        return events("WHERE e.gone=0 AND c.shown=1 AND e.start<? AND e.end>?\(clause) AND \(Self.notTaskEvent) ORDER BY e.start, e.short_id", [to, from] + args)
     }
 
     // MARK: Internals

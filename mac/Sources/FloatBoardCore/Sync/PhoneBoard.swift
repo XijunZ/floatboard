@@ -10,6 +10,21 @@ public struct BoardLink: Codable, Equatable {
     public init(kind: String, url: String, label: String? = nil) { self.kind = kind; self.url = url; self.label = label }
 }
 
+/// One calendar event in the copy for the phone's Today list. Times are ISO 8601 UTC; `tasks` are the ids of the cards linked to it.
+public struct BoardEvent: Codable, Equatable {
+    public var id: String
+    public var title: String
+    public var start: String
+    public var end: String
+    public var allDay: Bool
+    public var video: String?
+    public var color: String
+    public var tasks: [Int64]
+    public init(id: String, title: String, start: String, end: String, allDay: Bool, video: String?, color: String, tasks: [Int64]) {
+        self.id = id; self.title = title; self.start = start; self.end = end; self.allDay = allDay; self.video = video; self.color = color; self.tasks = tasks
+    }
+}
+
 /// One task in the copy of the board the engine keeps for the phone app (`PUT /v2/board`).
 public struct BoardCard: Codable, Equatable {
     public var id: Int64
@@ -251,24 +266,47 @@ public enum PhoneBoard {
         return f.date(from: s)
     }
 
-    /// The body sent to the engine: `{"cards":[...], "sent_at": ...}` with sorted keys. Without `sentAt` (as for the
-    /// hash), equal boards give equal bytes.
-    public static func body(_ cards: [BoardCard], sentAt: Date? = nil) throws -> Data {
+    public static let maxEvents = 50
+    static let maxEventTasks = 20
+
+    /// Today's and tomorrow's meetings (by the app's calendar) for the phone, at most 50: shown calendars of connected
+    /// accounts, not events made from tasks (C6), each with the ids of its linked tasks.
+    @MainActor
+    public static func events(store: Store, now: Date, calendar: Calendar = AppTime.calendar) -> [BoardEvent] {
+        let from = calendar.startOfDay(for: now)
+        guard let to = calendar.date(byAdding: .day, value: 2, to: from) else { return [] }
+        let cache = CalendarCache(store: store)
+        let colors = Dictionary(cache.calendars().map { ("\($0.account)\u{0}\($0.calendarID)", $0.color) }, uniquingKeysWith: { a, _ in a })
+        return cache.meetings(from: from, to: to).prefix(maxEvents).map { e in
+            let hex = colors["\(e.account)\u{0}\(e.calendarID)"].flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
+            let video = e.videoLink.hasPrefix("https://") && e.videoLink.utf16.count <= 2000 ? e.videoLink : nil // the engine refuses anything but https
+            let tasks = store.links(of: ShortID(kind: .event, number: e.shortID)).filter { $0.kind == .task }.map(\.number)
+            return BoardEvent(id: ShortID(kind: .event, number: e.shortID).text,
+                              title: clip(e.title.trimmingCharacters(in: .whitespacesAndNewlines)).trimmingCharacters(in: .whitespacesAndNewlines),
+                              start: isoUTC(e.start), end: isoUTC(e.end), allDay: e.allDay, video: video, color: hex,
+                              tasks: Array(tasks.prefix(maxEventTasks)))
+        }
+    }
+
+    /// The body sent to the engine: `{"cards":[...], "events":[...], "time_zone": ..., "sent_at": ...}` with sorted keys.
+    /// `events` and `time_zone` are left out when nil (older engines and checks). Without `sentAt` (as for the hash),
+    /// equal boards give equal bytes.
+    public static func body(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, sentAt: Date? = nil) throws -> Data {
         struct Body: Encodable {
-            let cards: [BoardCard]; let sentAt: String?
-            enum CodingKeys: String, CodingKey { case cards, sentAt = "sent_at" }
+            let cards: [BoardCard]; let events: [BoardEvent]?; let timeZone: String?; let sentAt: String?
+            enum CodingKeys: String, CodingKey { case cards, events, timeZone = "time_zone", sentAt = "sent_at" }
         }
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return try enc.encode(Body(cards: cards, sentAt: sentAt.map(isoUTC)))
+        return try enc.encode(Body(cards: cards, events: events, timeZone: timeZone, sentAt: sentAt.map(isoUTC)))
     }
 
     /// A stable fingerprint of the board for one engine address (a different engine always gets a push). It covers
-    /// each card's `status_at`, so a step change is sent even when the card ends on the same step.
-    public static func hash(_ cards: [BoardCard], engine: String) throws -> String {
+    /// each card's `status_at`, so a step change is sent even when the card ends on the same step, and the events.
+    public static func hash(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, engine: String) throws -> String {
         var data = Data(engine.utf8)
         data.append(0)
-        data.append(try body(cards))
+        data.append(try body(cards, events: events, timeZone: timeZone))
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

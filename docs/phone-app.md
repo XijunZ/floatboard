@@ -178,10 +178,12 @@ queued offline 3 h); action on a card deleted on the Mac is dropped and logged; 
 Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (unique per user), `device_id`,
 `made_at`, `sent_at`, `outcome`.
 
-- `PUT /v2/board` `{ sent_at?, cards: [{ ...card, status_at? }] }`. A missing `status_at` keeps the previous time when
+- `PUT /v2/board` `{ sent_at?, time_zone?, events?, cards: [{ ...card, status_at? }] }`. A missing `status_at` keeps the previous time when
   the step is unchanged, else the push time. Each push is compared with the last one: step changes, new cards and gone
   cards are logged (device "mac"); the first push is the baseline. Waiting phone moves older than a card's new
   `status_at` are marked taken (the Mac already shows that step) or superseded.
+  `events` (optional, at most 50, today and tomorrow) are `{ id: "E-37", title, start, end, allDay, video (https or null), color, tasks: [card ids] }`;
+  `time_zone` is the Mac's zone, so the phone's Today list shows the Mac's times. Both are stored in the encrypted copy and returned by `GET /app/api/board`.
 - `POST /app/api/action` `{ sent_at?, actions: [{ id, made_at?, card_id?, action, title?, group? }] }` (1 to 100; body
   at most 64 KB; the older single action still works). Times are corrected by `received_at - sent_at` (ignored past
   7 days) and never later than `received_at`. A repeated id is accepted and not stored again. A move older than the

@@ -391,9 +391,89 @@
     return statusText({ waiting: queue.actions.length, offline: isOffline, lastSync: lastSync, now: Date.now() }) || "Syncing…";
   }
 
+  // ---- Today: meetings and tasks due today, in the zone the Mac sent (the device's when absent)
+
+  function zoneOf() {
+    var z = board && board.time_zone;
+    if (typeof z !== "string" || !z) return undefined;
+    try { new Intl.DateTimeFormat("en", { timeZone: z }); return z; } catch (e) { return undefined; }
+  }
+
+  /** "YYYY-MM-DD" of a time on the calendar of the zone. */
+  function dayKey(ms, zone) {
+    var p = {};
+    new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
+    return p.year + "-" + p.month + "-" + p.day;
+  }
+
+  function todayEvents(zone, today) {
+    var list = board && Array.isArray(board.events) ? board.events : [];
+    return list.filter(function (e) {
+      var s = Date.parse(e.start), n = Date.parse(e.end);
+      if (isNaN(s) || isNaN(n)) return false;
+      return dayKey(s, zone) <= today && today <= dayKey(n > s ? n - 1 : s, zone);
+    }).sort(function (a, b) { return (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0) || Date.parse(a.start) - Date.parse(b.start); });
+  }
+
+  function dueToday(zone, today) {
+    return shown.filter(function (c) {
+      if (c.status === "done" || typeof c.due !== "string") return false;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(c.due)) return c.due === today;
+      var t = Date.parse(c.due);
+      return !isNaN(t) && dayKey(t, zone) === today;
+    });
+  }
+
+  function eventRow(e, zone) {
+    var row = el("div", "ev");
+    var when = e.allDay ? "All day" : new Intl.DateTimeFormat(undefined, { timeZone: zone, hour: "2-digit", minute: "2-digit" }).format(new Date(e.start));
+    row.appendChild(el("span", "when", when));
+    var body = el("span", "body");
+    body.appendChild(el("span", "t", e.title));
+    var byId = {};
+    shown.forEach(function (c) { byId[c.id] = c; });
+    (Array.isArray(e.tasks) ? e.tasks : []).forEach(function (id) {
+      if (byId[id]) body.appendChild(el("div", "task", byId[id].title));
+    });
+    row.appendChild(body);
+    if (typeof e.video === "string" && /^https:\/\//.test(e.video)) {
+      var a = el("a", "join", "Join");
+      a.href = e.video;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      row.appendChild(a);
+    }
+    return row;
+  }
+
+  function renderToday() {
+    var box = $("today");
+    box.replaceChildren();
+    var zone = zoneOf();
+    var cards = [];
+    var events = [];
+    try {
+      var tz = zone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      var today = dayKey(Date.now(), tz);
+      events = todayEvents(tz, today);
+      cards = dueToday(tz, today);
+      if (events.length) {
+        box.appendChild(el("h2", null, "Today"));
+        events.forEach(function (e) { box.appendChild(eventRow(e, tz)); });
+      }
+      if (cards.length) {
+        box.appendChild(el("h2", null, "Due today"));
+        cards.forEach(function (c) { box.appendChild(cardButton(c)); });
+      }
+    } catch (e) { box.replaceChildren(); events = []; cards = []; }
+    box.hidden = !(events.length || cards.length);
+  }
+
   function render() {
     if (!board) return;
     shown = viewBoard(board, queue.actions).cards;
+    renderToday();
     STATUSES.forEach(function (s) {
       document.querySelector('[data-count="' + s + '"]').textContent = String(cardsFor(s).length);
       document.querySelector('[data-tab="' + s + '"]').setAttribute("aria-selected", String(s === tab));
@@ -460,6 +540,8 @@
       queue.account = b.account;
     }
     board = { updated: b.updated || null, cards: Array.isArray(b.cards) ? b.cards : [], pending: b.pending || 0 };
+    if (Array.isArray(b.events)) board.events = b.events;   // absent from Macs before the calendar
+    if (typeof b.time_zone === "string") board.time_zone = b.time_zone;
     var sup = noticeSuperseded(sentIds, b.superseded);
     sentIds = sup.sentIds;
     store(SENT_KEY, sentIds);
