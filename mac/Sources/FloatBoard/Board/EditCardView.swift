@@ -12,6 +12,8 @@ struct EditCardView: View {
 
     /// Set when the pop-up closed via Save, Cancel or Delete (so closing it doesn't save again).
     @State private var finished = false
+    /// The task as the pop-up opened (with its due as the fields show it): only fields changed from this are saved.
+    @State private var opened: Card?
     @State private var replyDraftRefusal: String?
     /// "Link an email…" search shown in place; and why a link change was refused.
     @State private var linkingEmail = false
@@ -21,27 +23,24 @@ struct EditCardView: View {
     @AppStorage("editorExtraHeight") private var extraHeight: Double = 0
     @State private var dragStart: (w: Double, h: Double)?
 
+    /// Saves only the fields the user changed since the pop-up opened (`opened`); everything else is taken from the card as
+    /// stored now, so a title, time or Meet link that Google sent meanwhile is kept (and not sent back as a newer edit).
     private func save() {
         finished = true
         guard !draft.title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         draft.due = hasDue ? Due.combine(day: day, time: hasTime ? time : nil) : nil
         draft.dueHasTime = hasDue && hasTime
-        if let saved = store.card(draft.id) {
-            // Don't overwrite calendar info that may have been set while the pop-up was open.
-            draft.gcalAccount = saved.gcalAccount.isEmpty ? draft.gcalAccount : saved.gcalAccount
-            // Reply draft fields are changed by the app and the engine, never by this editor.
-            draft.replyDraftState = saved.replyDraftState; draft.replyDraftLink = saved.replyDraftLink
-            draft.replyDraftError = saved.replyDraftError; draft.replyDraftRequest = saved.replyDraftRequest
-            draft.replyDraftSentAt = saved.replyDraftSentAt
-            draft.watchSince = saved.watchSince
-            if saved.watchPerson != draft.watchPerson || saved.watchContact != draft.watchContact {
-                store.setWatch(saved, person: draft.watchPerson, contact: draft.watchContact)
-                guard let fresh = store.card(draft.id) else { return }
-                draft.watchPerson = fresh.watchPerson; draft.watchContact = fresh.watchContact
-            }
+        guard let saved = store.card(draft.id) else { return }
+        let base = opened ?? saved
+        if draft.watchPerson != base.watchPerson || draft.watchContact != base.watchContact,
+           saved.watchPerson != draft.watchPerson || saved.watchContact != draft.watchContact {
+            store.setWatch(saved, person: draft.watchPerson, contact: draft.watchContact)
         }
-        guard store.card(draft.id).map({ $0 != draft }) ?? false else { return }
-        store.update(draft)
+        guard let current = store.card(draft.id) else { return }
+        let merged = Card.editorSave(opened: base, edited: draft, current: current)
+        opened = draft   // the editor may stay open (Draft reply): later changes are measured from here
+        guard merged != current else { return }
+        store.update(merged)
     }
 
     /// The task as currently edited (unsaved), for calendar/Join actions.
@@ -265,6 +264,7 @@ struct EditCardView: View {
         // Clicking away (or the board collapsing) closes the pop-up: keep the edits.
         .onDisappear { if !finished { save() } }
         .onAppear {
+            if opened == nil { opened = draft }
             hasDue = draft.due != nil
             if let d = draft.due {
                 day = d

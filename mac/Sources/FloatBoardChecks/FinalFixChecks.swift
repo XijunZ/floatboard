@@ -81,6 +81,31 @@ import FloatBoardConnectors
         check(steady == 2 && lists() == 3, "calendar_list_read_next_pass_after_reconnect")
         check(!fake.requests.contains { $0.url?.path.contains(removed) == true }, "sync_skips_calendars_of_removed_accounts")
     } catch { check(false, "relist checks: \(error)") }
+
+    // 3. The task pop-up saves only what the user changed in it: Google's rename and Meet link made meanwhile stay.
+    do {
+        let (store, cache, outbox) = try setup("popup")
+        store.add(title: "Budget call", area: store.areas.first?.name ?? "Work", importance: .medium, due: at(10), dueHasTime: true)
+        guard let id = store.cards.last?.id else { check(false, "popup setup: no card"); return }
+        store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='\(acct)', gcal_event='b1', gcal_synced_at=\(Date().timeIntervalSince1970 - 3600) WHERE id=\(id)")
+        store.reload()
+        guard let opened = store.card(id) else { check(false, "popup setup: no card"); return }
+        // While the pop-up is open, Google renames the event and adds a Meet call.
+        cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: "b1", cancelled: false,
+            fields: CalEventFields(start: at(10), end: at(10, 30), title: "Budget call (moved room)", videoLink: "https://meet.google.com/abc-defg-hij",
+                                   googleUpdated: Date(), fbCard: id))], nextToken: nil)
+        TaskEventRules.reconcile(store: store, cache: cache, now: Date())
+        guard let current = store.card(id) else { check(false, "popup setup: card gone"); return }
+        var edited = opened; edited.notes = "Bring the numbers"
+        let merged = Card.editorSave(opened: opened, edited: edited, current: current)
+        if merged != current { store.update(merged) }
+        let after = store.card(id)
+        check(after?.title == "Budget call (moved room)" && after?.link == "https://meet.google.com/abc-defg-hij" && after?.notes == "Bring the numbers"
+              && outbox.rows(unsent: true).isEmpty, "popup_keeps_googles_changes_made_while_open")
+        var retitled = edited; retitled.title = "Budget call v2"
+        let m2 = Card.editorSave(opened: opened, edited: retitled, current: store.card(id) ?? current)
+        check(m2.title == "Budget call v2" && m2.link == "https://meet.google.com/abc-defg-hij" && m2.due == at(10), "popup_saves_fields_the_user_changed")
+    } catch { check(false, "popup checks: \(error)") }
 }
 
 /// A fake Google for the checks: records requests and answers with `handler` (body, status).
