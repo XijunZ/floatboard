@@ -211,6 +211,14 @@ import FloatBoardConnectors
         check(cache.nextMeeting(after: at(9, 15))?.title == "Focus block" && cache.nextMeeting(after: at(11, 30))?.title == "Focus block"
               && cache.nextMeeting(after: at(13, 30))?.title == "Retro", "next_meeting_falls_back_to_the_one_in_progress")
     } catch { check(false, "next meeting checks: \(error)") }
+
+    // Search: a typed id finds exactly that task, never a longer number that starts the same.
+    func card(_ id: Int64) -> Card {
+        Card(id: id, title: "Task \(id)", notes: "see T-1", area: "Work", importance: .medium, due: nil, status: .todo, created: Date(), started: nil, done: nil)
+    }
+    check(Search.matches(card(1), "T-1") && Search.matches(card(1), " t-1 ") && !Search.matches(card(10), "T-1") && !Search.matches(card(142), "T-1")
+          && !Search.matches(card(142), "t-14") && Search.matches(card(142), "T-142") && !Search.matches(card(1), "E-1"),
+          "search_by_id_matches_exactly")
 }
 
 /// 5. Google's answers that can never succeed end a change for good (one Activity error, no more retries); only a missing
