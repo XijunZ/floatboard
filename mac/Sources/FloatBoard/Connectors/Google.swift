@@ -224,8 +224,14 @@ final class Google: ObservableObject {
     func calendarAPI(for account: String) -> GoogleCalendarAPI {
         GoogleCalendarAPI(token: { [weak self] force in
             guard let self else { throw GoogleError("FloatBoard is closing.") }
+            guard await self.hasSignIn(account) else { throw GoogleCalendarError.notConnected(account: account) }
             return try await self.accessToken(for: account, forceRefresh: force)
         })
+    }
+
+    /// True when this account still has its saved sign-in (and the app has the Google client secret).
+    func hasSignIn(_ account: String) -> Bool {
+        GoogleCredentials.get("refresh:\(account)") != nil && GoogleCredentials.get("client-secret") != nil
     }
 
     struct CreatedEvent { let id: String; let htmlLink: String; let meetLink: String? }

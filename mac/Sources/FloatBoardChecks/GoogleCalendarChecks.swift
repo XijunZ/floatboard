@@ -116,6 +116,19 @@ func googleCalendarChecks() async {
               && b2["extendedProperties"] == nil && b2["conferenceData"] == nil, "insert_all_day_uses_dates")
     } catch { check(false, "insert_sets_floatboard_card_property: \(error)") }
 
+    // A fixed event id is sent when given; get reads one event.
+    do {
+        let log5 = Log()
+        let a5 = api(log5) { _ in (Data(#"{"id":"abc123","status":"confirmed","summary":"Plan","start":{"dateTime":"2026-11-20T10:00:00Z"},"end":{"dateTime":"2026-11-20T11:00:00Z"},"updated":"2026-11-16T10:00:00Z"}"#.utf8), 200) }
+        let f = CalEventFields(start: t0, end: t0.addingTimeInterval(3600), title: "Plan", googleUpdated: t0)
+        _ = try await a5.insert(calendarID: "primary", f, cardID: nil, addMeet: false, eventID: "abc123")
+        let b = (try? JSONSerialization.jsonObject(with: log5.requests[0].httpBody ?? Data()) as? [String: Any]) ?? [:] // try?-ok: empty body fails the check
+        let got = try await a5.get(calendarID: "primary", eventID: "abc123")
+        check(b["id"] as? String == "abc123" && log5.requests[1].httpMethod == "GET"
+              && log5.requests[1].url?.path.hasSuffix("/calendars/primary/events/abc123") == true && got.eventID == "abc123" && got.fields.title == "Plan",
+              "insert_sends_fixed_event_id_and_get_reads_one")
+    } catch { check(false, "insert_sends_fixed_event_id_and_get_reads_one: \(error)") }
+
     // Patch.
     let log4 = Log()
     let pat = api(log4) { _ in (Data(#"{"id":"e9","status":"confirmed","summary":"Renamed","start":{"date":"2026-12-03"},"end":{"date":"2026-12-04"},"updated":"2026-11-16T10:00:00Z"}"#.utf8), 200) }
