@@ -143,7 +143,7 @@ import FloatBoardConnectors
         googleChange(cache, "ga", "Made here", start: at(d1, 11), updated: ago(590), fb: a)   // as Google reports it, marked as ours
         let b = newCard(store, "Linked to a Google meeting", due: at(d1, 12), hasTime: true)
         store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='\(cal)', gcal_event='gb' WHERE id=\(b)")
-        googleChange(cache, "gb", "Team sync", start: at(d1, 12), updated: ago(500), fb: nil)
+        googleChange(cache, "gb", "Team sync", start: at(d1, 12), updated: ago(500), fb: 9999)   // marked as made for another task
         let c = newCard(store, "Never cached", due: at(d1, 13), hasTime: true)
         store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='\(cal)', gcal_event='gc' WHERE id=\(c)")
         store.delete(store.card(a)!)
@@ -165,6 +165,27 @@ import FloatBoardConnectors
         check(delA && afterB == 0 && delC, "task_delete_deletes_only_fb_event")
         check(recreated, "undo_delete_recreates_event")
     } catch { check(false, "tdel setup: \(error)") }
+
+    do {
+        // Tasks added to the calendar by the first version: account and event saved, no calendar, event unmarked.
+        let (store, cache, outbox) = try setup("oldpath")
+        let id = newCard(store, "Old style", due: at(d1, 10), hasTime: true)
+        store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_event='old1' WHERE id=\(id)")
+        let id2 = newCard(store, "Old style 2", due: at(d1, 12), hasTime: true)
+        store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_event='old2' WHERE id=\(id2)")
+        googleChange(cache, "old1", "Old style", start: at(d1, 10), updated: ago(900))
+        googleChange(cache, "old2", "Old style 2", start: at(d1, 12), updated: ago(900))
+        let meetingBefore = cache.nextMeeting(after: at(d1, 9))?.eventID
+        googleChange(cache, "old1", "Old style", start: at(d1, 15), updated: ago(60))
+        TaskEventRules.reconcile(store: store, cache: cache, now: t)
+        check(link(store, id).calendar == cal && store.card(id)?.due == at(d1, 15) && unsent(outbox).isEmpty, "old_card_reconciled_after_backfill")
+        check(meetingBefore == nil && cache.nextMeeting(after: at(d1, 9)) == nil, "old_card_event_is_not_a_bar_meeting")
+        store.performForTest("UPDATE cards SET gcal_calendar='' WHERE id=\(id2)")   // deleted before any reconcile has filled it in
+        store.delete(store.card(id2)!)
+        var del = false
+        if unsent(outbox).count == 1, case .delete(let eid)? = unsent(outbox)[0].write { del = eid == "old2" && unsent(outbox)[0].calendarID == cal }
+        check(del, "deleting_old_card_enqueues_event_delete")
+    } catch { check(false, "oldpath setup: \(error)") }
 
     do {
         // Clearing the due leaves the event and its link (D8); done leaves the event (C3).

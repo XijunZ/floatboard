@@ -27,6 +27,9 @@ public enum TaskEventRules {
     public static func reconcile(store: Store, cache: CalendarCache, now: Date) -> Int {
         var touched = 0
         let links: [LinkedCard]
+        do { try store.backfillOldLinks() } catch {
+            store.activity("calendar", .error, "Could not update tasks added to the calendar by an earlier version", detail: "\(error)")
+        }
         do { links = try store.linkedCards() } catch {
             store.activity("calendar", .error, "Could not read which tasks are on the calendar", detail: "\(error)")
             return 0
@@ -154,7 +157,9 @@ extension Store {
     /// cache) is left alone. Returns the event targeted, so undo can recreate it.
     func queueCalendarDelete(cardID: Int64, now: Date) throws -> EventLink? {
         guard let t = try eventTarget(cardID) else { return nil }
-        if let cached = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event), cached.fbCard != cardID {
+        // An event marked as made for another task is not this one's. Events from before the mark existed carry none: they are ours.
+        if let cached = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event),
+           let mark = cached.fbCard, mark != cardID {
             return nil
         }
         CalendarOutbox(store: self).enqueue(.delete(eventID: t.event), account: t.account, calendarID: t.calendar, now: now)
@@ -208,8 +213,32 @@ extension Store {
             """, [cardID], { s in EventLink(account: DB.text(s, 1), calendar: DB.text(s, 2), event: CalendarOutbox.googleEventID(forUUID: DB.text(s, 0))) }).first {
             return pending
         }
-        return try db.query("SELECT gcal_account, gcal_calendar, gcal_event FROM cards WHERE id=? AND gcal_event<>'' AND gcal_calendar<>''",
-                            [cardID]) { EventLink(account: DB.text($0, 0), calendar: DB.text($0, 1), event: DB.text($0, 2)) }.first
+        let own = try db.query("SELECT gcal_account, gcal_calendar, gcal_event FROM cards WHERE id=? AND gcal_event<>''",
+                               [cardID]) { EventLink(account: DB.text($0, 0), calendar: DB.text($0, 1), event: DB.text($0, 2)) }.first
+        guard var l = own, l.calendar.isEmpty else { return own }
+        guard let cal = try oldLinkCalendar(account: l.account, event: l.event) else { return nil }
+        l.calendar = cal
+        return l
+    }
+
+    /// The calendar of an event added by the first version of "Add to calendar", which always used the account's main calendar
+    /// ("primary"). Google names that calendar with the account's address, which is how the cache keys it: the cached event with
+    /// this account and id tells exactly; failing that, the account's main calendar as chosen for new events.
+    private func oldLinkCalendar(account: String, event: String) throws -> String? {
+        guard !account.isEmpty else { return nil }
+        if let c = try db.query("SELECT calendar_id FROM cal_events WHERE account=? AND event_id=? ORDER BY gone, short_id LIMIT 1",
+                                [account, event], { DB.text($0, 0) }).first { return c }
+        return try resolveCalendar(account)?.1
+    }
+
+    /// Tasks linked by the first version have no calendar saved: save it, so nothing else has to special-case them.
+    func backfillOldLinks() throws {
+        let old = try db.query("SELECT id, gcal_account, gcal_event FROM cards WHERE deleted=0 AND gcal_event<>'' AND gcal_calendar='' AND gcal_account<>''")
+            { (DB.int($0, 0), DB.text($0, 1), DB.text($0, 2)) }
+        for (id, account, event) in old {
+            guard let cal = try oldLinkCalendar(account: account, event: event) else { continue }
+            try performThrowing { try db.run("UPDATE cards SET gcal_calendar=? WHERE id=?", [cal, id]) }
+        }
     }
 
     func hasUnsentCalendarWrite(cardID: Int64, link: EventLink) throws -> Bool {
