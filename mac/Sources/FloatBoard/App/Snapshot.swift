@@ -125,6 +125,20 @@ enum Snapshot {
         // Calendar Day and Week with made-up events and tasks. Only on a scratch database: it fills the calendar cache and the board.
         if ProcessInfo.processInfo.environment["FLOATBOARD_CALSHOTS"] != nil, LocalData.isScratchDatabase {
             seedCalendar(store)
+            // The bar with a made-up meeting 20 minutes away: with a video link (Join), without one, and with a long title.
+            let soon = Date().addingTimeInterval(20 * 60)
+            for (name, title, link) in [("bar-meeting.png", "Design sync", "https://meet.example.com/abc"),
+                                        ("bar-meeting-nolink.png", "Dentist", ""),
+                                        ("bar-meeting-long.png", "Quarterly planning review with the whole leadership team", "https://meet.example.com/abc")] {
+                let f = CalEventFields(start: soon, end: soon.addingTimeInterval(1800), title: title, videoLink: link, googleUpdated: Date())
+                CalendarCache(store: store).apply(account: "me@example.com", calendarID: "me@example.com",
+                                                  changes: [GoogleEventChange(eventID: "bar", cancelled: false, fields: f)], nextToken: nil)
+                ui.refreshMeeting(store: store)
+                save(RootView().background(backdrop), name, CGSize(width: 900, height: 30))
+            }
+            CalendarCache(store: store).apply(account: "me@example.com", calendarID: "me@example.com",
+                                              changes: [GoogleEventChange(eventID: "bar", cancelled: true, fields: nil)], nextToken: nil)
+            ui.refreshMeeting(store: store)
             let cal0 = AppTime.calendar
             let cache = CalendarCache(store: store)
             let hours = 8...18

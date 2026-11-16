@@ -102,6 +102,26 @@ import FloatBoardCore
     check(cache.nextMeeting(after: base.addingTimeInterval(41.5 * 3600))?.title == "Real meeting"
           && cache.nextMeeting(after: base.addingTimeInterval(42 * 3600)) == nil, "next_meeting_includes_in_progress")
 
+    // The bar's next meeting: shown from 60 minutes before the start until the end; Join only with a video link.
+    func meeting(_ title: String, start: Double, end: Double, link: String = "") -> CalEvent {
+        CalEvent(shortID: 1, account: acct, calendarID: cal, eventID: "bm", start: base.addingTimeInterval(start * 3600),
+                 end: base.addingTimeInterval(end * 3600), allDay: false, title: title, location: "", videoLink: link,
+                 description: "", htmlLink: "", recurringID: nil, googleUpdated: base, fbCard: nil)
+    }
+    let bm = meeting("Sync", start: 10, end: 11)
+    check(BarMeeting.visible(next: bm, now: base.addingTimeInterval(8.99 * 3600)) == nil
+          && BarMeeting.visible(next: bm, now: base.addingTimeInterval(9 * 3600))?.title == "Sync"
+          && BarMeeting.visible(next: bm, now: base.addingTimeInterval(10.5 * 3600))?.title == "Sync"
+          && BarMeeting.visible(next: nil, now: base) == nil, "bar_meeting_appears_60_min_before")
+    check(BarMeeting.visible(next: bm, now: base.addingTimeInterval(10.99 * 3600)) != nil
+          && BarMeeting.visible(next: bm, now: base.addingTimeInterval(11 * 3600)) == nil
+          && BarMeeting.visible(next: bm, now: base.addingTimeInterval(12 * 3600)) == nil, "bar_meeting_hides_after_end")
+    check(BarMeeting.joinURL(meeting("A", start: 1, end: 2, link: "https://meet.example.com/abc"))?.absoluteString == "https://meet.example.com/abc"
+          && BarMeeting.joinURL(meeting("A", start: 1, end: 2)) == nil
+          && BarMeeting.joinURL(meeting("A", start: 1, end: 2, link: "  ")) == nil
+          && BarMeeting.joinURL(meeting("A", start: 1, end: 2, link: "javascript:alert(1)")) == nil
+          && BarMeeting.label(bm) == "\(Fmt.clock(bm.start)) Sync", "bar_meeting_join_only_with_video_link")
+
     // a write that fails is reported to Activity, not swallowed
     try? store.db.run("DROP TABLE cal_events") // try?-ok: the drop is the test setup; the check below fails if it did not happen
     let ok = cache.apply(account: acct, calendarID: cal, changes: [change("z", fields("Z", at: 2))], nextToken: "never")
