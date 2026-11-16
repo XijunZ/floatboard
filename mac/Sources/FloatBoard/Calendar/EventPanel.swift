@@ -16,12 +16,13 @@ struct EventPanel: View {
     @State private var confirmDelete = false
     /// Set by Delete: the panel closing after it must not queue a change for an event that is going away.
     @State private var deleted = false
-    /// The fields as they were when the panel opened: only what the user changed from these is sent.
-    private let opened: EventPanelEdit.Fields
+    /// The fields as they were when the panel opened: only what the user changed from these is sent. State, so a redraw
+    /// with a newer copy of the event (Google changed it meanwhile) does not move the starting point.
+    @State private var opened: EventPanelEdit.Fields
 
     init(event: CalEvent, calendar: CalCalendar?, waiting: Bool) {
         self.event = event; self.calendar = calendar; self.waiting = waiting
-        opened = EventPanelEdit.Fields(event)
+        _opened = State(initialValue: EventPanelEdit.Fields(event))
         _title = State(initialValue: event.title); _day = State(initialValue: event.start)
         _start = State(initialValue: event.start); _end = State(initialValue: event.end)
     }

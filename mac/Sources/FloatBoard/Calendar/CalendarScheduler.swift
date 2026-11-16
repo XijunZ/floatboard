@@ -28,6 +28,7 @@ final class CalendarScheduler {
     private var running = false
     /// Asked to run while a run was going: run once more right after it, so a change made meanwhile is not left for minutes.
     private var again = false
+    private var soon = false
 
     init(store: Store, google: Google) {
         sender = CalendarSender(store: store, google: google)
@@ -45,7 +46,7 @@ final class CalendarScheduler {
             MainActor.assumeIsolated { self?.runNow() }
         }
         NotificationCenter.default.addObserver(forName: .floatBoardCalendarNow, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.runNow() }
+            MainActor.assumeIsolated { self?.runSoon() }
         }
         // Board edits, deletes and undo that queue a calendar change ask for a run right away.
         CalendarOutbox.nudge = { NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil) }
@@ -55,6 +56,19 @@ final class CalendarScheduler {
     private func beat() {
         let interval = fastMode ? Self.fastInterval : Self.slowInterval
         if Date().timeIntervalSince(lastRun) >= interval - 5 { runNow() }
+    }
+
+    /// A run on the next turn of the main loop: several asks from one user action (the board and the calendar screen both
+    /// ask) become one run.
+    private func runSoon() {
+        guard !soon else { return }
+        soon = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.soon = false
+                self?.runNow()
+            }
+        }
     }
 
     func runNow() {
