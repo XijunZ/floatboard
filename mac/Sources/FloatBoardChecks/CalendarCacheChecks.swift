@@ -98,6 +98,10 @@ import FloatBoardCore
     check(cache.nextMeeting(after: base.addingTimeInterval(35 * 3600))?.title == "Real meeting"
           && cache.nextMeeting(after: base.addingTimeInterval(100 * 3600)) == nil, "next_meeting_skips_all_day_and_task_events")
 
+    // "Real meeting" runs 41-42h; at 41.5h it is in progress and still the next one, at 42h it is over
+    check(cache.nextMeeting(after: base.addingTimeInterval(41.5 * 3600))?.title == "Real meeting"
+          && cache.nextMeeting(after: base.addingTimeInterval(42 * 3600)) == nil, "next_meeting_includes_in_progress")
+
     // a write that fails is reported to Activity, not swallowed
     try? store.db.run("DROP TABLE cal_events") // try?-ok: the drop is the test setup; the check below fails if it did not happen
     let ok = cache.apply(account: acct, calendarID: cal, changes: [change("z", fields("Z", at: 2))], nextToken: "never")
