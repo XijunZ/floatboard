@@ -116,8 +116,11 @@ public final class CalendarCache {
 
     /// The earliest-starting timed event that has not ended by `date` (one in progress counts) and is not an all-day event or one made from a task (C6).
     public func nextMeeting(after date: Date) -> CalEvent? {
-        events("WHERE e.gone=0 AND c.shown=1 AND e.all_day=0 AND e.fb_card IS NULL AND e.end>? ORDER BY e.start, e.short_id LIMIT 1",
-               [date]).first
+        events("""
+            WHERE e.gone=0 AND c.shown=1 AND e.all_day=0 AND e.fb_card IS NULL
+            AND NOT EXISTS (SELECT 1 FROM cards k WHERE k.deleted=0 AND k.gcal_account=e.account AND k.gcal_event=e.event_id)
+            AND e.end>? ORDER BY e.start, e.short_id LIMIT 1
+            """, [date]).first
     }
 
     // MARK: Internals
