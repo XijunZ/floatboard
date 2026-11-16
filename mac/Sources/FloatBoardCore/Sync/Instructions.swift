@@ -5,9 +5,10 @@ import Foundation
 /// learned (`learned`). Every change is a new row in `instructions`; nothing is overwritten. The current text stays
 /// in the connector's settings, as before, so the engine gets it the same way.
 public enum Instructions {
-    public static let parts = ["my_rules", "chat_rules", "learned"]
+    public static let parts = ["my_rules", "chat_rules", "learned", "rulebook_email", "rulebook_chat"]
 
-    public enum Source: String, Sendable { case start, you, learning, restore }
+    /// `builtin`: a new built-in rulebook merged into your copy (your edits kept).
+    public enum Source: String, Sendable { case start, you, learning, restore, builtin }
 
     public struct Version: Identifiable, Equatable, Sendable {
         public let id: Int64

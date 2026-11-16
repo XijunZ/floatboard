@@ -8,6 +8,8 @@ struct InstructionsHistory: View {
     @EnvironmentObject var store: Store
     let info: ConnectorInfo
     let part: String
+    /// For a rulebook: what an empty version means (the built-in text), so its changes read sensibly.
+    var emptyMeans: String = ""
     @State private var open = false
 
     var body: some View {
@@ -17,12 +19,14 @@ struct InstructionsHistory: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(versions.enumerated()), id: \.element.id) { i, v in
                         let previous = i + 1 < versions.count ? versions[i + 1].text : ""
+                        let (before, now) = (previous.isEmpty ? emptyMeans : previous, v.text.isEmpty ? emptyMeans : v.text)
                         HStack(alignment: .top, spacing: 8) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("\(Self.when(v.at)) · \(Self.who(v))" + (v.note.isEmpty ? "" : " · \(v.note)"))
                                     .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                                Text(v.source == .start ? "The text you had: \(Instructions.lines(v.text).count) line(s)"
-                                     : Instructions.summary(previous, v.text))
+                                Text(v.source == .start ? "The text you had: \(Instructions.lines(now).count) line(s)"
+                                     : v.text.isEmpty && !emptyMeans.isEmpty ? "Back to the built-in rulebook"
+                                     : Instructions.summary(before, now))
                                     .font(.system(size: 11)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer()
@@ -48,6 +52,7 @@ struct InstructionsHistory: View {
         case .you: "you"
         case .learning: "learned from your corrections"
         case .restore: "you restored"
+        case .builtin: "built-in rulebook updated"
         }
     }
 

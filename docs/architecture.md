@@ -400,3 +400,6 @@ Where the build differs from the plan above, and why:
 - **Keys (C9)** live in the Mac's private credentials file (owner-only), not the Keychain, for every build without an
   Apple Developer ID: macOS ties Keychain access to the exact build for those, so each rebuild asked for the Keychain
   password and held the app at launch. Builds signed with a Developer ID use the Keychain.
+- **Rulebooks (C8) are editable** (16 Nov): each starts as the built-in one; your copy, with every version restorable
+  and Reset to built-in. Built-in updates merge into your copy line by line, your edits winning. One fixed rule always
+  applies on top: security or fraud alerts about your own accounts always need you.

@@ -173,6 +173,7 @@ final class ConnectorRunner {
             Task { @MainActor in
                 let r = await ConnectorSync.run(connector: id, store: store, client: client, now: Date())
                 await Keys.push(connector: id, store: store, client: client)
+                if let books = try? await client.rulebooks() { RulebookSync.refresh(connector: id, store: store, books: books) } // try?-ok: retried at the next sync
                 running.remove(id)
                 store.reload()
                 Health.refresh(store: store, backups: backups)

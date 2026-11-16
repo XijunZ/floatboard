@@ -90,3 +90,36 @@ import FloatBoardCore
               "removing_a_key_removes_it_on_the_engine")
     } catch { check(false, "keys: \(error)") }
 }
+
+/// Your copy of a rulebook: follows the built-in one until you edit it; afterwards built-in updates merge in and your
+/// edits stay; reset goes back; every step is a version.
+@MainActor func rulebookChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-rb-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: temp cleanup
+    let store: Store
+    do { store = Store(db: try DB(url: root.appendingPathComponent("board.sqlite"))) } catch { check(false, "rulebook setup: \(error)"); return }
+    func mine() -> String { store.connectors.first { $0.id == "rb" }?.settings["rulebook_email"] as? String ?? "" }
+    func book(_ t: String) -> [Rulebook] {
+        [try! JSONDecoder().decode(Rulebook.self, from: Data(#"{"key":"email","name":"Email","text":"\#(t)"}"#.utf8))]
+    }
+    do {
+        try ConnectorAccounts.add(id: "rb", name: "RB", baseURL: URL(string: "https://rb.example")!, key: "k", store: store)
+        RulebookSync.refresh(connector: "rb", store: store, books: book("- A\\n- B"))
+        RulebookSync.refresh(connector: "rb", store: store, books: book("- A\\n- B2"))
+        check(mine() == "", "rulebook_follows_the_built_in_until_edited")
+        // You edit: drop A, add Mine.
+        try store.saveConnectorSettings(connector: "rb", values: ["rulebook_email": "- B2\n- Mine"])
+        RulebookSync.setBase("- A\n- B2", "rb", "rulebook_email", store: store)
+        store.reload()
+        // The built-in changes B2 -> B3 and adds C: your removal of A and your line stay.
+        RulebookSync.refresh(connector: "rb", store: store, books: book("- A\\n- B3\\n- C"))
+        store.reload()
+        check(mine() == "- B3\n- C\n- Mine", "rulebook_built_in_update_keeps_your_edits: \(mine())")
+        let v = store.instructionVersions(connector: "rb", part: "rulebook_email")
+        check(v.first?.source == .builtin, "rulebook_update_is_a_version")
+        try store.saveConnectorSettings(connector: "rb", values: ["rulebook_email": ""], source: .restore, note: "reset")
+        store.reload()
+        check(mine() == "" && store.instructionVersions(connector: "rb", part: "rulebook_email").count == v.count + 1,
+              "rulebook_reset_is_a_version_and_follows_the_built_in")
+    } catch { check(false, "rulebook: \(error)") }
+}

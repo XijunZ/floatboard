@@ -151,6 +151,8 @@ export function schemaFor(env: Env): Field[] {
 
 export const SCHEMA: Field[] = [
   { "key": "group_notes", "label": "What each group means", "kind": "groupNotes", "help": "Claude uses these to put new tasks in the right group." },
+  { "key": "rulebook_email", "label": "Email rulebook", "kind": "longtext", "help": "How FloatBoard judges email. Starts as the built-in rulebook; edit it freely, restore any earlier version, or reset it to the built-in one." },
+  { "key": "rulebook_chat", "label": "Chat rulebook", "kind": "longtext", "help": "How FloatBoard judges WhatsApp and WeChat messages. Starts as the built-in rulebook; edit it freely, restore any earlier version, or reset it to the built-in one." },
   { "key": "my_rules", "label": "Your rules", "kind": "longtext", "help": "Plain words, one rule per line, for everything FloatBoard reads. To aim a rule at one place, start it with Email:, WhatsApp: or Meetings:. Your rules win over the built-in rulebook." },
   { "key": "learned", "label": "What FloatBoard has learned about you", "kind": "longtext", "help": "Built from your corrections. You can edit it." },
   { "key": "chat_rules", "label": "Your WhatsApp rules (older)", "kind": "longtext", "help": "Kept from before: these now belong in Your rules, each line starting with WhatsApp:." },
@@ -174,6 +176,7 @@ function valuesOf(s: any): Record<string, unknown> {
     ignore_senders: JSON.parse(s?.ignore_senders ?? "[]"), allow_senders: JSON.parse(s?.allow_senders ?? "[]"),
     unread_only: !!(s?.unread_only ?? 1), mark_read_on_done: !!(s?.mark_read_on_done ?? 1), ai_footer: !!(s?.ai_footer ?? 0), alerts_on: !!(s?.alerts_on ?? 1),
     critical_hours: s?.critical_hours ?? 24, learn_at: s?.learn_at ?? null, groups: JSON.parse(s?.groups ?? "[]"),
+    rulebook_email: s?.rulebook_email ?? "", rulebook_chat: s?.rulebook_chat ?? "",
     model_judge: modelName(s?.model_judge, "judge"), model_recap: modelName(s?.model_recap, "recap"), model_reply: modelName(s?.model_reply, "reply"),
     time_zone: s?.time_zone ?? DEFAULT_TIME_ZONE,
   };
@@ -211,6 +214,9 @@ function toColumns(values: Record<string, any>, env?: Env): { error: string } | 
           .map(([a, b]) => [String(a).trim(), String(b ?? "").trim().slice(0, 300)]).filter(([a, b]) => a && b));
         set.push("group_notes=?"); vals.push(JSON.stringify(notes)); break;
       }
+      case "rulebook_email": case "rulebook_chat":
+        if (typeof v !== "string" || v.length > 20000) return { error: `${k} must be text (at most 20,000 characters)` };
+        set.push(`${k}=?`); vals.push(v.trim() || null); break;
       case "my_rules": case "learned": case "chat_rules":
         if (typeof v !== "string") return { error: `${k} must be text` };
         set.push(`${k}=?`); vals.push(v.trim().slice(0, k === "learned" ? 4000 : 2000)); break;

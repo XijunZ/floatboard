@@ -22,9 +22,10 @@ route("POST", "/v2/models/compare", async (req, env, user) => {
       FROM chat_rows WHERE user_id=? ORDER BY received DESC LIMIT ?`).bind(user.id, limit).all<any>();
   if (!results.length) return json({ n: 0, agree: 0, pairs: [], note: "No chats to compare yet: turn on WhatsApp screening first." });
   const key = await decrypt(env, u.anthropic_key_enc);
-  const s = await env.DB.prepare("SELECT groups, chat_rules FROM settings WHERE user_id=?").bind(user.id).first<{ groups: string | null; chat_rules: string | null }>();
+  const s = await env.DB.prepare("SELECT groups, chat_rules, rulebook_chat FROM settings WHERE user_id=?").bind(user.id)
+    .first<{ groups: string | null; chat_rules: string | null; rulebook_chat: string | null }>();
   const groups: string[] = JSON.parse(s?.groups ?? "[]");
-  const ctx = { chatRules: s?.chat_rules ?? "", userName: u.name ?? "" };
+  const ctx = { chatRules: s?.chat_rules ?? "", userName: u.name ?? "", chatRulebook: s?.rulebook_chat ?? "" };
   const haiku = makeClient(key, undefined, { env, userId: user.id, job: "compare", model: HAIKU });
   const device = makeClient(key, undefined, { env, userId: user.id, job: "compare", model: ON_DEVICE });
   const pairs: { chat: string; haiku: boolean | null; device: boolean | null }[] = [];

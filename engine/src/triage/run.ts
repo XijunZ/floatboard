@@ -221,7 +221,8 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
     }
     if (route === "classify") {
       stats.classified++;
-      const res = await classify(m, me, fb, client, groups, { groupNotes, myRules, inbox: source, learned, timeZone, chatRules, userName });
+      const res = await classify(m, me, fb, client, groups, { groupNotes, myRules, inbox: source, learned, timeZone, chatRules, userName,
+        emailRulebook: s?.rulebook_email ?? "", chatRulebook: s?.rulebook_chat ?? "" });
       const a = res.ok ? res.action : null;
       if (!res.ok) {
         stats.classified--; // not judged
