@@ -20,6 +20,7 @@ public struct BoardEvent: Codable, Equatable {
     public var video: String?
     public var color: String
     public var tasks: [Int64]
+    enum CodingKeys: String, CodingKey { case id, title, start, end, allDay = "all_day", video, color, tasks }
     public init(id: String, title: String, start: String, end: String, allDay: Bool, video: String?, color: String, tasks: [Int64]) {
         self.id = id; self.title = title; self.start = start; self.end = end; self.allDay = allDay; self.video = video; self.color = color; self.tasks = tasks
     }
