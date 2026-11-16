@@ -143,7 +143,7 @@ import FloatBoardConnectors
     } catch { check(false, "gdel setup: \(error)") }
 
     do {
-        // Deleting a task deletes only the event FloatBoard made for it (D8); undo recreates it.
+        // Deleting a task deletes only the event FloatBoard made for it (D8); undo before sending takes the delete back.
         let (store, cache, outbox) = try setup("tdel")
         let a = newCard(store, "Made here")
         store.placeOnCalendar(cardID: a, start: at(d1, 11), account: acct, now: long)

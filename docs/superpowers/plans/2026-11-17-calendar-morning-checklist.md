@@ -3,20 +3,22 @@
 The calendar is built and all automatic checks pass. These steps are what is left before it goes live, in order.
 
 1. **Review.** Read the spec (`docs/superpowers/specs/2026-11-16-calendar-design.md`) and look at the branch `calendar`. Nothing has been installed, deployed or pushed.
-2. **Reconnect each Google account once.** The calendar needs one more permission. Settings, Calendar, press Reconnect on every account.
-3. **Recapture the Google test fixtures from real responses.** They live in `mac/Tests/Fixtures/` (the `gcal-*.json` files). The hand-written ones carry a `_note` field saying so. In practice: after reconnecting, make one real read per endpoint (calendar list, an events page, a cancelled event, a 410 and the missing-permission reply), scrub personal details, save over the matching file, then compare field names with the hand-written version. `gcal-events-page.json` is a wrapper holding `page1` and `page2`. Delete the `_note` from a fixture once it is genuinely captured. After any fixture fix, re-run FloatBoardChecks, `check-silent.sh`, `check-core-offline.sh` and the engine tests.
-4. **Deploy the engine first, then install the Mac app.** There are no new engine migrations on this branch, so deploying the engine is just the code. Engine first means the phone shows Today from the first push; an old engine ignores the new data safely. The Mac app upgrades its database from version 10 to 11 on first launch and backs it up first.
+2. **Deploy the engine, then install the Mac app.** There are no new engine migrations on this branch, so deploying the engine is just the code. Engine first means the phone shows Today from the first push; an old engine ignores the new data safely. The Mac app then upgrades its database from version 10 to 11 on first launch and backs it up first.
+3. **Reconnect each Google account once** (Settings › Outputs › Calendar, press Reconnect on every account). The calendar needs one more permission. The account's calendars should appear within a minute.
+4. **Ask Claude to recapture the Google fixtures live:** one read per endpoint (calendar list, an events page, a cancelled event, a 410 and the missing-permission reply), scrubbed of personal details, shown to you before anything is committed. Don't paste live data yourself. The fixtures live in `mac/Tests/Fixtures/` (the `gcal-*.json` files; `gcal-events-page.json` is a wrapper holding `page1` and `page2`); the hand-written ones carry a `_note` field, removed once a file is genuinely captured. After any fixture change, re-run FloatBoardChecks, `check-silent.sh`, `check-core-offline.sh` and the engine tests.
 5. **Live checks the automatic tests could not do:**
-   - drag an event, resize an event, click empty time to add one
+   - drag an event, resize an event, click empty time to add one (click at 23:00: the new event ends at midnight, not 23:15)
    - open the event panel (title, time, delete, Open in Google Calendar)
+   - open and close the panel of an event that runs past midnight without changing anything: Google is unchanged
+   - press Reconnect on an account: its calendars appear within a minute
+   - delete a task that is on the calendar and press Undo within 10 seconds: the event keeps its guests and Meet link
    - the link picker, from an event and from a task
-   - the bar's next meeting and its Join button, also on a narrow bar
+   - the bar's next meeting and its Join button, also on a narrow bar (it does not lose its chips); during a long block, a meeting starting within the hour is the one shown
    - the phone's Today list in a browser
-   - Settings, Calendar in each state (loading, reconnect needed, normal) and the Time zone setting
-   - the invisible x on a linked item must not be clickable (no accidental unlink)
-   - open an edit pop-up, change the event in Google, then save the pop-up: Google's change must not be reverted
-   - a narrow bar with a meeting showing: check it does not lose its chips
-   - a new event that fails or is parked lingers as "waiting" with no error shown (known gap)
+   - Settings › Outputs › Calendar in each state (loading, reconnect needed, normal) and the Time zone setting
+   - a linked item's remove x only works while it shows (hover); right-click offers Remove link
+   - open an edit pop-up, change the event's title in Google, change only the notes in the pop-up and save: Google's title stays
+   - a change Google refuses (for example editing an event on a calendar you can only read) shows one error in Activity and is not retried; a refused new event shows a red mark with Discard
    - after a sync reset, nothing in Google should look deleted
    - move a task in FloatBoard and in Google, delete its event in Google, delete the task
 6. **Reconcile today.** Compare what FloatBoard's calendar shows for today with Google, event by event and task by task.
