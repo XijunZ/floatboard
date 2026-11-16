@@ -412,12 +412,13 @@ struct RulesSection: View {
     var body: some View {
         if engines(store).isEmpty { NoEngineYet(what: "Rules") }
         ForEach(screening(store)) { info in
-            let oldChatRules = !((info.settings["chat_rules"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ConnectorSettingsForm(info: info, schema: ConnectorHealth.status(info, store: store)?.schema ?? [],
-                                  keys: ["my_rules"] + (oldChatRules ? ["chat_rules"] : []) + ["group_notes", "ignore_senders", "allow_senders",
-                                         "unread_only", "learned", "learn_at", "*"])
-            AIModelBlock(info: info)
+            let has = { (k: String) in !((info.settings[k] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             Rulebooks(info: info)
+            // "Your rules" and the old WhatsApp rules only show while they hold something (the rulebooks replace them).
+            ConnectorSettingsForm(info: info, schema: ConnectorHealth.status(info, store: store)?.schema ?? [],
+                                  keys: (has("my_rules") ? ["my_rules"] : []) + (has("chat_rules") ? ["chat_rules"] : [])
+                                      + ["group_notes", "ignore_senders", "allow_senders", "unread_only", "learned", "learn_at", "*"])
+            AIModelBlock(info: info)
         }
     }
 }
@@ -489,7 +490,9 @@ struct OnDeviceCompare: View {
     }
 }
 
-/// The shared rulebooks the engine follows (read-only): part 1 of your instructions.
+/// The rulebooks FloatBoard follows (email, chats): yours to edit. Each starts as the built-in one; every change is a
+/// version you can restore, and Reset goes back to the built-in one. A newer built-in rulebook is merged in without
+/// touching what you changed (RulebookSync).
 struct Rulebooks: View {
     @EnvironmentObject var store: Store
     let info: ConnectorInfo
@@ -497,27 +500,81 @@ struct Rulebooks: View {
     @State private var error: String?
 
     var body: some View {
-        SettingsBlock(title: "Built-in rulebook (read-only)", help: "What every FloatBoard engine follows, so it can be improved for everyone. To change how it treats something, write a line in Your rules: yours always win.") {
-            ForEach(books) { b in
-                DisclosureGroup(b.name) {
-                    ScrollView {
-                        Text(b.text).font(.system(size: 11)).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: 220)
-                }
-                .font(.system(size: 12))
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(books) { b in RulebookEditor(info: info, book: b) }
+            if books.isEmpty && error == nil { Text("Loading the rulebooks…").font(.system(size: 11)).foregroundStyle(.secondary) }
             if let error { Text(error).font(.system(size: 11)).foregroundStyle(.orange) }
+            Text("Always applied on top, and not editable: security or fraud alerts about your own accounts always need you.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
         }
         .task { await load() }
     }
 
     private func load() async {
         guard let client = ConnectorAccounts.client(for: info, store: store) else { return }
-        do { books = try await client.rulebooks(); error = nil } catch {
-            self.error = "Couldn't load the shared rules: \((error as? ConnectorError)?.description ?? error.localizedDescription)"
+        do {
+            books = try await client.rulebooks(); error = nil
+            RulebookSync.refresh(connector: info.id, store: store, books: books)
+        } catch {
+            self.error = "Couldn't load the rulebooks: \((error as? ConnectorError)?.description ?? error.localizedDescription)"
         }
+    }
+}
+
+struct RulebookEditor: View {
+    @EnvironmentObject var store: Store
+    let info: ConnectorInfo
+    let book: Rulebook
+    @State private var text = ""
+    @State private var loaded = false
+    @State private var message: String?
+
+    private var key: String { RulebookSync.keys[book.key] ?? "rulebook_\(book.key)" }
+    private var stored: String { (store.connectors.first { $0.id == info.id }?.settings[key] as? String ?? "") }
+    private var current: String { stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? book.text : stored }
+    private var isBuiltIn: Bool { stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        SettingsBlock(title: "\(book.name) rulebook",
+                      help: isBuiltIn ? "The built-in rulebook. Edit it to make it yours; you can always reset it."
+                                      : "Your own copy. Updates to the built-in rulebook are merged in; lines you changed stay yours.") {
+            TextEditor(text: $text)
+                .font(.system(size: 11, design: .monospaced))
+                .frame(height: 220)
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.15)))
+            HStack {
+                Button("Save") { save(text) }.disabled(text == current)
+                Button("Undo changes") { text = current }.buttonStyle(.borderless).disabled(text == current)
+                Spacer()
+                Button("Reset to built-in…") { reset() }.disabled(isBuiltIn)
+                if let message { Text(message).font(.system(size: 11)).foregroundStyle(.secondary) }
+            }
+            InstructionsHistory(info: info, part: key, emptyMeans: book.text)
+        }
+        .onAppear { if !loaded { text = current; loaded = true } }
+        .onChange(of: stored) { _, _ in text = current } // a restore, a reset or a merged update
+    }
+
+    private func save(_ t: String) {
+        // Saving text identical to the built-in one means "follow the built-in rulebook".
+        let value = t.trimmingCharacters(in: .whitespacesAndNewlines) == book.text.trimmingCharacters(in: .whitespacesAndNewlines) ? "" : t
+        do {
+            try store.saveConnectorSettings(connector: info.id, values: [key: value])
+            RulebookSync.setBase(book.text, info.id, key, store: store)
+            message = "Saved. It is used from the next check."
+            NotificationCenter.default.post(name: .floatBoardSyncConnectors, object: nil)
+        } catch { message = "Couldn't save: \(error)" }
+    }
+
+    private func reset() {
+        guard ConnectFlow.confirmTwice("Reset the \(book.name.lowercased()) rulebook?",
+            "It goes back to the built-in rulebook. Your version stays in the history, so you can restore it.", action: "Reset") else { return }
+        do {
+            try store.saveConnectorSettings(connector: info.id, values: [key: ""], source: .restore, note: "reset to the built-in rulebook")
+            text = book.text
+            message = "Back to the built-in rulebook."
+            NotificationCenter.default.post(name: .floatBoardSyncConnectors, object: nil)
+        } catch { message = "Couldn't reset: \(error)" }
     }
 }
 

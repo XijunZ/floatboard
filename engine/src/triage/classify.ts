@@ -48,6 +48,21 @@ export const PRE_RULES: string[] = [
   "Critical = urgent, or due within your alert window; anything overdue by more than a day doesn't alert.",
 ];
 
+/** Always added after the rulebook, whatever the person wrote in their own copy. */
+export const FIXED_RULES = `## Fixed rules (always apply)
+- Security or fraud alerts about the person's own accounts (password changes, unusual sign-ins, locked accounts, payments they
+  didn't make) always need their action. No other rule makes them "not an action" or lowers their importance.`;
+
+/** The email instructions with the person's own rulebook (their edited copy) or the built-in one. */
+export function emailSystem(rulebook?: string): string {
+  return SYSTEM.replace(SKILL.trim(), (rulebook?.trim() || SKILL.trim()) + "\n\n" + FIXED_RULES);
+}
+
+/** The chat instructions with the person's own chat rulebook or the built-in one. */
+export function chatSystem(rulebook?: string): string {
+  return CHAT_SYSTEM.replace(CHAT_SKILL.trim(), (rulebook?.trim() || CHAT_SKILL.trim()) + "\n\n" + FIXED_RULES);
+}
+
 const SYSTEM = `${SKILL.trim()}
 
 ## Output
@@ -73,7 +88,9 @@ export const PREVIEW_NOTE = "(This is the preview Outlook shows, not the full em
 /** `timeZone`: the user's IANA zone; relative dates and times in the email are read in it. */
 export type ClassifyContext = { groupNotes?: Record<string, string>; myRules?: string; inbox?: string; learned?: string; timeZone?: string;
   /** Chats only: the person's own chat rules, and their name (to spot messages addressed to them in groups). */
-  chatRules?: string; userName?: string };
+  chatRules?: string; userName?: string;
+  /** The person's own copy of each rulebook; empty means the built-in one. */
+  emailRulebook?: string; chatRulebook?: string };
 
 export async function classify(
   m: Message, me: string[], examples: FeedbackExample[], client: Anthropic, groups: string[] = [], ctx: ClassifyContext = {},
@@ -108,7 +125,8 @@ App: ${m.chat.app}
 Chat: ${m.chat.name} (${m.chat.group ? "group chat" : "one-to-one chat"}${m.chat.muted ? ", MUTED by the person: apply the muted-chat rule" : ""})
 Unread messages, oldest first (lines marked "earlier" were already read and are only context):
 ${m.text}` : "";
-  const r = await askStructured(client, { system: m.chat ? CHAT_SYSTEM : SYSTEM, user: m.chat ? chatUser : user, schema: Verdict });
+  const r = await askStructured(client, { system: m.chat ? chatSystem(ctx.chatRulebook) : emailSystem(ctx.emailRulebook),
+    user: m.chat ? chatUser : user, schema: Verdict });
   if (!r.ok) return r;
   const v = r.value;
   if (!v.action_required || !v.title.trim()) return { ok: true, action: null };
