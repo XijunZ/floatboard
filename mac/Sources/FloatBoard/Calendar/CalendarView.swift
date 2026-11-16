@@ -54,16 +54,14 @@ struct NewEventDraft: Identifiable {
     }
 
     /// The task an event was made from, if any.
-    func linkedTask(_ e: CalEvent) -> Card? {
-        store?.cards.first { $0.id == e.fbCard || (!$0.gcalEvent.isEmpty && $0.gcalEvent == e.eventID && $0.gcalAccount == e.account) }
-    }
+    func linkedTask(_ e: CalEvent) -> Card? { store?.linkedTask(of: e) }
 
     func move(_ e: CalEvent, start: Date, end: Date) {
-        guard let store else { return }
-        if let t = linkedTask(e), !e.allDay {
-            store.placeOnCalendar(cardID: t.id, start: start, account: nil)
-        } else if !outboxPatch(e, title: nil, start: start, end: end) { return }
-        else { overrides[e.shortID] = Override(start: start, end: end, title: overrides[e.shortID]?.title ?? e.title) }
+        guard let store, store.moveCalendarEvent(e, start: start, end: end) else { return }
+        // A linked task shows its own new time; a plain event is shown where it was put until Google has it.
+        if store.linkedTask(of: e) == nil || start == e.start {
+            overrides[e.shortID] = Override(start: start, end: end, title: overrides[e.shortID]?.title ?? e.title)
+        }
         nudge()
     }
 

@@ -50,7 +50,8 @@ public enum CalendarLayout {
 
         var strip: [PlacedItem] = []
         var timed: [PlacedItem] = []
-        for e in events where !e.gone && e.start < dayEnd && e.end > dayStart && !standsForTask(e) {
+        // An event with no length at the very start of the day still counts as on that day.
+        for e in events where !e.gone && e.start < dayEnd && (e.end > dayStart || (e.start == e.end && e.start == dayStart)) && !standsForTask(e) {
             if e.allDay {
                 strip.append(PlacedItem(content: .event(e), start: dayStart, end: dayEnd, column: 0, columns: 1, inStrip: true))
             } else {

@@ -43,7 +43,7 @@ import FloatBoardCore
     check(once.map(\.id).sorted() == ["T-8", "T-9"], "layout_linked_task_shown_once")
     // If the task is not shown (no due on this day), its event stays so the time is not lost.
     let keep = CalendarLayout.columns(for: [linkedA], tasks: [task(8, "Send the deck", due: nil, hasTime: false, gcalEvent: "g1")], day: day)
-    check(keep.map(\.id) == ["E-5"] || keep.isEmpty, "layout_linked_event_without_task_due")
+    check(keep.map(\.id) == ["E-5"], "layout_linked_event_without_task_due")
 
     // Weeks start on Monday, in the app's calendar.
     let monday = CalendarLayout.weekStart(containing: day)
@@ -57,4 +57,50 @@ import FloatBoardCore
     check(clipped?.start == at(0) && clipped?.end == at(10), "layout_clips_to_day")
     check(CalendarLayout.snap(at(9, 7)) == at(9) && CalendarLayout.snap(at(9, 9)) == at(9, 15)
           && CalendarLayout.snap(at(9, 53)) == at(10), "layout_snaps_to_15_minutes")
+
+    // An event with no length at midnight still shows on that day.
+    let zero = event(11, "Midnight ping", at(0), at(0))
+    check(CalendarLayout.columns(for: [zero], tasks: [], day: day).map(\.id) == ["E-11"], "layout_zero_length_event_at_midnight")
+}
+
+/// Calendar edits: resizing an event made from a task, and new events that wait to be sent.
+@MainActor func calendarEditChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-caledit-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let store: Store
+    do { store = Store(db: try DB(url: root.appendingPathComponent("board.sqlite"))) } catch { check(false, "calendar edit setup: \(error)"); return }
+    let cache = CalendarCache(store: store), outbox = CalendarOutbox(store: store)
+    let acct = "me@example.com"
+    cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: acct, name: "Me", color: "#112233", owned: true, shown: true)])
+    let start = AppTime.calendar.date(byAdding: .day, value: 3, to: AppTime.calendar.startOfDay(for: Date()))!.addingTimeInterval(10 * 3600)
+
+    store.add(title: "Call the bank", area: store.areas.first?.name ?? "Work", importance: .medium, due: start, dueHasTime: true)
+    guard let id = store.cards.last?.id else { check(false, "calendar edit setup: no card"); return }
+    store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='\(acct)', gcal_event='g1' WHERE id=\(id)")
+    cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: "g1", cancelled: false,
+        fields: CalEventFields(start: start, end: start.addingTimeInterval(1800), title: "Call the bank", googleUpdated: Date(), fbCard: id))], nextToken: nil)
+    guard let ev = cache.event(account: acct, calendarID: acct, eventID: "g1") else { check(false, "calendar edit setup: no event"); return }
+
+    // Resize: only the event's end is patched; the task's due stays.
+    let before = store.card(id)?.due
+    store.moveCalendarEvent(ev, start: ev.start, end: ev.end.addingTimeInterval(1800))
+    let rows = outbox.rows(unsent: true)
+    var endOnly = false
+    if rows.count == 1, case .patch(let eid, nil, nil, let e?, nil)? = rows[0].write { endOnly = eid == "g1" && e == ev.end.addingTimeInterval(1800) }
+    check(endOnly && store.card(id)?.due == before, "linked_event_resize_patches_end_only")
+
+    // Move: through the task (its due follows, the patch carries the new start).
+    store.moveCalendarEvent(ev, start: ev.start.addingTimeInterval(3600), end: ev.end.addingTimeInterval(3600))
+    check(store.card(id)?.due == start.addingTimeInterval(3600), "linked_event_move_goes_through_the_task")
+
+    // A new event waits as a placeholder until the cache has it.
+    let f = CalEventFields(start: start, end: start.addingTimeInterval(3600), title: "Dinner", googleUpdated: Date())
+    let uuid = outbox.enqueue(.create(f, cardID: nil, addMeet: false), account: acct, calendarID: acct)
+    let waiting = outbox.pendingNewEvents(from: start.addingTimeInterval(-3600), to: start.addingTimeInterval(7200))
+    check(waiting.count == 1 && waiting[0].title == "Dinner" && waiting[0].shortID < 0
+          && outbox.pendingNewEvents(from: start.addingTimeInterval(86400), to: start.addingTimeInterval(90000)).isEmpty,
+          "new_event_shows_while_waiting")
+    outbox.markSent(uuid: uuid, result: (CalendarOutbox.googleEventID(forUUID: uuid), f))
+    check(outbox.pendingNewEvents(from: start.addingTimeInterval(-3600), to: start.addingTimeInterval(7200)).isEmpty, "new_event_placeholder_goes_when_sent")
 }

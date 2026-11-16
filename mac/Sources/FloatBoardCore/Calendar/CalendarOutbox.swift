@@ -70,6 +70,22 @@ public final class CalendarOutbox {
         rows(unsent ? "WHERE sent IS NULL ORDER BY created, rowid" : "ORDER BY created, rowid", [])
     }
 
+    /// New events (not made from a task) that are queued but not yet in the cache, as events with a negative `shortID` (no E-n
+    /// yet), so the calendar can show them, marked as waiting, until Google confirms. Only those overlapping [from, to).
+    public func pendingNewEvents(from: Date, to: Date) -> [CalEvent] {
+        var out: [CalEvent] = []
+        for row in rows(unsent: true) {
+            guard case .create(let f, nil, _)? = row.write, f.start < to, f.end > from else { continue }
+            let id = Self.googleEventID(forUUID: row.uuid)
+            if cache.event(account: row.account, calendarID: row.calendarID, eventID: id) != nil { continue }
+            out.append(CalEvent(shortID: -Int64(out.count + 1), account: row.account, calendarID: row.calendarID, eventID: id,
+                                start: f.start, end: f.end, allDay: f.allDay, title: f.title, location: f.location,
+                                videoLink: f.videoLink, description: f.description, htmlLink: f.htmlLink, recurringID: nil,
+                                googleUpdated: f.googleUpdated, fbCard: nil))
+        }
+        return out
+    }
+
     /// True while any unsent change targets this event (the UI shows "waiting to send").
     public func pending(eventShortID: Int64) -> Bool {
         guard let e = cache.event(shortID: eventShortID) else { return false }
