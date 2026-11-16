@@ -1,6 +1,6 @@
 # Calendar: design
 
-Date: 16 Nov 2026 · Status: for review (updated after builder check) · Part 1 of 4 (Calendar → Jots → People → Decisions)
+Date: 16 Nov 2026 · Status: built (16–17 Nov 2026), awaiting owner review · Part 1 of 4 (Calendar → Jots → People → Decisions)
 
 ## Why
 
