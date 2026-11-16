@@ -31,10 +31,23 @@ describe("board events", () => {
     expect(b.events).toBeUndefined();
   });
 
-  it("rejects_non_https_video", async () => {
+  it("bad_video_is_dropped_to_null_and_the_push_succeeds", async () => {
     const u = await newUser("Video user");
-    for (const video of ["http://meet.example.com/x", "javascript:alert(1)", "not a url", 5]) {
-      expect((await put(u.key, { cards: [], events: [ev(1, { video })] })).status).toBe(400);
+    const { cookie } = await pairPhone(u.key);
+    const bad = ["http://meet.example.com/x", "javascript:alert(1)", "not a url", 5, "https://", "https://meet.example.com/a b"];
+    expect((await put(u.key, { cards: [card(1)], events: bad.map((video, i) => ev(i + 1, { video })) })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.events.map((e: any) => e.video)).toEqual(bad.map(() => null));
+  });
+
+  it("bad_time_zone_is_ignored_and_the_push_succeeds", async () => {
+    const u = await newUser("Zone user");
+    const { cookie } = await pairPhone(u.key);
+    for (const time_zone of ["Nowhere/Land", 5, "x".repeat(100)]) {
+      expect((await put(u.key, { cards: [card(1)], events: [ev(1)], time_zone })).status).toBe(200);
+      const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+      expect(b.time_zone).toBeUndefined();
+      expect(b.events).toHaveLength(1);
     }
   });
 
@@ -51,6 +64,5 @@ describe("board events", () => {
       { color: "red" }, { tasks: [0] }, { tasks: [1.5] }, { tasks: Array.from({ length: 21 }, (_, i) => i + 1) }, { tasks: "1" }];
     for (const over of bad) expect((await put(u.key, { cards: [], events: [ev(1, over)] })).status).toBe(400);
     expect((await put(u.key, { cards: [], events: "x" })).status).toBe(400);
-    expect((await put(u.key, { cards: [], time_zone: "Nowhere/Land" })).status).toBe(400);
   });
 });

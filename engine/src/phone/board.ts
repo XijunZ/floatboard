@@ -176,13 +176,10 @@ export function parseEvents(body: any): BoardEvent[] | undefined {
     if (!isIso(e.start)) throw new Error(`${at}.start must be an ISO date`);
     if (!isIso(e.end)) throw new Error(`${at}.end must be an ISO date`);
     if (typeof e.all_day !== "boolean") throw new Error(`${at}.all_day must be true or false`);
+    // A bad meeting link must not stop the push: anything but a clean https address becomes null.
     let video: string | null = null;
-    if (e.video !== undefined && e.video !== null) {
-      if (typeof e.video !== "string" || e.video.length > MAX_LINK) throw new Error(`${at}.video must be a web address or null`);
-      let u: URL;
-      try { u = new URL(e.video); } catch { throw new Error(`${at}.video must be a web address or null`); }
-      if (u.protocol !== "https:") throw new Error(`${at}.video must be https`);
-      video = e.video;
+    if (typeof e.video === "string" && e.video.length <= MAX_LINK && !/\s/.test(e.video)) {
+      try { const u = new URL(e.video); if (u.protocol === "https:" && u.hostname) video = e.video; } catch { /* not an address: no Join button */ }
     }
     if (typeof e.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(e.color)) throw new Error(`${at}.color must be a hex colour like #aabbcc`);
     if (!Array.isArray(e.tasks) || e.tasks.length > MAX_EVENT_TASKS || !e.tasks.every((t: unknown) => Number.isSafeInteger(t) && (t as number) > 0)) {
@@ -194,9 +191,8 @@ export function parseEvents(body: any): BoardEvent[] | undefined {
 
 /** The zone the Mac shows times in (an IANA name, e.g. Europe/London), so the phone shows the same times; absent: the device's. */
 function parseZone(v: unknown): string | undefined {
-  if (v === undefined || v === null) return undefined;
-  if (typeof v !== "string" || v.length > 64) throw new Error("time_zone must be a time zone name");
-  try { new Intl.DateTimeFormat("en", { timeZone: v }); } catch { throw new Error("time_zone must be a time zone name"); }
+  if (typeof v !== "string" || v.length > 64) return undefined; // unknown or bad: ignored, the phone uses its own zone
+  try { new Intl.DateTimeFormat("en", { timeZone: v }); } catch { return undefined; }
   return v;
 }
 

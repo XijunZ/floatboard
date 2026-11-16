@@ -280,13 +280,21 @@ public enum PhoneBoard {
         let colors = Dictionary(cache.calendars().map { ("\($0.account)\u{0}\($0.calendarID)", $0.color) }, uniquingKeysWith: { a, _ in a })
         return cache.meetings(from: from, to: to).prefix(maxEvents).map { e in
             let hex = colors["\(e.account)\u{0}\(e.calendarID)"].flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
-            let video = e.videoLink.hasPrefix("https://") && e.videoLink.utf16.count <= 2000 ? e.videoLink : nil // the engine refuses anything but https
+            let video = joinLink(e.videoLink)
             let tasks = store.links(of: ShortID(kind: .event, number: e.shortID)).filter { $0.kind == .task }.map(\.number)
             return BoardEvent(id: ShortID(kind: .event, number: e.shortID).text,
                               title: clip(e.title.trimmingCharacters(in: .whitespacesAndNewlines)).trimmingCharacters(in: .whitespacesAndNewlines),
                               start: isoUTC(e.start), end: isoUTC(e.end), allDay: e.allDay, video: video, color: hex,
                               tasks: Array(tasks.prefix(maxEventTasks)))
         }
+    }
+
+    /// A meeting link the phone can open: https, a host, no spaces, at most 2,000 characters; anything else is left out
+    /// (one odd link must never hold back the board).
+    static func joinLink(_ s: String) -> String? {
+        guard s.utf16.count <= 2000, s.range(of: #"\s"#, options: .regularExpression) == nil,
+              let u = URL(string: s), u.scheme?.lowercased() == "https", let host = u.host, !host.isEmpty else { return nil }
+        return s
     }
 
     /// The body sent to the engine: `{"cards":[...], "events":[...], "time_zone": ..., "sent_at": ...}` with sorted keys.
