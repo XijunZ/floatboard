@@ -24,7 +24,7 @@ public enum TaskEventRules {
     /// task's newer title or time for Google, and lets go of the link when the event is gone from Google. Tasks with a
     /// change still waiting to be sent are left alone until it has gone. Returns how many tasks it changed or queued for.
     @discardableResult
-    public static func reconcile(store: Store, cache: CalendarCache, now: Date) -> Int {
+    public static func reconcile(store: Store, cache: CalendarCache, now: Date, unreadCalendars: Set<String> = []) -> Int {
         var touched = 0
         let links: [LinkedCard]
         do { try store.backfillOldLinks() } catch {
@@ -40,8 +40,9 @@ public enum TaskEventRules {
                 if try store.hasUnsentCalendarWrite(cardID: card.id, link: l.link) { continue }
                 guard let ev = cache.event(account: l.link.account, calendarID: l.link.calendar, eventID: l.link.event) else { continue }
                 if ev.gone {
-                    // Only inside the window: after a full re-read every event outside it is hidden too, and is not a deletion.
-                    guard ev.start < now.addingTimeInterval(windowAhead), ev.end > now.addingTimeInterval(-windowBack) else { continue }
+                    // Only Google's own cancellation counts (D4). An event hidden by a sync reset may still exist, and a calendar
+                    // whose read failed in this pass says nothing new.
+                    guard ev.cancelled, !unreadCalendars.contains(key(l.link.account, l.link.calendar)) else { continue }
                     try store.performThrowing { try store.dropEventLink(card, now: now) }
                     touched += 1
                 } else if try store.align(card, with: ev, link: l, cache: cache, now: now) {
@@ -53,6 +54,9 @@ public enum TaskEventRules {
         }
         return touched
     }
+
+    /// Names one calendar in `reconcile`'s `unreadCalendars`.
+    public static func key(_ account: String, _ calendar: String) -> String { account + "|" + calendar }
 }
 
 struct EventLink: Equatable {
@@ -79,7 +83,6 @@ extension Store {
             let parts = AppTime.calendar.dateComponents([.hour, .minute], from: start)
             try setDueRow(cardID, day: start, time: parts, actor: .user, now: now, patchCalendar: false)
             guard let c = try cardForEvent(cardID), let due = c.due else { return }
-            let end = due.addingTimeInterval(TaskEventRules.eventLength)
             let outbox = CalendarOutbox(store: self)
             if let t = try eventTarget(cardID) {
                 let length = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event)
@@ -88,7 +91,7 @@ extension Store {
                                account: t.account, calendarID: t.calendar, now: now)
                 queued = true
             } else if let (acct, calID) = try resolveCalendar(account) {
-                let f = CalEventFields(start: due, end: end, title: c.title, description: eventDescription(c), googleUpdated: now, fbCard: cardID)
+                guard let f = eventFields(for: c, now: now) else { return }
                 outbox.enqueue(.create(f, cardID: cardID, addMeet: false), account: acct, calendarID: calID, now: now)
                 queued = true
             } else {
@@ -114,17 +117,7 @@ extension Store {
                 return
             }
             guard let (acct, calID) = try resolveCalendar(account) else { return }
-            var f: CalEventFields
-            if card.dueHasTime {
-                f = CalEventFields(start: due, end: due.addingTimeInterval(TaskEventRules.eventLength), title: card.title,
-                                   description: eventDescription(card), googleUpdated: now, fbCard: card.id)
-            } else {
-                let day = Due.dayString(due)
-                let startOfDay = Due.startOfDay(day) ?? due
-                let next = AppTime.calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay.addingTimeInterval(86400)
-                f = CalEventFields(start: startOfDay, end: next, allDay: true, startDay: day, endDay: Due.dayString(next), title: card.title,
-                                   description: eventDescription(card), googleUpdated: now, fbCard: card.id)
-            }
+            guard let f = eventFields(for: card, now: now) else { return }
             CalendarOutbox(store: self).enqueue(.create(f, cardID: card.id, addMeet: addMeet), account: acct, calendarID: calID, now: now)
             queued = true
         }
@@ -168,18 +161,8 @@ extension Store {
 
     /// Delete undone: queue the event again, under a new outbox id; the send links the task to the new event.
     func queueCalendarRecreate(cardID: Int64, target: EventLink, now: Date) throws {
-        guard let c = try cardForEvent(cardID), let due = c.due else { return }
-        let f: CalEventFields
-        if c.dueHasTime {
-            f = CalEventFields(start: due, end: due.addingTimeInterval(TaskEventRules.eventLength), title: c.title,
-                               description: eventDescription(c), googleUpdated: now, fbCard: cardID)
-        } else {
-            let day = Due.dayString(due)
-            let s = Due.startOfDay(day) ?? due
-            let next = AppTime.calendar.date(byAdding: .day, value: 1, to: s) ?? s.addingTimeInterval(86400)
-            f = CalEventFields(start: s, end: next, allDay: true, startDay: day, endDay: Due.dayString(next), title: c.title,
-                               description: eventDescription(c), googleUpdated: now, fbCard: cardID)
-        }
+        guard let c = try cardForEvent(cardID) else { return }
+        guard let f = eventFields(for: c, now: now) else { return }
         CalendarOutbox(store: self).enqueue(.create(f, cardID: cardID, addMeet: false), account: target.account, calendarID: target.calendar, now: now)
     }
 
@@ -266,6 +249,20 @@ extension Store {
         let mine = calendars.filter { $0.account == acct }
         let main = mine.first { $0.calendarID.lowercased() == acct.lowercased() } ?? mine.first { $0.owned }
         return (acct, main?.calendarID ?? acct)
+    }
+
+    /// The event to make for a task: a 30-minute block at its time, or an all-day event for a date-only task (D11). Nil without a due.
+    private func eventFields(for c: Card, now: Date) -> CalEventFields? {
+        guard let due = c.due else { return nil }
+        if c.dueHasTime {
+            return CalEventFields(start: due, end: due.addingTimeInterval(TaskEventRules.eventLength), title: c.title,
+                                  description: eventDescription(c), googleUpdated: now, fbCard: c.id)
+        }
+        let day = Due.dayString(due)
+        let s = Due.startOfDay(day) ?? due
+        let next = AppTime.calendar.date(byAdding: .day, value: 1, to: s) ?? s.addingTimeInterval(86400)
+        return CalEventFields(start: s, end: next, allDay: true, startDay: day, endDay: Due.dayString(next), title: c.title,
+                              description: eventDescription(c), googleUpdated: now, fbCard: c.id)
     }
 
     /// What the event's description gets: the task's notes and its call link.

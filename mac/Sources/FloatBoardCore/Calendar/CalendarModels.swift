@@ -82,6 +82,8 @@ public struct CalEvent: Equatable {
     public var fbCard: Int64?
     /// True once Google reported it cancelled (or a full re-read has not brought it back yet); kept so links to it still resolve.
     public var gone: Bool = false
+    /// True only when Google itself reported the event cancelled (deleted). A reset hides events (`gone`) without cancelling them.
+    public var cancelled: Bool = false
 
     /// "E-37".
     public var id: ShortID { ShortID(kind: .event, number: shortID) }

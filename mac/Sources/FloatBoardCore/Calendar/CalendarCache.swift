@@ -65,7 +65,7 @@ public final class CalendarCache {
         write("Could not save calendar changes") {
             for change in changes {
                 if change.cancelled || change.fields == nil {
-                    try db.run("UPDATE cal_events SET gone=1 WHERE account=? AND calendar_id=? AND event_id=?",
+                    try db.run("UPDATE cal_events SET gone=1, cancelled=1 WHERE account=? AND calendar_id=? AND event_id=?",
                                [account, calendarID, change.eventID])
                 } else if let f = change.fields {
                     let (start, end) = Self.span(f)
@@ -78,7 +78,7 @@ public final class CalendarCache {
                             end_day=excluded.end_day, title=excluded.title, location=excluded.location,
                             video_link=excluded.video_link, description=excluded.description, html_link=excluded.html_link,
                             recurring_id=excluded.recurring_id, google_updated=excluded.google_updated,
-                            fb_card=excluded.fb_card, gone=0
+                            fb_card=excluded.fb_card, gone=0, cancelled=0
                         """, [account, calendarID, change.eventID, start, end, f.allDay ? 1 : 0, f.startDay, f.endDay, f.title,
                               f.location, f.videoLink, f.description, f.htmlLink, f.recurringID, f.googleUpdated, f.fbCard])
                 }
@@ -91,7 +91,7 @@ public final class CalendarCache {
     }
 
     /// Forgets the calendar's sync token and hides all its events until the next full read brings them back
-    /// (each comes back with the same E-n).
+    /// (each comes back with the same E-n). Hidden is not cancelled: only Google's own cancellation marks an event deleted.
     @discardableResult
     public func resetSync(account: String, calendarID: String) -> Bool {
         write("Could not reset a calendar's sync") {
@@ -127,7 +127,7 @@ public final class CalendarCache {
 
     private static let columns = """
         e.short_id, e.account, e.calendar_id, e.event_id, e.start, e.end, e.all_day, e.start_day, e.end_day, e.title, e.location,
-        e.video_link, e.description, e.html_link, e.recurring_id, e.google_updated, e.fb_card, e.gone
+        e.video_link, e.description, e.html_link, e.recurring_id, e.google_updated, e.fb_card, e.gone, e.cancelled
         """
 
     private func events(_ tail: String, _ args: [Any?]) -> [CalEvent] {
@@ -145,7 +145,7 @@ public final class CalendarCache {
                                 start: start, end: end, allDay: allDay, title: DB.text(s, 9), location: DB.text(s, 10),
                                 videoLink: DB.text(s, 11), description: DB.text(s, 12), htmlLink: DB.text(s, 13),
                                 recurringID: DB.isNull(s, 14) ? nil : DB.text(s, 14), googleUpdated: DB.date(s, 15) ?? Date(),
-                                fbCard: DB.isNull(s, 16) ? nil : DB.int(s, 16), gone: DB.int(s, 17) != 0)
+                                fbCard: DB.isNull(s, 16) ? nil : DB.int(s, 16), gone: DB.int(s, 17) != 0, cancelled: DB.int(s, 18) != 0)
             }
         } ?? []
     }
