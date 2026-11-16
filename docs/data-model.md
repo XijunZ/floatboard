@@ -98,7 +98,7 @@ All paths come from `LocalData` (`mac/Sources/FloatBoardCore/LocalData.swift`). 
 
 ## 2. Ontology: the app (board.sqlite)
 
-Every table, schema version 8 (`mac/Sources/FloatBoardCore/DB.swift`, fixture `mac/Tests/Fixtures/schema-v8.json`).
+Every table, schema version 11 (`mac/Sources/FloatBoardCore/Storage/DB.swift`, fixture `mac/Tests/Fixtures/schema-v11.json`).
 
 | Entity | Table | Meaning | Key fields |
 |---|---|---|---|

@@ -84,8 +84,16 @@ public final class CalendarSync {
         let from = now().addingTimeInterval(-TaskEventRules.windowBack), to = now().addingTimeInterval(TaskEventRules.windowAhead)
         do {
             var result: (changes: [GoogleEventChange], nextToken: String)
-            var full = c.syncToken == nil || (c.fullReadAt.map { now().timeIntervalSince($0) >= Self.fullReadInterval } ?? true)
+            var full = c.syncToken == nil
+            let dailyDue = c.fullReadAt.map { now().timeIntervalSince($0) >= Self.fullReadInterval } ?? true
             do {
+                if let token = c.syncToken, dailyDue {
+                    // The daily full read replaces the bookmark, so first take in what changed anywhere (also outside the window)
+                    // since the last pass; the full read then only has to find events that were beyond the window before.
+                    let inc = try await api.listEvents(calendarID: c.calendarID, syncToken: token, timeMin: from, timeMax: to)
+                    guard cache.apply(account: c.account, calendarID: c.calendarID, changes: inc.changes, nextToken: inc.nextToken, now: now()) else { return false }
+                    full = true
+                }
                 result = try await api.listEvents(calendarID: c.calendarID, syncToken: full ? nil : c.syncToken, timeMin: from, timeMax: to)
             } catch GoogleCalendarError.syncExpired {
                 full = true
