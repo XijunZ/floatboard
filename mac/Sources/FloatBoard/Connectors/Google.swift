@@ -220,6 +220,14 @@ final class Google: ObservableObject {
 
     // MARK: Calendar
 
+    /// A Google Calendar client for one account; it asks this class for a fresh token each time it needs one.
+    func calendarAPI(for account: String) -> GoogleCalendarAPI {
+        GoogleCalendarAPI(token: { [weak self] force in
+            guard let self else { throw GoogleError("FloatBoard is closing.") }
+            return try await self.accessToken(for: account, forceRefresh: force)
+        })
+    }
+
     struct CreatedEvent { let id: String; let htmlLink: String; let meetLink: String? }
 
     /// Creates an event on the account's main calendar. Timed tasks get 30 minutes; date-only tasks are all-day.

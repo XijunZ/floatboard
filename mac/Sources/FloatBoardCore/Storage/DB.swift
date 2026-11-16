@@ -121,6 +121,8 @@ public final class DB {
             sql += """
             ALTER TABLE cards ADD COLUMN due_day TEXT;
             ALTER TABLE cards ADD COLUMN due_has_time INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE cards ADD COLUMN gcal_calendar TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cards ADD COLUMN gcal_synced_at REAL;
             -- Links between items by visible id (T-142, E-37); stored once, smaller text first.
             CREATE TABLE links(
                 id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,
@@ -144,6 +146,12 @@ public final class DB {
                 UNIQUE(account, calendar_id, event_id)
             );
             CREATE INDEX cal_events_start ON cal_events(start);
+            -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
+            CREATE TABLE cal_outbox(
+                uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,
+                card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+                next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL
+            );
 
             """
         }
@@ -185,7 +193,7 @@ public final class DB {
         reply_draft_link TEXT NOT NULL DEFAULT '',
         reply_draft_error TEXT NOT NULL DEFAULT '',
         reply_draft_request TEXT NOT NULL DEFAULT '',
-        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0
+        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0, gcal_calendar TEXT NOT NULL DEFAULT '', gcal_synced_at REAL
     );
     CREATE INDEX cards_external_id ON cards(external_id);
     CREATE UNIQUE INDEX cards_source_key ON cards(connector, source_mid, source_sent)
@@ -271,6 +279,12 @@ public final class DB {
         UNIQUE(account, calendar_id, event_id)
     );
     CREATE INDEX cal_events_start ON cal_events(start);
+        -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
+        CREATE TABLE cal_outbox(
+            uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,
+            card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+            next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL
+        );
 
     """
 
