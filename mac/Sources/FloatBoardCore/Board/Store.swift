@@ -44,7 +44,7 @@ public final class Store: ObservableObject {
                        source,external_id,source_link,source_meta,imported_at,
                        source_mid,source_sent,withdrawn,ai_summary,connector,
                        reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at,
-                       watch_person,watch_contact,watch_since
+                       watch_person,watch_contact,watch_since,due_day,due_has_time
                 FROM cards WHERE deleted=0 ORDER BY created
                 """) { s in
                 var c = Card(
@@ -78,6 +78,8 @@ public final class Store: ObservableObject {
                     replyDraftSentAt: DB.date(s, 27)
                 )
                 c.watchPerson = DB.text(s, 28); c.watchContact = DB.text(s, 29); c.watchSince = DB.date(s, 30)
+                (c.due, c.dueHasTime) = Self.loadedDue(due: c.due, day: sqlite3_column_type(s, 31) == SQLITE_NULL ? nil : DB.text(s, 31),
+                                                       hasTime: DB.int(s, 32) != 0)
                 return c
             }
         } catch {
@@ -87,6 +89,14 @@ public final class Store: ObservableObject {
         do { connectors = try loadConnectors() } catch {
             activity("store", .error, "Could not read the connectors list", detail: "\(error)")
         }
+    }
+
+    /// A stored due as the card shows it. A date-only due is rebuilt from its day in the app's zone, so a zone change
+    /// leaves it on the same day; a timed due is the stored instant.
+    static func loadedDue(due: Date?, day: String?, hasTime: Bool) -> (Date?, Bool) {
+        if hasTime { return (due, due != nil) }
+        if let day, let start = Due.startOfDay(day) { return (start, false) }
+        return (due, false)
     }
 
     // MARK: Views of the data
@@ -123,16 +133,17 @@ public final class Store: ObservableObject {
     // MARK: Changes
 
     /// A new task of the user's, straight into any step (To do by default).
-    public func add(title: String, area: String, importance: Importance, due: Date?, status: Status = .todo) {
+    public func add(title: String, area: String, importance: Importance, due: Date?, dueHasTime: Bool = false, status: Status = .todo) {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         let now = Date()
         let started: Date? = status == .doing ? now : nil
         let done: Date? = status == .done ? now : nil
+        let d = Due.stored(due, hasTime: dueHasTime)
         perform {
             let id = try db.run(
-                "INSERT INTO cards(title,area,importance,due,status,created,started,done,updated) VALUES(?,?,?,?,?,?,?,?,?)",
-                [t, area, importance.rawValue, due, status.rawValue, now, started, done, now])
+                "INSERT INTO cards(title,area,importance,due,due_day,due_has_time,status,created,started,done,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                [t, area, importance.rawValue, d.due, d.day, d.hasTime, status.rawValue, now, started, done, now])
             try log(id, "created", nil, status, now)
         }
     }
@@ -162,11 +173,29 @@ public final class Store: ObservableObject {
     public func update(_ card: Card, now: Date = Date()) {
         perform {
             let old = try currentCard(card.id)?.card
-            try db.run("UPDATE cards SET title=?, notes=?, area=?, importance=?, due=?, link=?, updated=? WHERE id=?",
-                       [card.title, card.notes, card.area, card.importance.rawValue, card.due,
+            let d = Due.stored(card.due, hasTime: card.dueHasTime)
+            try db.run("UPDATE cards SET title=?, notes=?, area=?, importance=?, due=?, due_day=?, due_has_time=?, link=?, updated=? WHERE id=?",
+                       [card.title, card.notes, card.area, card.importance.rawValue, d.due, d.day, d.hasTime,
                         card.link.trimmingCharacters(in: .whitespaces), now, card.id])
             try log(card.id, "edited", nil, nil, now)
-            if let old { var new = old; new.title = card.title; new.area = card.area; new.importance = card.importance; new.due = card.due
+            if let old { var new = old; new.title = card.title; new.area = card.area; new.importance = card.importance
+                new.due = card.due; new.dueHasTime = card.dueHasTime
+                try queueChange(old: old, new: new, now: now) }
+        }
+    }
+
+    /// Sets a task's due: the `day` (read in the app's zone), with a time of day if `time` is given, otherwise date-only.
+    public func setDue(_ cardID: Int64, day: Date, time: DateComponents?, actor: Actor, now: Date = Date()) {
+        let cal = AppTime.calendar
+        let start = cal.startOfDay(for: day)
+        var due = start
+        if let time { due = cal.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0, second: 0, of: start) ?? start }
+        let d = Due.stored(due, hasTime: time != nil)
+        perform {
+            let old = try currentCard(cardID)?.card
+            try db.run("UPDATE cards SET due=?, due_day=?, due_has_time=?, updated=? WHERE id=?", [d.due, d.day, d.hasTime, now, cardID])
+            try insertEvent(cardID, "due: " + (d.due.map { Fmt.due($0, hasTime: d.hasTime == 1) } ?? "none"), actor: actor, at: now)
+            if let old { var new = old; new.due = d.due; new.dueHasTime = d.hasTime == 1
                 try queueChange(old: old, new: new, now: now) }
         }
     }
@@ -332,14 +361,15 @@ public final class Store: ObservableObject {
     /// The one place connector cards are inserted. Writes the card and its "created" history row, attributed to
     /// the connector. Must run inside a transaction.
     @discardableResult
-    func insertConnectorCard(connector: String, title: String, area: String, importance: Int, due: Date?, externalID: String,
+    func insertConnectorCard(connector: String, title: String, area: String, importance: Int, due: Date?, dueHasTime: Bool = false, externalID: String,
                              sourceKey: (mid: String, sent: String?)?, sourceLink: String, metaJSON: String,
                              proposalJSON: String, aiSummary: String = "", now: Date) throws -> Int64 {
+        let d = Due.stored(due, hasTime: dueHasTime)
         let id = try db.run("""
-            INSERT INTO cards(title,area,importance,due,status,created,updated,source,external_id,source_link,source_meta,imported_at,
+            INSERT INTO cards(title,area,importance,due,due_day,due_has_time,status,created,updated,source,external_id,source_link,source_meta,imported_at,
                               connector,source_mid,source_sent,proposal_json,ai_summary)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, [title, area, importance, due, Status.todo.rawValue, now, now, connector, externalID, sourceLink, metaJSON, now,
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, [title, area, importance, d.due, d.day, d.hasTime, Status.todo.rawValue, now, now, connector, externalID, sourceLink, metaJSON, now,
                   connector, sourceKey?.mid, sourceKey?.sent, proposalJSON, aiSummary])
         try insertEvent(id, "created (from \(connector))", to: .todo, actor: .connector(connector), at: now)
         return id

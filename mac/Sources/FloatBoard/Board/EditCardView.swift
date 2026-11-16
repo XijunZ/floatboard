@@ -25,6 +25,7 @@ struct EditCardView: View {
         finished = true
         guard !draft.title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         draft.due = hasDue ? Due.combine(day: day, time: hasTime ? time : nil) : nil
+        draft.dueHasTime = hasDue && hasTime
         if let saved = store.card(draft.id) {
             // Don't overwrite calendar info that may have been set while the pop-up was open.
             draft.gcalAccount = saved.gcalAccount.isEmpty ? draft.gcalAccount : saved.gcalAccount
@@ -47,6 +48,7 @@ struct EditCardView: View {
     private var pending: Card {
         var c = draft
         c.due = hasDue ? Due.combine(day: day, time: hasTime ? time : nil) : nil
+        c.dueHasTime = hasDue && hasTime
         return c
     }
 
@@ -268,7 +270,7 @@ struct EditCardView: View {
             hasDue = draft.due != nil
             if let d = draft.due {
                 day = d
-                hasTime = Due.hasTime(d)
+                hasTime = draft.dueHasTime
                 if hasTime { time = d }
             }
         }

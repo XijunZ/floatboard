@@ -138,8 +138,8 @@ private func draftProposal(id: String, mid: String, sent: String = "2026-11-07T1
         let backupVersion = backup.map { rows($0.url, "PRAGMA user_version") } ?? []
         check(opened.store != nil && opened.backedUp && backupVersion == [["7"]] && boardFacts(v7) == before
               && integrity(v7) == "ok" && rows(v7, "PRAGMA user_version") == [[String(DB.schemaVersion)]]
-              && Array(cols.suffix(8).prefix(5)) == draftColumns
-              && Array(cols.suffix(3)) == ["watch_person", "watch_contact", "watch_since"]
+              && Array(cols.suffix(10).prefix(5)) == draftColumns
+              && Array(cols.suffix(5)) == ["watch_person", "watch_contact", "watch_since", "due_day", "due_has_time"]
               && rows(v7, "SELECT watch_person, watch_contact, watch_since FROM cards WHERE id=2") == [["", "", nil]]
               && rows(v7, "SELECT reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at FROM cards WHERE id=2")
                 == [[nil, "", "", "", nil]]
@@ -157,7 +157,7 @@ private func draftProposal(id: String, mid: String, sent: String = "2026-11-07T1
     do {
         let fresh = root.appendingPathComponent("fresh8.sqlite")
         _ = try DB(url: fresh)
-        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("schema-v10.json"))) as? [[Any]] ?? []
+        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("schema-v11.json"))) as? [[Any]] ?? []
         let expected = raw.map { $0.map { $0 as? String } }
         let freshRows = norm(rows(fresh, masterSQL))
         check(!expected.isEmpty && freshRows == norm(rows(v7, masterSQL)) && freshRows == norm(expected),

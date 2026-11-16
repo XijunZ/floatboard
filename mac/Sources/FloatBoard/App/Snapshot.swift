@@ -21,7 +21,7 @@ enum Snapshot {
             }
         }
         if ProcessInfo.processInfo.environment["FLOATBOARD_GCALTEST"] != nil {
-            for c in store.cards { print(c.title.prefix(30), "|", c.due.map(Fmt.due) ?? "-", "|", c.googleCalendarURL?.absoluteString ?? "no due date") }
+            for c in store.cards { print(c.title.prefix(30), "|", c.due.map { Fmt.due($0, hasTime: c.dueHasTime) } ?? "-", "|", c.googleCalendarURL?.absoluteString ?? "no due date") }
             var c = store.cards[0]; c.notes = "Agenda: plan the week. Call: https://meet.google.com/abc-defg-hij"
             print("meet from notes:", c.meetLink?.absoluteString ?? "none")
         }
@@ -52,19 +52,19 @@ enum Snapshot {
             let t0900 = cal.date(bySettingHour: 9, minute: 0, second: 0, of: today)!
             store.add(title: "Tomorrow date-only", area: "Personal", importance: .high, due: Due.combine(day: tomorrow, time: nil))
             store.add(title: "Today date-only", area: "Personal", importance: .high, due: Due.combine(day: today, time: nil))
-            store.add(title: "Meeting tomorrow 15:30", area: "Acme", importance: .low, due: Due.combine(day: tomorrow, time: t1530))
-            store.add(title: "Meeting today 09:00", area: "Acme", importance: .low, due: Due.combine(day: today, time: t0900))
+            store.add(title: "Meeting tomorrow 15:30", area: "Acme", importance: .low, due: Due.combine(day: tomorrow, time: t1530), dueHasTime: true)
+            store.add(title: "Meeting today 09:00", area: "Acme", importance: .low, due: Due.combine(day: today, time: t0900), dueHasTime: true)
             store.add(title: "No due", area: "Acme", importance: .high, due: nil)
             for c in store.active {
-                print(c.title, "|", c.due.map(Fmt.due) ?? "-", "| overdue:", c.isOverdue)
+                print(c.title, "|", c.due.map { Fmt.due($0, hasTime: c.dueHasTime) } ?? "-", "| overdue:", c.isOverdue)
             }
         }
         if ProcessInfo.processInfo.environment["FLOATBOARD_GROUPTEST"] != nil {
             let day: TimeInterval = 86400
             store.add(title: "No due todo high", area: "Acme", importance: .high, due: nil)
-            store.add(title: "Due in 5d todo", area: "Personal", importance: .low, due: Date().addingTimeInterval(5 * day))
+            store.add(title: "Due in 5d todo", area: "Personal", importance: .low, due: Date().addingTimeInterval(5 * day), dueHasTime: true)
             store.add(title: "Doing no due", area: "Acme", importance: .medium, due: nil)
-            store.add(title: "Due tomorrow doing", area: "Garden", importance: .low, due: Date().addingTimeInterval(day))
+            store.add(title: "Due tomorrow doing", area: "Garden", importance: .low, due: Date().addingTimeInterval(day), dueHasTime: true)
             store.add(title: "Todo no due low", area: "Personal", importance: .low, due: nil)
             for c in store.cards where c.title.hasPrefix("Doing") || c.title.hasSuffix("doing") { store.move(c, to: .doing) }
             print("ORDER:", store.active.map(\.title).joined(separator: " | "))

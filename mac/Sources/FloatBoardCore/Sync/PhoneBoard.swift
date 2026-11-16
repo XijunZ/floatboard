@@ -168,7 +168,7 @@ public enum PhoneBoard {
 
     public static func card(for c: Card, color: String?, calendar: Calendar) -> BoardCard {
         let hex = color.flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
-        let hasTime = c.due.map { Due.hasTime($0) } ?? false
+        let hasTime = c.dueHasTime
         let all = links(for: c)
         return BoardCard(id: c.id, title: clip(c.title), group: clip(c.area), color: hex, importance: c.importance.rawValue,
                          due: c.due.map { hasTime ? iso($0, calendar) : day($0, calendar) }, hasTime: hasTime,
