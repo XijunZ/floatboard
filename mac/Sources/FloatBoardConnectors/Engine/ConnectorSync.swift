@@ -247,9 +247,11 @@ public enum ConnectorSync {
             }
             step = "send the board to the phone"
             let cards = PhoneBoard.payload(store: store, now: now)
-            let hash = try PhoneBoard.hash(cards, engine: client.engineAddress)
+            let events = PhoneBoard.events(store: store, now: now)
+            let zone = AppTime.zone.identifier
+            let hash = try PhoneBoard.hash(cards, events: events, timeZone: zone, engine: client.engineAddress)
             if hash != store.lastBoardHash(connector: id) {
-                try await client.putBoard(cards)
+                try await client.putBoard(cards, events: events, timeZone: zone)
                 store.setLastBoardHash(hash, connector: id)
                 result.pushed = true
             }

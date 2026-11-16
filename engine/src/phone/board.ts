@@ -29,6 +29,8 @@ import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
 import { GMAIL_ID, ownGmail } from "../email/search";
 
 export const MAX_CARDS = 500;
+export const MAX_EVENTS = 50;
+const MAX_EVENT_TASKS = 20;
 export const MAX_UNTAKEN_ACTIONS = 200;
 export const MAX_BATCH = 100;
 const MAX_TITLE = 200;
@@ -63,6 +65,8 @@ export type Card = {
   /** Watch only: whom it waits on, how to recognise their reply ("email:<address>", "wa:<chat id>" or ""), and since when. */
   watch?: CardWatch;
 };
+/** A calendar event for the phone's Today list: ISO UTC times, `tasks` = ids of the cards linked to it. */
+export type BoardEvent = { id: string; title: string; start: string; end: string; allDay: boolean; video: string | null; color: string; tasks: number[] };
 export type CardWatch = { person: string; contact: string; since: string };
 /** The email a `link_email` action attaches (sent_at as the search gave it). */
 export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
@@ -156,6 +160,46 @@ export function parseCards(body: any): Card[] {
   });
 }
 
+/** The optional `events` of a push (absent from older Macs: none), strictly checked like cards; trimmed text, https-only video. */
+export function parseEvents(body: any): BoardEvent[] | undefined {
+  const v = body?.events;
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v)) throw new Error("events must be a list");
+  if (v.length > MAX_EVENTS) throw new Error(`at most ${MAX_EVENTS} events`);
+  return v.map((e: any, i: number): BoardEvent => {
+    const at = `events[${i}]`;
+    if (!e || typeof e !== "object" || Array.isArray(e)) throw new Error(`${at} must be an object`);
+    if (typeof e.id !== "string" || !/^E-[1-9][0-9]*$/.test(e.id) || e.id.length > 20) throw new Error(`${at}.id must look like E-37`);
+    if (typeof e.title !== "string") throw new Error(`${at}.title must be text`);
+    const title = e.title.trim();
+    if (title.length > MAX_TITLE) throw new Error(`${at}.title must be text up to ${MAX_TITLE} characters`);
+    if (!isIso(e.start)) throw new Error(`${at}.start must be an ISO date`);
+    if (!isIso(e.end)) throw new Error(`${at}.end must be an ISO date`);
+    if (typeof e.allDay !== "boolean") throw new Error(`${at}.allDay must be true or false`);
+    let video: string | null = null;
+    if (e.video !== undefined && e.video !== null) {
+      if (typeof e.video !== "string" || e.video.length > MAX_LINK) throw new Error(`${at}.video must be a web address or null`);
+      let u: URL;
+      try { u = new URL(e.video); } catch { throw new Error(`${at}.video must be a web address or null`); }
+      if (u.protocol !== "https:") throw new Error(`${at}.video must be https`);
+      video = e.video;
+    }
+    if (typeof e.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(e.color)) throw new Error(`${at}.color must be a hex colour like #aabbcc`);
+    if (!Array.isArray(e.tasks) || e.tasks.length > MAX_EVENT_TASKS || !e.tasks.every((t: unknown) => Number.isSafeInteger(t) && (t as number) > 0)) {
+      throw new Error(`${at}.tasks must be a list of up to ${MAX_EVENT_TASKS} positive integers`);
+    }
+    return { id: e.id, title, start: e.start, end: e.end, allDay: e.allDay, video, color: e.color, tasks: e.tasks };
+  });
+}
+
+/** The zone the Mac shows times in (an IANA name, e.g. Europe/London), so the phone shows the same times; absent: the device's. */
+function parseZone(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "string" || v.length > 64) throw new Error("time_zone must be a time zone name");
+  try { new Intl.DateTimeFormat("en", { timeZone: v }); } catch { throw new Error("time_zone must be a time zone name"); }
+  return v;
+}
+
 /**
  * Clock skew of a sending device: `received - sent_at` in ms. 0 when `sent_at` is missing (times are taken as sent);
  * null when it is more than 7 days off (the device's times are ignored and the received time is used).
@@ -172,10 +216,12 @@ export function corrected(at: string | null | undefined, skew: number | null, re
   return iso(Math.min(Date.parse(at) + skew, receivedMs));
 }
 
-async function loadSnapshot(env: Env, userId: string): Promise<{ cards: Card[]; updated: string } | null> {
+type Snapshot = { cards: Card[]; events?: BoardEvent[]; time_zone?: string; updated: string };
+async function loadSnapshot(env: Env, userId: string): Promise<Snapshot | null> {
   const row = await env.DB.prepare("SELECT data_enc, updated FROM board_snapshots WHERE user_id=?").bind(userId).first<{ data_enc: string; updated: string }>();
   if (!row) return null;
-  return { cards: JSON.parse(await decrypt(env, row.data_enc)).cards as Card[], updated: row.updated };
+  const d = JSON.parse(await decrypt(env, row.data_enc));
+  return { cards: d.cards as Card[], events: d.events as BoardEvent[] | undefined, time_zone: d.time_zone as string | undefined, updated: row.updated };
 }
 
 const ACTION_COLS = "id, rowid AS rid, client_id, card_id, action, title, group_name, created, COALESCE(made_at, created) AS made_at, taken, payload";
@@ -238,6 +284,7 @@ async function boardBody(env: Env, userId: string, deviceId: string) {
     env.DB.prepare("SELECT COUNT(*) AS n FROM phone_actions WHERE user_id=? AND taken=0").bind(userId).first<{ n: number }>(),
     notApplied(env, userId, deviceId), accountMarker(userId)]);
   return { updated: snap?.updated ?? null, server_time: nowISO(), account, cards: overlay(snap?.cards ?? [], actions, snap?.updated ?? null),
+    ...(snap?.events ? { events: snap.events } : {}), ...(snap?.time_zone ? { time_zone: snap.time_zone } : {}),
     pending: waiting?.n ?? 0, superseded };
 }
 
@@ -264,6 +311,8 @@ route("PUT", "/v2/board", async (req, env, user) => {
   if (!rb.ok) return rb.tooLarge ? json({ error: "too large" }, 413) : json({ error: "Invalid JSON" }, 400);
   let cards: Card[];
   try { cards = parseCards(rb.body); } catch (e) { return json({ error: (e as Error).message }, 400); }
+  let events: BoardEvent[] | undefined, timeZone: string | undefined;
+  try { events = parseEvents(rb.body); timeZone = parseZone(rb.body.time_zone); } catch (e) { return json({ error: (e as Error).message }, 400); }
   const sentAt = rb.body.sent_at ?? null;
   if (sentAt !== null && !isIso(sentAt)) return json({ error: "sent_at must be an ISO date" }, 400);
   const skew = skewOf(sentAt, receivedMs);
@@ -298,7 +347,7 @@ route("PUT", "/v2/board", async (req, env, user) => {
     }
   }
   stmts.unshift(env.DB.prepare("INSERT INTO board_snapshots(user_id,data_enc,updated) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET data_enc=excluded.data_enc, updated=excluded.updated")
-    .bind(user.id, await encrypt(env, JSON.stringify({ cards })), now));
+    .bind(user.id, await encrypt(env, JSON.stringify({ cards, ...(events ? { events } : {}), ...(timeZone ? { time_zone: timeZone } : {}) })), now));
   await env.DB.batch(stmts);
   return json({ ok: true, count: cards.length });
 });

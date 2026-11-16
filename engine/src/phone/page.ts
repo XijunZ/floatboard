@@ -67,6 +67,14 @@ min-height:56px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .card .meta{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px;font-size:14px;color:var(--muted)}
 .card .due.late{color:var(--danger);font-weight:600}
 .card .wait-fresh{color:#1e9e4a}.card .wait-chase{color:#e8830c}.card .wait-late{color:var(--danger)}
+.today{margin-bottom:14px}
+.today h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:10px 4px 6px}
+.ev{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.06);margin-bottom:8px}
+.ev .when{flex:none;min-width:58px;font-size:14px;color:var(--muted);margin-top:2px}
+.ev .body{flex:1;min-width:0}
+.ev .t{font-size:17px;overflow-wrap:anywhere}
+.ev .task{font-size:14px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
+.ev .join{flex:none;align-self:center;padding:8px 12px;border-radius:12px;background:var(--accent);color:var(--accent-text);font-size:14px;font-weight:600;text-decoration:none}
 .marks{font-weight:800;letter-spacing:-.05em;color:var(--muted);flex:none;margin-top:1px}
 .marks.m1{color:var(--text)}
 .marks.m2{color:var(--danger)}
@@ -156,6 +164,7 @@ const BODY = `${ICONS}
 </div>
 <p id="sync-note" class="note" role="status" hidden></p>
 <div id="pending-note" class="banner" hidden></div>
+<div id="today" class="today" hidden></div>
 <div id="list" class="list" role="tabpanel"></div>
 <p id="empty" class="empty" hidden></p>
 <button id="add" class="fab" aria-label="Add a task">${icon("plus")}</button>
