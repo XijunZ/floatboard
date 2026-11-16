@@ -31,6 +31,8 @@ struct ExpandedView: View {
                 HStack(alignment: .top, spacing: 10) {
                     ForEach(Status.allCases) { Column(status: $0) }
                 }
+            case .calendar:
+                CalendarView()
             case .bar:
                 BarSettingsView()
             case .groups:

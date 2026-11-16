@@ -7,10 +7,11 @@ import SwiftUI
 final class UIState: ObservableObject {
     enum Mode { case banner, expanded, minimized, hidden }
     enum Tab: Hashable, CaseIterable {
-        case board, bar, groups, settings
+        case board, calendar, bar, groups, settings
         var title: String {
             switch self {
             case .board: "Board"
+            case .calendar: "Calendar"
             case .bar: "Bar"
             case .groups: "Groups"
             case .settings: "Settings"

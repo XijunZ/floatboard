@@ -122,6 +122,13 @@ enum Snapshot {
         if ProcessInfo.processInfo.environment["FLOATBOARD_EDITSHOTS"] != nil, LocalData.isScratchDatabase {
             for c in store.cards { save(EditCardView(draft: c) {}, "edit-\(c.id).png", CGSize(width: 420, height: 400)) }
         }
+        // Calendar Day and Week with made-up events and tasks. Only on a scratch database: it fills the calendar cache and the board.
+        if ProcessInfo.processInfo.environment["FLOATBOARD_CALSHOTS"] != nil, LocalData.isScratchDatabase {
+            seedCalendar(store)
+            let hours = 8...18
+            save(CalendarView(span: .day, snapshotHours: hours).padding(12), "calendar-day.png", CGSize(width: 1100, height: 640))
+            save(CalendarView(span: .week, snapshotHours: hours).padding(12), "calendar-week.png", CGSize(width: 1100, height: 640))
+        }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so each Settings section is drawn directly.
         for s in SettingsSection.allCases {
@@ -137,6 +144,58 @@ enum Snapshot {
                 Spacer(minLength: 0)
             }.padding(12).frame(width: 800, alignment: .topLeading).fixedSize(horizontal: false, vertical: true)
             save(page, "settings-\(s.rawValue).png", CGSize(width: 800, height: 900))
+        }
+    }
+
+    /// Made-up calendars, events and tasks for the Calendar pictures (this week, around today).
+    private static func seedCalendar(_ store: Store) {
+        let cal = AppTime.calendar
+        let cache = CalendarCache(store: store)
+        let account = "me@example.com"
+        cache.upsertCalendars(account: account, [
+            CalCalendar(account: account, calendarID: account, name: "Work", color: "#4285f4", owned: true, shown: true),
+            CalCalendar(account: account, calendarID: "home", name: "Home", color: "#33b679", owned: true, shown: true),
+            CalCalendar(account: account, calendarID: "hol", name: "Holidays", color: "#f4511e", owned: false, shown: true)])
+        let monday = CalendarLayout.weekStart(containing: Date())
+        let today = cal.startOfDay(for: Date())
+        func at(_ day: Date, _ h: Int, _ m: Int = 0) -> Date { cal.date(bySettingHour: h, minute: m, second: 0, of: day)! }
+        func dayOffset(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: monday)! }
+        func timed(_ title: String, _ day: Date, _ h: Int, _ m: Int, minutes: Int, link: String = "") -> CalEventFields {
+            let s = at(day, h, m)
+            return CalEventFields(start: s, end: s.addingTimeInterval(Double(minutes) * 60), title: title, videoLink: link, googleUpdated: Date())
+        }
+        func change(_ id: String, _ f: CalEventFields) -> GoogleEventChange { GoogleEventChange(eventID: id, cancelled: false, fields: f) }
+        let f = DateFormatter(); f.timeZone = AppTime.zone; f.dateFormat = "yyyy-MM-dd"
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: today)!
+        let holiday = CalEventFields(start: today, end: tomorrow, allDay: true, startDay: f.string(from: today), endDay: f.string(from: tomorrow),
+                                     title: "Office closed", googleUpdated: Date())
+        cache.apply(account: account, calendarID: account, changes: [
+            change("w1", timed("Standup", today, 9, 0, minutes: 30, link: "https://meet.example.com/a")),
+            change("w2", timed("Quarterly review prep", today, 9, 15, minutes: 60)),
+            change("w3", timed("Design sync", today, 11, 0, minutes: 60)),
+            change("w4", timed("Planning", today, 14, 0, minutes: 90)),
+            change("w5", timed("Standup", dayOffset(1), 9, 0, minutes: 30)),
+            change("w6", timed("Roadmap workshop", dayOffset(1), 10, 0, minutes: 120)),
+            change("w7", timed("1:1", dayOffset(3), 13, 30, minutes: 30)),
+            change("w8", timed("Team lunch", dayOffset(4), 12, 0, minutes: 60)),
+            change("w9", timed("Board of nobody", today, 16, 30, minutes: 45))], nextToken: nil)
+        cache.apply(account: account, calendarID: "home", changes: [
+            change("h1", timed("Dentist", dayOffset(2), 8, 30, minutes: 45)),
+            change("h2", timed("School pick-up", today, 15, 45, minutes: 30))], nextToken: nil)
+        cache.apply(account: account, calendarID: "hol", changes: [change("x1", holiday)], nextToken: nil)
+        store.add(title: "Send the deck to the team", area: "Personal", importance: .high, due: at(today, 15, 0), dueHasTime: true)
+        store.add(title: "Renew the parking permit", area: "Acme", importance: .medium, due: today)
+        store.add(title: "Book the venue", area: "Garden", importance: .low, due: cal.date(byAdding: .day, value: 2, to: today))
+        store.add(title: "Reply to the supplier", area: "Acme", importance: .medium, due: cal.date(byAdding: .day, value: 5, to: today))
+        // A task that has an event: it shows once, as the task.
+        store.add(title: "Call the accountant", area: "Personal", importance: .medium, due: at(dayOffset(3), 10, 0), dueHasTime: true)
+        if let t = store.cards.last {
+            cache.apply(account: account, calendarID: account, changes: [
+                change("lk1", timed("Call the accountant", dayOffset(3), 10, 0, minutes: 30))], nextToken: nil)
+            do { try store.db.run("UPDATE cards SET gcal_account=?, gcal_calendar=?, gcal_event=? WHERE id=?", [account, account, "lk1", t.id]) } catch {
+                print("ERR: could not link the sample task: \(error)")
+            }
+            store.reload()
         }
     }
 }
