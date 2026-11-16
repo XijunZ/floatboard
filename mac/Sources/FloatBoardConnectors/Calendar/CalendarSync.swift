@@ -35,10 +35,16 @@ public final class CalendarSync {
         self.now = now
     }
 
-    /// One scheduled pass: the calendar list when it is new or 6 hours old, then the events.
+    /// One scheduled pass: every account's calendar list when it is new or 6 hours old, else the list of any account whose
+    /// last read did not succeed (it failed, was refused, or the account was just connected again); then the events.
     public func tick() async {
         guard !running else { return }
-        if lastListed.map({ now().timeIntervalSince($0) >= Self.listInterval }) ?? true { await refreshCalendars() }
+        if lastListed.map({ now().timeIntervalSince($0) >= Self.listInterval }) ?? true {
+            await refreshCalendars()
+        } else {
+            let unlisted = accounts().filter { CalendarListAttempts.outcome($0) != .listed }
+            if !unlisted.isEmpty { await refreshCalendars(only: unlisted) }
+        }
         await syncOnce()
     }
 
@@ -46,7 +52,11 @@ public final class CalendarSync {
     /// (the user chooses in Settings). A known calendar keeps its choice.
     public func refreshCalendars() async {
         lastListed = now()
-        for account in accounts() {
+        await refreshCalendars(only: accounts())
+    }
+
+    private func refreshCalendars(only list: [String]) async {
+        for account in list {
             let key = "list:" + account
             do {
                 let found = try await apiFor(account).listCalendars()
@@ -69,13 +79,16 @@ public final class CalendarSync {
         }
     }
 
-    /// Reads every shown calendar, then reconciles tasks with their events. A second call while one runs does nothing.
+    /// Reads every shown calendar of a connected account, then reconciles tasks with their events. A removed account's
+    /// calendars are not read (and count as unread, so nothing is concluded from them). A second call while one runs does nothing.
     public func syncOnce() async {
         guard !running else { return }
         running = true
         defer { running = false }
         var unread = Set<String>()
+        let connected = Set(accounts())
         for c in cache.calendars() where c.shown {
+            guard connected.contains(c.account) else { unread.insert(TaskEventRules.key(c.account, c.calendarID)); continue }
             if !(await sync(c)) { unread.insert(TaskEventRules.key(c.account, c.calendarID)) }
         }
         TaskEventRules.reconcile(store: store, cache: cache, now: now(), unreadCalendars: unread)

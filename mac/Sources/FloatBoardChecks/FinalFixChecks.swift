@@ -50,4 +50,48 @@ import FloatBoardConnectors
         let sheet2 = EventPanelEdit.span(day: day, start: at(23), end: at(22))
         check(sheet.start == at(23) && sheet.end == at(0, plusDays: 1) && sheet2.end == at(22, plusDays: 1), "new_event_end_rolls_to_next_day")
     } catch { check(false, "panel checks: \(error)") }
+
+    // 2. The calendar list is read again at the next pass after a failed read or a reconnect, not 6 hours later;
+    //    calendars of a removed account are not read.
+    do {
+        let (store, cache, _) = try setup("relist")
+        let who = "relist@example.com", removed = "removed@example.com"
+        cache.upsertCalendars(account: removed, [CalCalendar(account: removed, calendarID: removed, name: "Old", color: "#000000", owned: true, shown: true)])
+        let fake = FakeGoogle()
+        var listOK = false
+        fake.handler = { r in
+            if r.url?.path.hasSuffix("/users/me/calendarList") == true {
+                return listOK ? (##"{"items":[{"id":"relist@example.com","summary":"R","accessRole":"owner","primary":true,"backgroundColor":"#111111"}]}"##, 200)
+                              : (#"{"error":"backendError"}"#, 500)
+            }
+            return (#"{"items":[],"nextSyncToken":"T"}"#, 200)
+        }
+        let sync = CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [who] })
+        func lists() -> Int { fake.requests.filter { $0.url?.path.hasSuffix("/users/me/calendarList") == true }.count }
+        await sync.tick()
+        let afterFail = lists()
+        listOK = true
+        await sync.tick()   // the failed read is tried again at once
+        check(afterFail == 1 && lists() == 2 && CalendarListAttempts.outcome(who) == .listed
+              && cache.calendars().contains { $0.account == who }, "calendar_list_retried_next_pass_after_failure")
+        await sync.tick()
+        let steady = lists()
+        CalendarListAttempts.forget(who)   // what a fresh sign-in (Reconnect) does
+        await sync.tick()
+        check(steady == 2 && lists() == 3, "calendar_list_read_next_pass_after_reconnect")
+        check(!fake.requests.contains { $0.url?.path.contains(removed) == true }, "sync_skips_calendars_of_removed_accounts")
+    } catch { check(false, "relist checks: \(error)") }
+}
+
+/// A fake Google for the checks: records requests and answers with `handler` (body, status).
+final class FakeGoogle: @unchecked Sendable {
+    var requests: [URLRequest] = []
+    var handler: (URLRequest) -> (String, Int) = { _ in ("{}", 200) }
+    func api() -> GoogleCalendarAPI {
+        GoogleCalendarAPI(token: { _ in "tok" }, http: { [self] req in
+            requests.append(req)
+            let (body, status) = handler(req)
+            return (Data(body.utf8), HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        })
+    }
 }
