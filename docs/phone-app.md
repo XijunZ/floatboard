@@ -374,3 +374,22 @@ Deploy order: migrations 0031 and 0032 (`npm run migrate:remote`), then the engi
 `wrangler.toml`), then the Mac app. An older Mac skips a phone link as invalid (the phone shows it as replaced) and
 sends no `email` marker (the phone then offers Link an email only on tasks without an email link); a newer Mac
 against an older engine says "Update the engine first" when searching.
+
+### Built: Today list (Calendar, Nov 2026)
+
+The phone shows a **Today** list above the board: today's meetings (time, title, a **Join** button when there is a
+video link) and the tasks due today. It is read only. The phone has no calendar access of its own: the Mac puts the
+events in the board copy it already sends.
+
+- `PUT /v2/board` gains optional `events` (today and tomorrow, at most 50) and `time_zone` (the Mac's zone, so the phone
+  shows the Mac's times, not the phone's). Each event is `{ id: "E-37", title, start, end, all_day, video, color, tasks }`.
+  The key is `all_day` (snake_case, like the cards). Both are kept in the encrypted board copy and come back from
+  `GET /app/api/board`. An older Mac sends neither and the phone simply has no Today meetings.
+- Robustness rule: one bad field never blocks the board push. A `video` that is not a valid https address becomes
+  none (no Join button) and an unknown `time_zone` is ignored, instead of the engine refusing the whole push with 400.
+  The Mac also checks the address before sending. Fields that are the wrong type (for example a missing `all_day`) are
+  still refused with 400, as for cards.
+- A task linked to an event is not repeated: it shows under its meeting, and a task that is itself on the calendar is
+  not counted as a meeting.
+- Deploy order: engine first, then the Mac app. An older engine ignores `events` safely; with the engine first, Today
+  shows from the first push.
