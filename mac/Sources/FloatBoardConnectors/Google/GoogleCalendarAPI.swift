@@ -12,6 +12,8 @@ public enum GoogleCalendarError: Error, Equatable {
     /// Any other failure, with Google's answer so the cause shows in Activity.
     case http(status: Int, body: String)
     case badResponse(String)
+    /// The account's saved sign-in is gone (not a Google answer): nothing can be sent for it until it is connected again.
+    case notConnected(account: String)
 }
 
 /// A calendar in the user's Google calendar list, before it is tied to an account.
@@ -94,9 +96,12 @@ public struct GoogleCalendarAPI: Sendable {
 
     /// Creates an event. Returns Google's event id and the fields as Google stored them. The caller (outbox) gives it its
     /// E-n number by storing it through the calendar cache; this client never invents one.
-    public func insert(calendarID: String, _ e: CalEventFields, cardID: Int64?, addMeet: Bool)
+    /// `eventID`, when given, is the id Google must use for the new event (lowercase letters a-v and digits, 5-1024 characters):
+    /// sending the same one again gets HTTP 409 instead of a second event, so a retry after a lost answer is safe.
+    public func insert(calendarID: String, _ e: CalEventFields, cardID: Int64?, addMeet: Bool, eventID: String? = nil)
         async throws -> (eventID: String, fields: CalEventFields) {
         var body: [String: Any] = ["summary": e.title]
+        if let eventID { body["id"] = eventID }
         if e.allDay, let s = e.startDay, let en = e.endDay { body["start"] = ["date": s]; body["end"] = ["date": en] }
         else { body["start"] = Self.timedJSON(e.start); body["end"] = Self.timedJSON(e.end) }
         if !e.location.isEmpty { body["location"] = e.location }
@@ -108,6 +113,11 @@ public struct GoogleCalendarAPI: Sendable {
             q.append(URLQueryItem(name: "conferenceDataVersion", value: "1"))
         }
         return try await eventResult(try await send("POST", "/calendars/\(Self.pathID(calendarID))/events", query: q, body: body))
+    }
+
+    /// Reads one event.
+    public func get(calendarID: String, eventID: String) async throws -> (eventID: String, fields: CalEventFields) {
+        try await eventResult(try await send("GET", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(eventID))"))
     }
 
     /// Changes only the fields given. `allDayStart` ("yyyy-MM-dd") makes it an all-day event starting that day; it ends the

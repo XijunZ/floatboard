@@ -86,9 +86,11 @@ public final class CalendarOutbox {
     /// Google accepted the change. A create with a task links the task to the new event; the result (nil for a delete)
     /// goes into the calendar cache. The task and the outbox row change together first; if the cache write then fails the
     /// next calendar sync brings the event in, and the change is never sent twice.
-    public func markSent(uuid: String, result: (eventID: String, fields: CalEventFields)?, now: Date = Date()) {
+    /// Returns false (and logs to Activity) when the local save failed: the change then stays unsent.
+    @discardableResult
+    public func markSent(uuid: String, result: (eventID: String, fields: CalEventFields)?, now: Date = Date()) -> Bool {
         let row = rows("WHERE uuid=?", [uuid]).first
-        store.perform {
+        do { try store.performThrowing {
             try db.run("UPDATE cal_outbox SET sent=?, last_error='' WHERE uuid=?", [now, uuid])
             if let row, case .create(_, let cardID?, _) = row.write, let result {
                 try db.run("""
@@ -96,8 +98,11 @@ public final class CalendarOutbox {
                     """, [row.account, row.calendarID, result.eventID, result.fields.htmlLink, now, now, cardID])
                 try store.insertEvent(cardID, "added to Google Calendar (\(row.account))", actor: .user, at: now)
             }
+        } } catch {
+            store.activity("calendar", .error, "Could not record a calendar change as sent", detail: "\(error)", trace: uuid)
+            return false
         }
-        guard let row else { return }
+        guard let row else { return true }
         if let result {
             cache.apply(account: row.account, calendarID: row.calendarID,
                         changes: [GoogleEventChange(eventID: result.eventID, cancelled: false, fields: result.fields)], nextToken: nil)
@@ -105,6 +110,13 @@ public final class CalendarOutbox {
             cache.apply(account: row.account, calendarID: row.calendarID,
                         changes: [GoogleEventChange(eventID: id, cancelled: true, fields: nil)], nextToken: nil)
         }
+        return true
+    }
+
+    /// The id a created event gets on Google's side, the same every time for the same outbox row (Google accepts a second
+    /// attempt with it only as a duplicate, never as a second event). 32 hex digits are valid Google event ids.
+    public static func googleEventID(forUUID uuid: String) -> String {
+        uuid.lowercased().replacingOccurrences(of: "-", with: "")
     }
 
     /// The send failed: keep the change, remember why, and wait 1 minute, then 2, 4 ... never more than an hour.
