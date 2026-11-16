@@ -19,7 +19,7 @@ struct NewEventSheet: View {
     }
 
     /// Calendars the user owns and shows: the only ones a new event can go to.
-    private var options: [CalCalendar] { CalendarCache(store: store).calendars().filter { $0.owned && $0.shown } }
+    private var options: [CalCalendar] { CalendarCache(store: store).connectedCalendars().filter { $0.owned && $0.shown } }
     private var calendar: CalCalendar? { chosen ?? edits.defaultCalendar(in: options) }
 
     private func on(_ time: Date) -> Date {

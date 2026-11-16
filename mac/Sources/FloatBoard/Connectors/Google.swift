@@ -34,6 +34,7 @@ final class Google: ObservableObject {
     func attach(store: Store) {
         self.store = store
         GoogleCredentials.store = store
+        CalendarCache.connectedAccounts = { [weak self] in Set(self?.accounts ?? []) }
         clientID = GoogleCredentials.get("client-id") ?? ""
     }
 

@@ -128,6 +128,9 @@ struct AccountsView: View {
 
 /// Settings › Outputs › Calendar: the connected Google accounts, which account new events go to, and a switch for every calendar.
 struct CalendarSettingsView: View {
+    /// The block's help line, shared with the pictures.
+    static let help = "Switch on the calendars to show in the Calendar tab and the bar. Tasks you put on the calendar go to the default account."
+
     @EnvironmentObject var store: Store
     @EnvironmentObject var google: Google
     /// Pictures only: pretend these accounts are connected.
@@ -184,7 +187,7 @@ struct CalendarSettingsView: View {
                 Spacer()
                 Button("Remove…") {
                     if ConnectFlow.confirmTwice("Remove \(email)?",
-                        "FloatBoard stops adding tasks to this calendar and making Meet links with it. Events already made stay.",
+                        "FloatBoard stops adding tasks to this account's calendars and making Meet links with it, and its calendars stop showing until you add it again. Events already made stay.",
                         action: "Remove") { google.remove(email); tick += 1 }
                 }
             }

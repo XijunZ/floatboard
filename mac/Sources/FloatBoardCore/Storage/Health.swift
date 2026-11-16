@@ -32,7 +32,7 @@ public enum Health {
         var out: [HealthProblem] = []
         if online ?? isOnline {
             let launchedAt = launchedAt ?? Self.launchedAt
-            for c in CalendarCache(store: store).calendars() where c.shown && !c.needsReconnect {
+            for c in CalendarCache(store: store).connectedCalendars() where c.shown && !c.needsReconnect {
                 guard let synced = c.syncedAt else { continue }
                 let since = max(synced, launchedAt)
                 if now.timeIntervalSince(since) > calendarStale {

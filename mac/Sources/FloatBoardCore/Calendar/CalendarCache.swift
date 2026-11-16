@@ -12,6 +12,19 @@ public final class CalendarCache {
     public init(db: DB, store: Store? = nil) { self.db = db; self.store = store }
     public convenience init(store: Store) { self.init(db: store.db, store: store) }
 
+    /// The accounts that are connected right now. What the calendar and the bar show leaves out the others (a removed account's
+    /// events stay saved, with each calendar's shown choice, and come back when the account is added again). Nil: no filtering
+    /// (the sync and the checks). The app sets it from its list of Google accounts.
+    public static var connectedAccounts: (() -> Set<String>)?
+
+    /// SQL for "only connected accounts" on the event table `e`, with its arguments.
+    private static func connectedClause() -> (String, [Any?]) {
+        guard let set = connectedAccounts?() else { return ("", []) }
+        if set.isEmpty { return (" AND 0", []) }
+        let list = set.sorted()
+        return (" AND e.account IN (" + list.map { _ in "?" }.joined(separator: ",") + ")", list)
+    }
+
     // MARK: Calendars
 
     /// Adds new calendars and refreshes name, colour and ownership of known ones. What the user chose (shown),
@@ -39,6 +52,12 @@ public final class CalendarCache {
                             syncToken: DB.isNull(s, 7) ? nil : DB.text(s, 7), syncedAt: DB.date(s, 8), fullReadAt: DB.date(s, 9))
             }
         } ?? []
+    }
+
+    /// The calendars of connected accounts only: what can be shown or chosen for a new event.
+    public func connectedCalendars() -> [CalCalendar] {
+        guard let set = Self.connectedAccounts?() else { return calendars() }
+        return calendars().filter { set.contains($0.account) }
     }
 
     @discardableResult
@@ -100,9 +119,10 @@ public final class CalendarCache {
         }
     }
 
-    /// Events that overlap [from, to): they start before `to` and end after `from`. Shown calendars only, not gone, by start.
+    /// Events that overlap [from, to): they start before `to` and end after `from`. Shown calendars of connected accounts only, not gone, by start.
     public func events(from: Date, to: Date) -> [CalEvent] {
-        events("WHERE e.gone=0 AND c.shown=1 AND e.start<? AND e.end>? ORDER BY e.start, e.short_id", [to, from])
+        let (clause, args) = Self.connectedClause()
+        return events("WHERE e.gone=0 AND c.shown=1 AND e.start<? AND e.end>?\(clause) ORDER BY e.start, e.short_id", [to, from] + args)
     }
 
     /// Any event by its E-n, even a cancelled one (so a link to it still resolves); nil if there is none.
@@ -116,11 +136,12 @@ public final class CalendarCache {
 
     /// The earliest-starting timed event that has not ended by `date` (one in progress counts) and is not an all-day event or one made from a task (C6).
     public func nextMeeting(after date: Date) -> CalEvent? {
-        events("""
-            WHERE e.gone=0 AND c.shown=1 AND e.all_day=0 AND e.fb_card IS NULL
+        let (clause, args) = Self.connectedClause()
+        return events("""
+            WHERE e.gone=0 AND c.shown=1\(clause) AND e.all_day=0 AND e.fb_card IS NULL
             AND NOT EXISTS (SELECT 1 FROM cards k WHERE k.deleted=0 AND k.gcal_account=e.account AND k.gcal_event=e.event_id)
             AND e.end>? ORDER BY e.start, e.short_id LIMIT 1
-            """, [date]).first
+            """, args + [date]).first
     }
 
     // MARK: Internals
