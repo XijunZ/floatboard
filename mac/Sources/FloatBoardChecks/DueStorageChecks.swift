@@ -103,4 +103,30 @@ import FloatBoardCore
             check(rows.count == 1 && rows[0].0 == "2026-11-20" && rows[0].1 == 0, "due_upgrade_day_uses_mac_zone_at_upgrade")
         } catch { check(false, "due_upgrade_day_uses_mac_zone_at_upgrade: \(error)") }
     }
+
+    // The engine's has_time decides whether a proposal's due is timed.
+    do {
+        func prop(_ due: String, hasTime: Bool?, mid: String) -> Proposal? {
+            var json: [String: Any] = ["id": mid, "kind": "task", "source_key": ["message_id": mid, "sent_at": "2026-11-01T09:00:00Z"],
+                                       "title": "T", "why": "w", "due": due, "importance": 1, "source_label": "x", "link": "",
+                                       "provenance": ["model": "m", "skill_version": "1", "created": "2026-11-01T09:00:00Z"]]
+            if let hasTime { json["has_time"] = hasTime }
+            return try? JSONDecoder().decode(Proposal.self, from: JSONSerialization.data(withJSONObject: json)) // try?-ok: nil fails the check
+        }
+        let cases: [(String, Bool?, Bool, String)] = [
+            ("2026-11-20T00:00", false, false, "due_proposal_midnight_with_has_time_false_is_date_only"),
+            ("2026-11-20T00:00", true, true, "due_proposal_midnight_with_has_time_true_is_timed"),
+            ("2026-11-20", true, false, "due_proposal_without_T_is_never_timed"),
+            ("2026-11-20T00:00", nil, false, "due_proposal_missing_has_time_midnight_is_date_only"),
+            ("2026-11-20T14:30", nil, true, "due_proposal_missing_has_time_uses_old_rule_for_a_time"),
+        ]
+        for (i, c) in cases.enumerated() {
+            guard let p = prop(c.0, hasTime: c.1, mid: "<due\(i)@x>") else { check(false, c.3 + ": decode"); continue }
+            do {
+                try Reconciler.apply([p], connector: "email", store: store, defaultGroup: "Personal", autoAdd: true)
+                let got = store.cards.first { $0.sourceKey?.messageID == "<due\(i)@x>" }
+                check(got.map { $0.dueHasTime == c.2 && $0.due != nil } ?? false, c.3)
+            } catch { check(false, c.3 + ": \(error)") }
+        }
+    }
 }
