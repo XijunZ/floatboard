@@ -394,7 +394,7 @@ struct OutputsBlock: View {
             if engines(store).isEmpty { NoEngineYet(what: "Email actions") }
             ForEach(screening(store)) { form($0, ["mark_read_on_done", "ai_footer"]) }
         }
-        SettingsBlock(title: "Calendar") {
+        SettingsBlock(title: "Calendar", help: "Switch on the calendars to show in the Calendar tab and the bar. Tasks you put on the calendar go to the default account.") {
             AccountsView(showSetup: false)
         }
         SettingsBlock(title: "Mac notifications",

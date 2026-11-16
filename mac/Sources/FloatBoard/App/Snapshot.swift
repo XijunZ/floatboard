@@ -162,6 +162,31 @@ enum Snapshot {
                 }
             }
         }
+        // Settings › Calendar in each state, with made-up accounts. Only on a scratch database: it fills the calendar cache.
+        if ProcessInfo.processInfo.environment["FLOATBOARD_CALSETTINGSSHOTS"] != nil, LocalData.isScratchDatabase {
+            let cache = CalendarCache(store: store)
+            let a = "alex@example.com", b = "sam@example.org"
+            func page(_ accounts: [String]) -> some View {
+                SettingsBlock(title: "Calendar", help: "Switch on the calendars to show in the Calendar tab and the bar. Tasks you put on the calendar go to the default account.") {
+                    CalendarSettingsView(accounts: accounts).environment(\.calendarSnapshot, true)
+                }.padding(12).frame(width: 640, alignment: .topLeading).fixedSize(horizontal: false, vertical: true)
+            }
+            save(page([]), "settings-calendar-none.png", CGSize(width: 640, height: 260))
+            // Connected but no calendars listed yet (the permission to list them is missing).
+            save(page([a]), "settings-calendar-reconnect.png", CGSize(width: 640, height: 260))
+            cache.upsertCalendars(account: a, [
+                CalCalendar(account: a, calendarID: a, name: "Work", color: "#4285f4", owned: true, shown: true),
+                CalCalendar(account: a, calendarID: "home", name: "Home", color: "#33b679", owned: true, shown: true),
+                CalCalendar(account: a, calendarID: "hol", name: "Holidays", color: "#f4511e", owned: false, shown: false)])
+            cache.upsertCalendars(account: b, [
+                CalCalendar(account: b, calendarID: b, name: "Sam", color: "#8e24aa", owned: true, shown: true),
+                CalCalendar(account: b, calendarID: "club", name: "Chess club", color: "#039be5", owned: false, shown: false)])
+            save(page([a, b]), "settings-calendar-two.png", CGSize(width: 640, height: 420))
+            // One calendar that Google refused: its account asks to reconnect.
+            cache.setNeedsReconnect(account: b, calendarID: "club", true)
+            store.setDefaultCalendarAccount(b)
+            save(page([a, b]), "settings-calendar-two-reconnect.png", CGSize(width: 640, height: 420))
+        }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so each Settings section is drawn directly.
         for s in SettingsSection.allCases {

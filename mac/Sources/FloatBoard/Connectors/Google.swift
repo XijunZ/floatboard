@@ -102,7 +102,8 @@ final class Google: ObservableObject {
     /// The client ID and secret, for handing a Gmail sign-in to an engine.
     var clientSecret: String? { GoogleCredentials.get("client-secret") }
 
-    func connect(scope: String? = nil) {
+    /// `loginHint` pre-selects the account when it signs in again (Settings › Calendar › Reconnect).
+    func connect(scope: String? = nil, loginHint: String? = nil) {
         if scope == nil { gmailHandler = nil }
         let scope = scope ?? Self.scopes
         guard isConfigured, let secret = GoogleCredentials.get("client-secret") else {
@@ -161,6 +162,7 @@ final class Google: ObservableObject {
                     .init(name: "prompt", value: "select_account consent"),
                     .init(name: "state", value: state),
                 ]
+                if let hint = loginHint { c.queryItems?.append(.init(name: "login_hint", value: hint)) }
                 if let u = c.url { NSWorkspace.shared.open(u) }
             }
         }
@@ -195,6 +197,8 @@ final class Google: ObservableObject {
             if !accounts.contains(email) { accounts.append(email) }
             UserDefaults.standard.set(accounts, forKey: "googleAccounts")
             status = "Connected \(email)."
+            // Read the account's calendar list and events now, so Settings › Calendar fills in (and a reconnect clears).
+            NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
         } catch {
             fail("Sign-in failed: \(error.localizedDescription)", detail: "\(error)")
         }

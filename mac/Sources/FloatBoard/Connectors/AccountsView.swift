@@ -76,31 +76,7 @@ struct AccountsView: View {
         Group {
             VStack(alignment: .leading, spacing: 12) {
                 if showAccounts {
-                Text("Google Calendar (optional)").font(.system(size: 13, weight: .semibold))
-                Text("Only for adding tasks to your calendar and Meet links. Off until you connect an account.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                if google.accounts.isEmpty {
-                    Text("No accounts connected yet.").font(.system(size: 12)).foregroundStyle(.secondary)
-                }
-                ForEach(google.accounts, id: \.self) { email in
-                    HStack {
-                        Image(systemName: "person.crop.circle").foregroundStyle(.secondary)
-                        Text(email).font(.system(size: 12))
-                        Spacer()
-                        Button("Remove…") {
-                            if ConnectFlow.confirmTwice("Remove \(email)?",
-                                "FloatBoard stops adding tasks to this calendar and making Meet links with it. Events already made stay.",
-                                action: "Remove") { google.remove(email) }
-                        }
-                    }
-                    .frame(maxWidth: 520)
-                }
-                HStack {
-                    Button(google.busy ? "Waiting for sign-in in your browser…" : "Connect Google account…") { google.connect() }
-                        .disabled(!google.isConfigured || google.busy)
-                    if let s = google.status { Text(s).font(.system(size: 11)).foregroundStyle(.secondary) }
-                }
-
+                    CalendarSettingsView()
                 }
 
                 if showSetup {
@@ -146,6 +122,104 @@ struct AccountsView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Settings › Outputs › Calendar: the connected Google accounts, which account new events go to, and a switch for every calendar.
+struct CalendarSettingsView: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var google: Google
+    /// Pictures only: pretend these accounts are connected.
+    var accounts: [String]? = nil
+    /// Bumped after a change so the lists are read again.
+    @State private var tick = 0
+    /// Pictures can't draw system controls (pickers, switches, link buttons), so they get plain stand-ins.
+    @Environment(\.calendarSnapshot) private var snapshot
+
+    private var connected: [String] { accounts ?? google.accounts }
+
+    var body: some View {
+        let _ = tick
+        let all = CalendarCache(store: store).calendars()
+        let effective = CalendarSettings.effectiveDefault(saved: store.savedDefaultCalendarAccount(), connected: connected)
+        VStack(alignment: .leading, spacing: 14) {
+            if connected.isEmpty {
+                Text("No Google account connected yet. Connect one to see your calendars here and to put tasks on them.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            if connected.count > 1, let effective {
+                HStack {
+                    Text("New events go to").font(.system(size: 12))
+                    if snapshot {
+                        Text(effective + " ⌄").font(.system(size: 12)).padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.08)))
+                    } else {
+                        Picker("Default account", selection: Binding(get: { effective }, set: {
+                            if store.setDefaultCalendarAccount($0) { tick += 1 }
+                        })) {
+                            ForEach(connected, id: \.self) { Text($0).tag($0) }
+                        }
+                        .labelsHidden().fixedSize()
+                    }
+                }
+            }
+            ForEach(connected, id: \.self) { email in account(email, all: all) }
+            HStack {
+                Button(google.busy ? "Waiting for sign-in in your browser…" : "Connect Google account…") { google.connect() }
+                    .disabled(!google.isConfigured || google.busy)
+                if let s = google.status { Text(s).font(.system(size: 11)).foregroundStyle(.secondary) }
+            }
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+    }
+
+    private func account(_ email: String, all: [CalCalendar]) -> some View {
+        let mine = CalendarSettings.calendars(of: email, in: all)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "person.crop.circle").foregroundStyle(.secondary)
+                Text(email).font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("Remove…") {
+                    if ConnectFlow.confirmTwice("Remove \(email)?",
+                        "FloatBoard stops adding tasks to this calendar and making Meet links with it. Events already made stay.",
+                        action: "Remove") { google.remove(email); tick += 1 }
+                }
+            }
+            if CalendarSettings.needsReconnect(account: email, calendars: all) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.system(size: 11))
+                    if snapshot {
+                        Text("Reconnect to show your calendars").font(.system(size: 12)).foregroundStyle(Color.accentColor)
+                    } else {
+                        Button("Reconnect to show your calendars") { google.connect(loginHint: email) }
+                            .buttonStyle(.link).font(.system(size: 12))
+                            .disabled(!google.isConfigured || google.busy)
+                    }
+                }
+                .padding(.leading, 22)
+            }
+            ForEach(mine, id: \.calendarID) { c in
+                HStack(spacing: 8) {
+                    Circle().fill(Color(hex: c.color)).frame(width: 9, height: 9)
+                    Text(c.name).font(.system(size: 12)).lineLimit(1)
+                    Spacer()
+                    if snapshot {
+                        Capsule().fill(c.shown ? Color.accentColor : Color.primary.opacity(0.2)).frame(width: 26, height: 14)
+                            .overlay(Circle().fill(.white).padding(2), alignment: c.shown ? .trailing : .leading)
+                    } else {
+                        Toggle(c.name, isOn: Binding(get: { c.shown }, set: { on in
+                            if CalendarCache(store: store).setShown(account: email, calendarID: c.calendarID, on) {
+                                tick += 1
+                                NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
+                            }
+                        }))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    }
+                }
+                .padding(.leading, 22)
+            }
         }
     }
 }
