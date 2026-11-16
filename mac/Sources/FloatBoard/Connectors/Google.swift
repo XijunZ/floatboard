@@ -234,49 +234,6 @@ final class Google: ObservableObject {
         GoogleCredentials.get("refresh:\(account)") != nil && GoogleCredentials.get("client-secret") != nil
     }
 
-    struct CreatedEvent { let id: String; let htmlLink: String; let meetLink: String? }
-
-    /// Creates an event on the account's main calendar. Timed tasks get 30 minutes; date-only tasks are all-day.
-    func createEvent(for card: Card, account: String, addMeet: Bool) async throws -> CreatedEvent {
-        guard let due = card.due else { throw GoogleError("Give the task a due date first.") }
-        let token = try await accessToken(for: account)
-        var body: [String: Any] = ["summary": card.title]
-        var description = card.notes
-        if let m = card.meetLink { description += (description.isEmpty ? "" : "\n\n") + m.absoluteString }
-        if !description.isEmpty { body["description"] = description }
-        if card.dueHasTime {
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime]
-            iso.timeZone = AppTime.zone
-            let tz = AppTime.zone.identifier
-            body["start"] = ["dateTime": iso.string(from: due), "timeZone": tz]
-            body["end"] = ["dateTime": iso.string(from: due.addingTimeInterval(30 * 60)), "timeZone": tz]
-        } else {
-            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = AppTime.zone
-            let next = AppTime.calendar.date(byAdding: .day, value: 1, to: due) ?? due
-            body["start"] = ["date": f.string(from: due)]
-            body["end"] = ["date": f.string(from: next)]
-        }
-        if addMeet {
-            body["conferenceData"] = ["createRequest": [
-                "requestId": UUID().uuidString,
-                "conferenceSolutionKey": ["type": "hangoutsMeet"],
-            ]]
-        }
-        var req = URLRequest(url: URL(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1")!)
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:] // try?-ok: untrusted reply; a non-200 or missing id is reported below
-        guard (resp as? HTTPURLResponse)?.statusCode == 200, let id = json["id"] as? String else {
-            let msg = (json["error"] as? [String: Any])?["message"] as? String ?? "HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)"
-            throw GoogleError("Google Calendar said: \(msg)")
-        }
-        return CreatedEvent(id: id, htmlLink: json["htmlLink"] as? String ?? "", meetLink: json["hangoutLink"] as? String)
-    }
-
     // MARK: Helpers
 
     private static func postForm(_ url: String, _ fields: [String: String]) async throws -> [String: Any] {

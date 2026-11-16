@@ -10,9 +10,8 @@ struct CalendarMenu: View {
     let card: Card
     /// Show "Add to Google Calendar" text next to the icon (used in the edit pop-up).
     var labeled = false
-    /// Called after the event is created, e.g. so the edit pop-up can show the new Meet link.
-    var onAdded: (String, Google.CreatedEvent) -> Void = { _, _ in }
-    @State private var working = false
+    /// Called after the event is queued for Google, e.g. so the edit pop-up can show the task is on the calendar.
+    var onAdded: (String) -> Void = { _ in }
 
     var body: some View {
         Menu {
@@ -41,7 +40,7 @@ struct CalendarMenu: View {
                 Button("Open pre-filled in browser instead") { NSWorkspace.shared.open(url) }
             }
         } label: {
-            let icon = working ? "hourglass" : (card.gcalAccount.isEmpty ? "calendar.badge.plus" : "calendar.badge.checkmark")
+            let icon = (card.gcalAccount.isEmpty ? "calendar.badge.plus" : "calendar.badge.checkmark")
             if labeled {
                 Label(card.gcalAccount.isEmpty ? "Add to Google Calendar" : "In Google Calendar", systemImage: icon)
             } else {
@@ -52,22 +51,14 @@ struct CalendarMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help(card.gcalAccount.isEmpty ? "Add to Google Calendar" : "In \(card.gcalAccount)'s calendar")
-        .disabled(working)
     }
 
+    /// One path for every way of putting a task on the calendar: a change waits in the calendar outbox and is sent at once
+    /// when online (the scheduler is nudged), kept and retried when not. Problems are written to Activity.
     private func add(_ account: String, meet: Bool) {
-        working = true
-        Task {
-            defer { working = false }
-            do {
-                let ev = try await google.createEvent(for: card, account: account, addMeet: meet)
-                store.markInCalendar(card, account: account, event: ev)
-                onAdded(account, ev)
-            } catch {
-                store.lastError = error.localizedDescription
-                store.activity("google", .error, "Could not add the task to Google Calendar", detail: error.localizedDescription)
-            }
-        }
+        guard store.addToCalendar(card, account: account, addMeet: meet) else { return }
+        onAdded(account)
+        NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
     }
 }
 

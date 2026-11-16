@@ -20,9 +20,6 @@ extension Color {
 
 extension Store {
     func color(_ area: String) -> Color { areas.first { $0.name == area }?.color ?? .gray }
-    func markInCalendar(_ card: Card, account: String, event: Google.CreatedEvent) {
-        markInCalendar(card, account: account, eventID: event.id, htmlLink: event.htmlLink, meetLink: event.meetLink)
-    }
 }
 
 extension Search {

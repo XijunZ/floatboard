@@ -124,7 +124,7 @@ public final class CalendarCache {
 
     private static let columns = """
         e.short_id, e.account, e.calendar_id, e.event_id, e.start, e.end, e.all_day, e.start_day, e.end_day, e.title, e.location,
-        e.video_link, e.description, e.html_link, e.recurring_id, e.google_updated, e.fb_card
+        e.video_link, e.description, e.html_link, e.recurring_id, e.google_updated, e.fb_card, e.gone
         """
 
     private func events(_ tail: String, _ args: [Any?]) -> [CalEvent] {
@@ -142,7 +142,7 @@ public final class CalendarCache {
                                 start: start, end: end, allDay: allDay, title: DB.text(s, 9), location: DB.text(s, 10),
                                 videoLink: DB.text(s, 11), description: DB.text(s, 12), htmlLink: DB.text(s, 13),
                                 recurringID: DB.isNull(s, 14) ? nil : DB.text(s, 14), googleUpdated: DB.date(s, 15) ?? Date(),
-                                fbCard: DB.isNull(s, 16) ? nil : DB.int(s, 16))
+                                fbCard: DB.isNull(s, 16) ? nil : DB.int(s, 16), gone: DB.int(s, 17) != 0)
             }
         } ?? []
     }

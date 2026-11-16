@@ -218,12 +218,8 @@ struct EditCardView: View {
             HStack(spacing: 14) {
                 if hasDue {
                     // Uses the date/time as currently set here, even before Save.
-                    CalendarMenu(card: pending, labeled: true) { account, ev in
+                    CalendarMenu(card: pending, labeled: true) { account in
                         draft.gcalAccount = account
-                        draft.gcalLink = ev.htmlLink
-                        if let meet = ev.meetLink, draft.link.trimmingCharacters(in: .whitespaces).isEmpty {
-                            draft.link = meet
-                        }
                     }
                 }
                 if let meet = pending.meetingLink {
