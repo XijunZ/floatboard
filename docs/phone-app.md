@@ -393,3 +393,4 @@ events in the board copy it already sends.
   not counted as a meeting.
 - Deploy order: engine first, then the Mac app. An older engine ignores `events` safely; with the engine first, Today
   shows from the first push.
+- Past events stay in Today all day (they are not removed once they end).
