@@ -373,6 +373,8 @@ private final class PhoneEngine {
     cache.apply(account: acct, calendarID: cid, changes: [
         change("m1", fields("  Standup  ", at(0, 10), video: "https://meet.example.com/abc")),
         change("m2", fields("Insecure call", at(0, 12), video: "http://meet.example.com/abc")),
+        change("m5", fields("Odd link", at(0, 13), video: "https://")),
+        change("m6", fields("Spaced link", at(0, 13), video: "https://meet.example.com/a b")),
         change("m3", fields("Tomorrow review", at(1, 9))),
         change("m4", fields("Next week", at(3, 9))),
         change("t1", fields("Task block", at(0, 14), fbCard: made.id)),
@@ -381,7 +383,8 @@ private final class PhoneEngine {
     store.link(ShortID(kind: .task, number: prep.id), ShortID(kind: .event, number: standup.shortID), actor: .user)
 
     let events = PhoneBoard.events(store: store, now: now)
-    check(events.map(\.title) == ["Standup", "Insecure call", "Tomorrow review"]
+    check(events.filter { $0.title.hasSuffix("link") }.allSatisfy { $0.video == nil } && events.count == 5, "phone_body_drops_malformed_https_link")
+    check(events.filter { !$0.title.hasSuffix("link") }.map(\.title) == ["Standup", "Insecure call", "Tomorrow review"]
           && events[0].id == "E-\(standup.shortID)" && events[0].video == "https://meet.example.com/abc" && events[0].tasks == [prep.id]
           && events[0].color == "#112233" && events[0].allDay == false && events[1].video == nil && events[2].tasks.isEmpty
           && PhoneBoard.parseISO(events[0].start) == at(0, 10) && PhoneBoard.parseISO(events[0].end) == at(0, 11),

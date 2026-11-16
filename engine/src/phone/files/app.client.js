@@ -466,7 +466,7 @@
         box.appendChild(el("h2", null, "Due today"));
         cards.forEach(function (c) { box.appendChild(cardButton(c)); });
       }
-    } catch (e) { box.replaceChildren(); events = []; cards = []; }
+    } catch (err) { console.error("Today list failed", err); box.replaceChildren(); events = []; cards = []; }
     box.hidden = !(events.length || cards.length);
   }
 
