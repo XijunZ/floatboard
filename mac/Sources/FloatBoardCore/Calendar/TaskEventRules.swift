@@ -267,23 +267,13 @@ extension Store {
             """, [link.account, link.calendar, link.event]) { DB.date($0, 0) }.first ?? nil
     }
 
-    /// The account and calendar a new event goes to: `account`, else the default one in settings, else the first connected;
-    /// the account's main calendar (Google names it with the account's address), else its first owned one.
+    /// The account and calendar a new event goes to (`newEventCalendar`, the rule the New event sheet uses too).
     private func resolveCalendar(_ account: String?) throws -> (String, String)? {
-        var acct = account
-        let calendars = CalendarCache(store: self).calendars()
-        if acct == nil {
-            acct = try db.query("SELECT value FROM meta WHERE key=?", [TaskEventRules.defaultAccountKey]) { DB.text($0, 0) }.first
-            if acct?.isEmpty == true { acct = nil }
-        }
-        if acct == nil { acct = calendars.map(\.account).sorted().first }
-        guard let acct else {
+        guard let target = newEventCalendar(account: account) else {
             activity("calendar", .warning, "No Google calendar to put this task on; connect an account in Settings")
             return nil
         }
-        let mine = calendars.filter { $0.account == acct }
-        let main = mine.first { $0.calendarID.lowercased() == acct.lowercased() } ?? mine.first { $0.owned }
-        return (acct, main?.calendarID ?? acct)
+        return (target.account, target.calendarID)
     }
 
     /// The event to make for a task: a 30-minute block at its time, or an all-day event for a date-only task (D11). Nil without a due.

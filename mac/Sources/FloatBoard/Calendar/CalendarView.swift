@@ -113,13 +113,11 @@ struct NewEventDraft: Identifiable {
 
     private func nudge() { NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil) }
 
-    /// The calendar a new event goes to: the default account's main calendar, else the first connected account's, among those
-    /// the user owns and shows.
+    /// The calendar a new event goes to among `options` (calendars the user owns and shows): the same rule as for tasks
+    /// (`Store.newEventCalendar`), so a removed account is never chosen.
     func defaultCalendar(in options: [CalCalendar]) -> CalCalendar? {
-        let saved = store.flatMap { try? $0.db.query("SELECT value FROM meta WHERE key=?", [TaskEventRules.defaultAccountKey]) { DB.text($0, 0) }.first } // try?-ok: with no saved default account the first connected one is used
-        let account = (saved?.isEmpty == false ? saved : nil) ?? options.map(\.account).sorted().first
-        let mine = options.filter { $0.account == account }
-        return mine.first { $0.calendarID.lowercased() == account?.lowercased() } ?? mine.first ?? options.first
+        guard let pick = store?.newEventCalendar(among: options) else { return options.first }
+        return options.first { $0.account == pick.account && $0.calendarID == pick.calendarID } ?? options.first
     }
 }
 
