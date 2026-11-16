@@ -228,6 +228,11 @@ public enum Due {
         let c = Calendar.current.dateComponents([.hour, .minute], from: d)
         return (c.hour ?? 0) != 0 || (c.minute ?? 0) != 0
     }
+    /// Whether `d` is not midnight in `calendar`'s zone (the app's, by default).
+    public static func hasTime(_ d: Date, in calendar: Calendar) -> Bool {
+        let c = calendar.dateComponents([.hour, .minute], from: d)
+        return (c.hour ?? 0) != 0 || (c.minute ?? 0) != 0
+    }
     /// The calendar day of `d` in the app's zone, "yyyy-MM-dd": how a date-only due is stored.
     public static func dayString(_ d: Date) -> String {
         let c = AppTime.calendar.dateComponents([.year, .month, .day], from: d)

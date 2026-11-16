@@ -39,6 +39,14 @@ import FloatBoardCore
         let again = try WeChatNotifications.newChats(folder: dir, cursors: ["Anna": anna!.newest], now: now)
         check(again.isEmpty, "wechat_nothing_sent_twice")
         check(try WeChatNotifications.recentCount(folder: dir, now: now) == 3, "wechat_recent_count")
+        let savedTZ = ProcessInfo.processInfo.environment["TZ"], savedApp = AppTime.setting
+        setenv("TZ", "Asia/Shanghai", 1); tzset(); NSTimeZone.resetSystemTimeZone()
+        defer { if let savedTZ { setenv("TZ", savedTZ, 1) } else { unsetenv("TZ") }; tzset(); NSTimeZone.resetSystemTimeZone(); AppTime.apply(savedApp) }
+        AppTime.apply("Europe/London")
+        let byDefault = try WeChatNotifications.newChats(folder: dir, cursors: [:], now: now).map(\.transcript)
+        let london = try WeChatNotifications.newChats(folder: dir, cursors: [:], now: now, zone: TimeZone(identifier: "Europe/London")!).map(\.transcript)
+        let shanghai = try WeChatNotifications.newChats(folder: dir, cursors: [:], now: now, zone: TimeZone(identifier: "Asia/Shanghai")!).map(\.transcript)
+        check(!byDefault.isEmpty && byDefault == london && byDefault != shanghai, "wechat_stamps_follow_app_zone_not_the_mac")
     } catch { check(false, "wechat: \(error)") }
     let missing = dir.appendingPathComponent("nope/db2")
     do { _ = try WeChatNotifications.newChats(folder: missing, cursors: [:]) ; check(false, "wechat_missing_folder_is_reported") }

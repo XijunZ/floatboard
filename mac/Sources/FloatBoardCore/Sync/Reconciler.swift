@@ -281,7 +281,7 @@ public enum Reconciler {
         guard let s = p.due, !s.isEmpty else { return (nil, false, false) }
         if let d = parseDue(s) {
             // The engine's has_time decides; a due with no "T" is never timed. Without has_time (older engine): the old rule.
-            let timed = s.contains("T") && (p.hasTimeMissing ? Due.hasTime(d) : p.hasTime)
+            let timed = s.contains("T") && (p.hasTimeMissing ? Due.hasTime(d, in: AppTime.calendar) : p.hasTime)
             return (d, timed, false)
         }
         info("Ignored unreadable due date \"\(s)\"", .warning)

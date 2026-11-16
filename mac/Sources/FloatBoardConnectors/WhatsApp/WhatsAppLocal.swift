@@ -1,3 +1,4 @@
+import FloatBoardCore
 import Foundation
 import SQLite3
 
@@ -59,7 +60,7 @@ public enum WhatsAppLocal {
 
     /// Unread chats to screen, oldest newest-message first. `cursors`: chat id -> newest message date already sent.
     public static func unreadChats(folder: URL = folder, cursors: [String: Double], now: Date = Date(),
-                                   zone: TimeZone = .current) throws -> [Chat] {
+                                   zone: TimeZone = AppTime.zone) throws -> [Chat] {
         try withCopy(folder) { try read($0, cursors: cursors, now: now, zone: zone) }
     }
 

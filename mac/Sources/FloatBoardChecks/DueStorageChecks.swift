@@ -202,6 +202,20 @@ import FloatBoardCore
     check(Reconciler.parseDue("2026-11-20").map { Due.dayString($0) } == "2026-11-20" && Reconciler.parseDue("2026-07-01T09:00") == ISO8601DateFormatter().date(from: "2026-07-01T08:00:00Z"),
           "parse_due_defaults_to_app_zone")
 
+    // A legacy proposal (no has_time) at 00:00 is date-only by the app zone's midnight, not the Mac's.
+    do {
+        let json: [String: Any] = ["id": "<legacy@x>", "kind": "task", "source_key": ["message_id": "<legacy@x>", "sent_at": "2026-11-01T09:00:00Z"],
+                                   "title": "Legacy", "why": "w", "due": "2026-11-20T00:00", "importance": 1, "source_label": "x", "link": "",
+                                   "provenance": ["model": "m", "skill_version": "1", "created": "2026-11-01T09:00:00Z"]]
+        if let data = try? JSONSerialization.data(withJSONObject: json), let p = try? JSONDecoder().decode(Proposal.self, from: data) { // try?-ok: nil fails the check
+            do {
+                try Reconciler.apply([p], connector: "email", store: store, defaultGroup: "Personal", autoAdd: true)
+                let got = store.cards.first { $0.sourceKey?.messageID == "<legacy@x>" }
+                check(got.map { !$0.dueHasTime && Due.dayString($0.due!) == "2026-11-20" } ?? false, "due_legacy_midnight_proposal_is_date_only_with_mac_in_shanghai")
+            } catch { check(false, "due_legacy_midnight_proposal_is_date_only_with_mac_in_shanghai: \(error)") }
+        } else { check(false, "legacy proposal decode") }
+    }
+
     // And on a Mac in New York everything treats it as the 20th.
     setProcessZone("America/New_York")
     let nov20 = Due.startOfDay("2026-11-20")!
