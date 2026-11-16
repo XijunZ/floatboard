@@ -200,7 +200,9 @@ final class Google: ObservableObject {
         }
     }
 
-    private func accessToken(for email: String) async throws -> String {
+    /// `forceRefresh` drops the saved token first (Google can invalidate one before it expires).
+    private func accessToken(for email: String, forceRefresh: Bool = false) async throws -> String {
+        if forceRefresh { tokens[email] = nil }
         if let t = tokens[email], t.expires > Date() { return t.token }
         guard let refresh = GoogleCredentials.get("refresh:\(email)"), let secret = GoogleCredentials.get("client-secret") else {
             throw GoogleError("\(email) isn't connected any more. Reconnect it in Settings › Outputs › Calendar.")

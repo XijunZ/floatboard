@@ -6,7 +6,7 @@ public typealias HTTPFetch = @Sendable (URLRequest) async throws -> (Data, HTTPU
 
 public enum GoogleCalendarError: Error, Equatable {
     /// Google refused our access (not signed in, or the calendar permission is missing): the user has to sign in again.
-    case needsReconnect
+    case needsReconnect(body: String)
     /// The saved sync bookmark is too old (HTTP 410): forget it and read the whole window again.
     case syncExpired
     /// Any other failure, with Google's answer so the cause shows in Activity.
@@ -36,10 +36,11 @@ public struct GoogleCalendarAPI: Sendable {
         guard let http = resp as? HTTPURLResponse else { throw GoogleCalendarError.badResponse("not an HTTP response") }
         return (data, http)
     }
-    let token: @Sendable () async throws -> String
+    /// Gives an access token; `forceRefresh` true means "drop any saved one and get a new one" (used after a 401).
+    let token: @Sendable (_ forceRefresh: Bool) async throws -> String
     let http: HTTPFetch
 
-    public init(token: @escaping @Sendable () async throws -> String, http: @escaping HTTPFetch = GoogleCalendarAPI.defaultHTTP) {
+    public init(token: @escaping @Sendable (_ forceRefresh: Bool) async throws -> String, http: @escaping HTTPFetch = GoogleCalendarAPI.defaultHTTP) {
         self.token = token; self.http = http
     }
 
@@ -116,11 +117,13 @@ public struct GoogleCalendarAPI: Sendable {
         var body: [String: Any] = [:]
         if let title { body["summary"] = title }
         if let day = allDayStart {
-            body["start"] = ["date": day]
-            body["end"] = ["date": end.map { Self.dayString($0) } ?? Self.nextDay(day)]
+            // Google's PATCH merges nested objects, so the timed form is cleared explicitly (null) when switching to all-day.
+            body["start"] = ["date": day, "dateTime": NSNull(), "timeZone": NSNull()] as [String: Any]
+            body["end"] = ["date": end.map { Self.dayString($0) } ?? Self.nextDay(day), "dateTime": NSNull(), "timeZone": NSNull()] as [String: Any]
         } else {
-            if let start { body["start"] = Self.timedJSON(start) }
-            if let end { body["end"] = Self.timedJSON(end) }
+            // ...and the all-day form is cleared when switching to timed.
+            if let start { body["start"] = Self.timedJSON(start).merging(["date": NSNull()]) { a, _ in a } }
+            if let end { body["end"] = Self.timedJSON(end).merging(["date": NSNull()]) { a, _ in a } }
         }
         return try await eventResult(try await send("PATCH", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(eventID))", body: body))
     }
@@ -203,7 +206,7 @@ public struct GoogleCalendarAPI: Sendable {
         guard let d = parseDay(s), let n = AppTime.calendar.date(byAdding: .day, value: 1, to: d) else { return s }
         return dayString(n)
     }
-    private static func timedJSON(_ d: Date) -> [String: String] {
+    private static func timedJSON(_ d: Date) -> [String: Any] {
         let f = ISO8601DateFormatter(); f.timeZone = AppTime.zone
         return ["dateTime": f.string(from: d), "timeZone": AppTime.zone.identifier]
     }
@@ -224,12 +227,18 @@ public struct GoogleCalendarAPI: Sendable {
         guard let url = comps.url else { throw GoogleCalendarError.badResponse("bad URL \(path)") }
         var req = URLRequest(url: url)
         req.httpMethod = method
-        req.setValue("Bearer \(try await token())", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(try await token(false))", forHTTPHeaderField: "Authorization")
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         let (data, resp) = try await http(req)
+        if resp.statusCode == 401 {
+            // A saved token Google dropped early looks like a 401; try once with a fresh one before giving up.
+            req.setValue("Bearer \(try await token(true))", forHTTPHeaderField: "Authorization")
+            let (data2, resp2) = try await http(req)
+            return (data2, resp2.statusCode)
+        }
         return (data, resp.statusCode)
     }
 
@@ -241,8 +250,8 @@ public struct GoogleCalendarAPI: Sendable {
     static func accept(_ data: Data, _ status: Int, mapGone: Bool) throws -> Data {
         if (200..<300).contains(status) { return data }
         let body = String(decoding: data, as: UTF8.self)
-        if status == 401 { throw GoogleCalendarError.needsReconnect }
-        if status == 403, body.contains("insufficientPermissions") || body.contains("PERMISSION_DENIED") { throw GoogleCalendarError.needsReconnect }
+        if status == 401 { throw GoogleCalendarError.needsReconnect(body: body) }
+        if status == 403, body.contains("insufficientPermissions") || body.contains("PERMISSION_DENIED") { throw GoogleCalendarError.needsReconnect(body: body) }
         if status == 410, mapGone { throw GoogleCalendarError.syncExpired }
         throw GoogleCalendarError.http(status: status, body: body)
     }

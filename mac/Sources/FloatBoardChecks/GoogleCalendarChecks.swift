@@ -17,7 +17,7 @@ func googleCalendarChecks() async {
     }
     final class Log: @unchecked Sendable { var requests: [URLRequest] = [] }
     func api(_ log: Log = Log(), _ handler: @escaping @Sendable (URLRequest) -> (Data, Int)) -> GoogleCalendarAPI {
-        GoogleCalendarAPI(token: { "tok" }, http: { req in
+        GoogleCalendarAPI(token: { _ in "tok" }, http: { req in
             log.requests.append(req)
             let (d, s) = handler(req)
             return (d, resp(req.url!, s))
@@ -36,7 +36,8 @@ func googleCalendarChecks() async {
     // 403 insufficient scope.
     let denied = api { _ in (data(raw("gcal-403-scope.json")), 403) }
     do { _ = try await denied.listCalendars(); check(false, "calendar_list_403_marks_needs_reconnect") }
-    catch let e as GoogleCalendarError { check(e == .needsReconnect, "calendar_list_403_marks_needs_reconnect") }
+    catch let e as GoogleCalendarError { if case .needsReconnect(let b) = e { check(b.contains("insufficientPermissions"), "calendar_list_403_marks_needs_reconnect") }
+        else { check(false, "calendar_list_403_marks_needs_reconnect") } }
     catch { check(false, "calendar_list_403_marks_needs_reconnect: \(error)") }
     let other403 = api { _ in (Data(#"{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded"}]}}"#.utf8), 403) }
     do { _ = try await other403.listCalendars(); check(false, "other_403_is_http_error_with_body") }
@@ -124,6 +125,14 @@ func googleCalendarChecks() async {
         check(log4.requests[0].httpMethod == "PATCH" && b["summary"] as? String == "Renamed"
               && (b["start"] as? [String: Any])?["date"] as? String == "2026-12-03"
               && (b["end"] as? [String: Any])?["date"] as? String == "2026-12-04" && r.fields.allDay, "patch_sends_only_changed_fields")
+        let bs = b["start"] as? [String: Any] ?? [:], be = b["end"] as? [String: Any] ?? [:]
+        check(bs["dateTime"] is NSNull && bs["timeZone"] is NSNull && be["dateTime"] is NSNull && be["timeZone"] is NSNull,
+              "patch_all_day_nulls_timed_form")
+        _ = try await pat.patch(calendarID: "primary", eventID: "e9", title: nil, start: t0, end: t0.addingTimeInterval(3600), allDayStart: nil)
+        let bt = (try? JSONSerialization.jsonObject(with: log4.requests[1].httpBody ?? Data()) as? [String: Any]) ?? [:] // try?-ok: same
+        let ts = bt["start"] as? [String: Any] ?? [:], te = bt["end"] as? [String: Any] ?? [:]
+        check(ts["date"] is NSNull && te["date"] is NSNull && ts["dateTime"] is String && te["dateTime"] is String && bt["summary"] == nil,
+              "patch_timed_nulls_all_day_form")
     } catch { check(false, "patch_sends_only_changed_fields: \(error)") }
 
     // Delete.
@@ -135,6 +144,27 @@ func googleCalendarChecks() async {
     do { try await delBad.delete(calendarID: "primary", eventID: "x"); check(false, "delete_500_throws_with_body") }
     catch let e as GoogleCalendarError { check(e == .http(status: 500, body: "nope"), "delete_500_throws_with_body") }
     catch { check(false, "delete_500_throws_with_body") }
+
+    // 401: a stale saved token gets exactly one forced refresh; a second 401 means reconnect.
+    final class Refresh: @unchecked Sendable { var forced = 0, calls = 0 }
+    let rf = Refresh()
+    let stale = GoogleCalendarAPI(token: { force in if force { rf.forced += 1 }; return force ? "fresh" : "old" }, http: { req in
+        rf.calls += 1
+        let ok = req.value(forHTTPHeaderField: "Authorization") == "Bearer fresh"
+        return (ok ? data(raw("gcal-calendarlist.json")) : Data("expired".utf8), resp(req.url!, ok ? 200 : 401))
+    })
+    do {
+        let cals = try await stale.listCalendars()
+        check(cals.count == 3 && rf.forced == 1 && rf.calls == 2, "401_then_200_retries_once_with_fresh_token")
+    } catch { check(false, "401_then_200_retries_once_with_fresh_token: \(error)") }
+    let rf2 = Refresh()
+    let revoked = GoogleCalendarAPI(token: { force in if force { rf2.forced += 1 }; return "t" }, http: { req in
+        rf2.calls += 1
+        return (Data("revoked".utf8), resp(req.url!, 401))
+    })
+    do { _ = try await revoked.listCalendars(); check(false, "401_twice_needs_reconnect") }
+    catch let e as GoogleCalendarError { check(e == .needsReconnect(body: "revoked") && rf2.forced == 1 && rf2.calls == 2, "401_twice_needs_reconnect") }
+    catch { check(false, "401_twice_needs_reconnect: \(error)") }
 
     // Scopes.
     check(GoogleAuthConfig.scopes.contains("https://www.googleapis.com/auth/calendar.calendarlist.readonly")
