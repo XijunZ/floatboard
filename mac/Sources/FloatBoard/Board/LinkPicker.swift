@@ -68,9 +68,12 @@ struct LinkedRow<Content: View>: View {
             Button(action: remove) { Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)) }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)
                 .opacity(hover ? 1 : 0)
+                .allowsHitTesting(hover)   // hidden means not clickable either
+                .accessibilityLabel("Remove link")
                 .help("Remove the link (the item stays)")
         }
         .onHover { hover = $0 }
+        .contextMenu { Button("Remove link", action: remove) }
     }
 }
 
