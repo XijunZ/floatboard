@@ -392,7 +392,7 @@ private final class PhoneEngine {
         let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let first = (obj?["events"] as? [[String: Any]])?.first
         let plain = try JSONSerialization.jsonObject(with: try PhoneBoard.body([])) as? [String: Any]
-        check(obj?["time_zone"] as? String == "Europe/London" && Set(first?.keys.map { $0 } ?? []) == ["id", "title", "start", "end", "allDay", "video", "color", "tasks"]
+        check(obj?["time_zone"] as? String == "Europe/London" && Set(first?.keys.map { $0 } ?? []) == ["id", "title", "start", "end", "all_day", "video", "color", "tasks"]
               && plain?["events"] == nil && plain?["time_zone"] == nil,
               "phone_body_has_events_and_time_zone_only_when_given")
         let h1 = try PhoneBoard.hash([], events: events, timeZone: "Europe/London", engine: "e")

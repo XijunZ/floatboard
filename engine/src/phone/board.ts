@@ -66,7 +66,7 @@ export type Card = {
   watch?: CardWatch;
 };
 /** A calendar event for the phone's Today list: ISO UTC times, `tasks` = ids of the cards linked to it. */
-export type BoardEvent = { id: string; title: string; start: string; end: string; allDay: boolean; video: string | null; color: string; tasks: number[] };
+export type BoardEvent = { id: string; title: string; start: string; end: string; all_day: boolean; video: string | null; color: string; tasks: number[] };
 export type CardWatch = { person: string; contact: string; since: string };
 /** The email a `link_email` action attaches (sent_at as the search gave it). */
 export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
@@ -175,7 +175,7 @@ export function parseEvents(body: any): BoardEvent[] | undefined {
     if (title.length > MAX_TITLE) throw new Error(`${at}.title must be text up to ${MAX_TITLE} characters`);
     if (!isIso(e.start)) throw new Error(`${at}.start must be an ISO date`);
     if (!isIso(e.end)) throw new Error(`${at}.end must be an ISO date`);
-    if (typeof e.allDay !== "boolean") throw new Error(`${at}.allDay must be true or false`);
+    if (typeof e.all_day !== "boolean") throw new Error(`${at}.all_day must be true or false`);
     let video: string | null = null;
     if (e.video !== undefined && e.video !== null) {
       if (typeof e.video !== "string" || e.video.length > MAX_LINK) throw new Error(`${at}.video must be a web address or null`);
@@ -188,7 +188,7 @@ export function parseEvents(body: any): BoardEvent[] | undefined {
     if (!Array.isArray(e.tasks) || e.tasks.length > MAX_EVENT_TASKS || !e.tasks.every((t: unknown) => Number.isSafeInteger(t) && (t as number) > 0)) {
       throw new Error(`${at}.tasks must be a list of up to ${MAX_EVENT_TASKS} positive integers`);
     }
-    return { id: e.id, title, start: e.start, end: e.end, allDay: e.allDay, video, color: e.color, tasks: e.tasks };
+    return { id: e.id, title, start: e.start, end: e.end, all_day: e.all_day, video, color: e.color, tasks: e.tasks };
   });
 }
 

@@ -413,7 +413,7 @@
       var s = Date.parse(e.start), n = Date.parse(e.end);
       if (isNaN(s) || isNaN(n)) return false;
       return dayKey(s, zone) <= today && today <= dayKey(n > s ? n - 1 : s, zone);
-    }).sort(function (a, b) { return (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0) || Date.parse(a.start) - Date.parse(b.start); });
+    }).sort(function (a, b) { return (b.all_day ? 1 : 0) - (a.all_day ? 1 : 0) || Date.parse(a.start) - Date.parse(b.start); });
   }
 
   function dueToday(zone, today) {
@@ -427,7 +427,7 @@
 
   function eventRow(e, zone) {
     var row = el("div", "ev");
-    var when = e.allDay ? "All day" : new Intl.DateTimeFormat(undefined, { timeZone: zone, hour: "2-digit", minute: "2-digit" }).format(new Date(e.start));
+    var when = e.all_day ? "All day" : new Intl.DateTimeFormat(undefined, { timeZone: zone, hour: "2-digit", minute: "2-digit" }).format(new Date(e.start));
     row.appendChild(el("span", "when", when));
     var body = el("span", "body");
     body.appendChild(el("span", "t", e.title));
