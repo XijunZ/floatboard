@@ -147,13 +147,16 @@ public final class CalendarCache {
         e.fb_card IS NULL AND NOT EXISTS (SELECT 1 FROM cards k WHERE k.deleted=0 AND k.gcal_account=e.account AND k.gcal_event=e.event_id)
         """
 
-    /// The earliest-starting timed event that has not ended by `date` (one in progress counts) and is not an all-day event or one made from a task (C6).
+    /// The meeting the bar shows: a timed event (not all-day, not made from a task, C6) that has not ended by `date`. One that
+    /// starts within the bar's lead time (60 minutes) wins over one already in progress, so a long block under way never hides
+    /// the real next meeting; with none starting soon, the one in progress; else the next one to start.
     public func nextMeeting(after date: Date) -> CalEvent? {
         let (clause, args) = Self.connectedClause()
-        return events("""
-            WHERE e.gone=0 AND c.shown=1\(clause) AND e.all_day=0 AND \(Self.notTaskEvent)
-            AND e.end>? ORDER BY e.start, e.short_id LIMIT 1
-            """, args + [date]).first
+        let base = "WHERE e.gone=0 AND c.shown=1\(clause) AND e.all_day=0 AND \(Self.notTaskEvent) AND e.end>?"
+        let near = events(base + " AND e.start<=? ORDER BY e.start, e.short_id", args + [date, date.addingTimeInterval(BarMeeting.leadTime)])
+        if let soon = near.first(where: { $0.start >= date }) { return soon }
+        if let current = near.first { return current }
+        return events(base + " ORDER BY e.start, e.short_id LIMIT 1", args + [date]).first
     }
 
     /// Like `events(from:to:)` but without events made from tasks (C6): what the phone's Today list shows.

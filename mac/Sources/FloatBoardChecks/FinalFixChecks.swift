@@ -197,6 +197,20 @@ import FloatBoardConnectors
         store.setDefaultCalendarAccount(acct)
         check(store.newEventCalendar(among: options)?.account == acct && store.newEventCalendar()?.calendarID == acct, "new_events_use_the_connected_default")
     } catch { check(false, "default calendar checks: \(error)") }
+
+    // 7. A long block already under way does not hide the real next meeting starting within the hour.
+    do {
+        let (_, cache, _) = try setup("nextmeeting")
+        func timed(_ id: String, _ s: Date, _ e: Date) -> GoogleEventChange {
+            GoogleEventChange(eventID: id, cancelled: false, fields: CalEventFields(start: s, end: e, title: id, googleUpdated: Date()))
+        }
+        cache.apply(account: acct, calendarID: acct, changes: [timed("Focus block", at(9), at(17)), timed("Client call", at(10, 30), at(11)),
+                                                               timed("Retro", at(14), at(15))], nextToken: nil)
+        check(cache.nextMeeting(after: at(10))?.title == "Client call" && cache.nextMeeting(after: at(10, 30))?.title == "Client call",
+              "next_meeting_prefers_one_starting_soon_over_one_in_progress")
+        check(cache.nextMeeting(after: at(9, 15))?.title == "Focus block" && cache.nextMeeting(after: at(11, 30))?.title == "Focus block"
+              && cache.nextMeeting(after: at(13, 30))?.title == "Retro", "next_meeting_falls_back_to_the_one_in_progress")
+    } catch { check(false, "next meeting checks: \(error)") }
 }
 
 /// 5. Google's answers that can never succeed end a change for good (one Activity error, no more retries); only a missing
