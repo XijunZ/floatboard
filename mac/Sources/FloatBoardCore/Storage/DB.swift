@@ -128,6 +128,22 @@ public final class DB {
                 UNIQUE(from_type, from_id, to_type, to_id)
             );
             CREATE INDEX links_to ON links(to_type, to_id);
+            -- Google Calendar kept locally; short_id is the visible E-n and is never reused (AUTOINCREMENT).
+            CREATE TABLE cal_calendars(
+                account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,
+                owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,
+                needs_reconnect INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(account, calendar_id)
+            );
+            CREATE TABLE cal_events(
+                short_id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT NOT NULL,
+                start REAL NOT NULL, end REAL NOT NULL, all_day INTEGER NOT NULL, start_day TEXT, end_day TEXT, title TEXT NOT NULL,
+                location TEXT NOT NULL DEFAULT '', video_link TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+                html_link TEXT NOT NULL DEFAULT '', recurring_id TEXT, google_updated REAL NOT NULL, fb_card INTEGER,
+                gone INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(account, calendar_id, event_id)
+            );
+            CREATE INDEX cal_events_start ON cal_events(start);
 
             """
         }
@@ -239,6 +255,22 @@ public final class DB {
         UNIQUE(from_type, from_id, to_type, to_id)
     );
     CREATE INDEX links_to ON links(to_type, to_id);
+    -- Google Calendar kept locally; short_id is the visible E-n and is never reused (AUTOINCREMENT).
+    CREATE TABLE cal_calendars(
+        account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,
+        owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,
+        needs_reconnect INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(account, calendar_id)
+    );
+    CREATE TABLE cal_events(
+        short_id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT NOT NULL,
+        start REAL NOT NULL, end REAL NOT NULL, all_day INTEGER NOT NULL, start_day TEXT, end_day TEXT, title TEXT NOT NULL,
+        location TEXT NOT NULL DEFAULT '', video_link TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+        html_link TEXT NOT NULL DEFAULT '', recurring_id TEXT, google_updated REAL NOT NULL, fb_card INTEGER,
+        gone INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(account, calendar_id, event_id)
+    );
+    CREATE INDEX cal_events_start ON cal_events(start);
 
     """
 
@@ -309,4 +341,5 @@ public final class DB {
         sqlite3_column_type(s, i) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(s, i))
     }
     public static func int(_ s: OpaquePointer, _ i: Int32) -> Int64 { sqlite3_column_int64(s, i) }
+    public static func isNull(_ s: OpaquePointer, _ i: Int32) -> Bool { sqlite3_column_type(s, i) == SQLITE_NULL }
 }
