@@ -19,14 +19,14 @@ struct SegmentModel: Equatable {
     var buffer = ""
 
     static func time(_ d: Date) -> SegmentModel {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        let c = AppTime.calendar.dateComponents([.hour, .minute], from: d)
         return SegmentModel(specs: [Spec(length: 2, range: 0...23, jumpAbove: 2),
                                     Spec(length: 2, range: 0...59, jumpAbove: 5)],
                             values: [c.hour ?? 0, c.minute ?? 0])
     }
 
     static func date(_ d: Date) -> SegmentModel {
-        let c = Calendar.current.dateComponents([.day, .month, .year], from: d)
+        let c = AppTime.calendar.dateComponents([.day, .month, .year], from: d)
         return SegmentModel(specs: [Spec(length: 4, range: 2000...2099, jumpAbove: 9),
                                     Spec(length: 2, range: 1...12, jumpAbove: 1),
                                     Spec(length: 2, range: 1...31, jumpAbove: 3)],
@@ -88,12 +88,12 @@ struct SegmentModel: Equatable {
 
     /// Apply HH:MM to `base`'s day.
     func applyTime(to base: Date) -> Date {
-        Calendar.current.date(bySettingHour: values[0], minute: values[1], second: 0, of: base) ?? base
+        AppTime.calendar.date(bySettingHour: values[0], minute: values[1], second: 0, of: base) ?? base
     }
 
     /// Apply YYYY-MM-DD to `base`, keeping its time of day; day is clamped to the month's length.
     func applyDate(to base: Date) -> Date {
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         var c = cal.dateComponents([.hour, .minute, .second], from: base)
         c.year = values[0]; c.month = values[1]; c.day = 1
         guard let first = cal.date(from: c), let days = cal.range(of: .day, in: .month, for: first)?.count else { return base }
@@ -209,6 +209,8 @@ struct TimeInput: View {
                         DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                             .datePickerStyle(.graphical)
                             .labelsHidden()
+                            .environment(\.calendar, AppTime.calendar)
+                            .environment(\.timeZone, AppTime.zone)
                     }
                 }
         }
@@ -238,6 +240,8 @@ struct DateInput: View {
                         DatePicker("", selection: $date, displayedComponents: .date)
                             .datePickerStyle(.graphical)
                             .labelsHidden()
+                            .environment(\.calendar, AppTime.calendar)
+                            .environment(\.timeZone, AppTime.zone)
                     }
                 }
         }

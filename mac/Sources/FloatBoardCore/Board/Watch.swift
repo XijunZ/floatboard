@@ -77,7 +77,7 @@ public enum Watch {
 
     /// "↩ Anna replied by email · 14 Nov 10:00", put at the top of the task's notes.
     public static func replyNote(_ reason: String, at: Date) -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "d MMM HH:mm"
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.timeZone = AppTime.zone; f.dateFormat = "d MMM HH:mm"
         return "↩ \(reason.prefix(200)) · \(f.string(from: at))"
     }
 

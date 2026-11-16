@@ -60,7 +60,7 @@ struct BarConfig: Codable, Equatable {
 
     /// Which open tasks appear on the bar.
     func filtered(_ cards: [Card]) -> [Card] {
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         let endToday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: Date()))!
         let endWeek = cal.date(byAdding: .day, value: 7, to: endToday)!
         return cards.filter { c in

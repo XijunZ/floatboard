@@ -97,7 +97,7 @@ extension Store {
 
     /// Puts an earlier version back as the current text (a new version; nothing is deleted).
     public func restoreInstructions(connector: String, version: Instructions.Version) throws {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "d MMM HH:mm"
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.timeZone = AppTime.zone; f.dateFormat = "d MMM HH:mm"
         try saveConnectorSettings(connector: connector, values: [version.part: version.text],
                                   source: .restore, note: "restored the version from \(f.string(from: version.at))")
     }

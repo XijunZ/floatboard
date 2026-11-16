@@ -12,7 +12,7 @@ struct ExpandedView: View {
     /// Step the new task goes into; back to To do after each add.
     @State private var newStatus: Status = .todo
     @State private var hasDue = false
-    @State private var newDue = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var newDue = AppTime.calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     @State private var hasTime = false
     @State private var newTime = Due.nextHour
     enum AddField: String, Hashable { case status, title, importance, group }
@@ -238,7 +238,7 @@ struct ExpandedView: View {
         // Next task starts fresh: no due date or time.
         hasDue = false
         hasTime = false
-        newDue = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        newDue = AppTime.calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date()
         newTime = Due.nextHour
         addField = .title
         nav = "title"

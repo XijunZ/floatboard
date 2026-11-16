@@ -8,7 +8,7 @@ import SQLite3
 public enum Reconciler {
     /// "YYYY-MM-DD" -> 00:00 that day (the board's "no time" convention); "YYYY-MM-DDTHH:mm" -> that wall-clock time.
     /// Both are read in `zone`, the device's time zone unless given (the engine is told the same zone). Nil if invalid.
-    public static func parseDue(_ s: String, in zone: TimeZone = .current) -> Date? {
+    public static func parseDue(_ s: String, in zone: TimeZone = AppTime.zone) -> Date? {
         let parts = s.split(separator: "T", omittingEmptySubsequences: false).map(String.init)
         guard parts.count <= 2 else { return nil }
         let ymd = parts[0].split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }

@@ -60,7 +60,7 @@ private final class PhoneEngine {
     let store: Store
     do { store = Store(db: try DB(url: root.appendingPathComponent("phone.sqlite"))) } catch { check(false, "phone setup: \(error)"); return }
     let now = Date()
-    let cal = Calendar.current
+    let cal = AppTime.calendar
     func newest(_ title: String) -> Card? { store.cards.last { $0.title == title } }
     func warnings(_ id: String) -> [ActivityEntry] { connectorActivity(store, id).filter { $0.level != .info } }
 

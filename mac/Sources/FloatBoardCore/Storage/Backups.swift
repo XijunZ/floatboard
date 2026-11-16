@@ -129,7 +129,7 @@ public struct Backups {
 
     private var isoCalendar: Calendar {
         var c = Calendar(identifier: .iso8601)
-        c.timeZone = TimeZone.current
+        c.timeZone = AppTime.zone
         return c
     }
 
@@ -247,7 +247,7 @@ extension Store {
 
     /// Launch and every 6 h: one daily snapshot per calendar day, then rotation.
     public func dailyBackup(_ b: Backups, now: Date = Date()) {
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         if !b.list().contains(where: { $0.reason == "daily" && cal.isDate($0.date, inSameDayAs: now) }) {
             takeBackup(b, reason: "daily", now: now)
         }

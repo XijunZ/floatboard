@@ -302,7 +302,7 @@ MainActor.assumeIsolated {
         let fm = FileManager.default
         let root = URL(fileURLWithPath: bkDir, isDirectory: true)
         try? fm.removeItem(at: root) // try?-ok: scratch dir may not exist yet
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 7, hour: 12))!
         func integrityOK(_ u: URL) -> Bool {
             var h: OpaquePointer?
@@ -670,7 +670,12 @@ MainActor.assumeIsolated {
     do { // the device's zone is whatever TZ says; switch it for one check, then restore it
         let savedTZ = ProcessInfo.processInfo.environment["TZ"]
         setenv("TZ", "Asia/Tokyo", 1); tzset(); NSTimeZone.resetSystemTimeZone()
-        check(TimeZone.current == tokyo && utc(Reconciler.parseDue("2026-07-01T09:00")) == "2026-07-01T00:00:00Z", "due_uses_current_time_zone")
+        let savedApp = AppTime.setting
+        AppTime.apply("Asia/Tokyo")
+        check(TimeZone.current == tokyo && utc(Reconciler.parseDue("2026-07-01T09:00")) == "2026-07-01T00:00:00Z", "due_uses_app_time_zone")
+        AppTime.apply("Europe/London")
+        check(utc(Reconciler.parseDue("2026-07-01T09:00")) == "2026-07-01T08:00:00Z", "due_ignores_the_mac_zone_when_app_zone_is_london")
+        AppTime.apply(savedApp)
         if let savedTZ { setenv("TZ", savedTZ, 1) } else { unsetenv("TZ") }
         tzset(); NSTimeZone.resetSystemTimeZone()
     }
@@ -733,6 +738,7 @@ phoneLinksChecks()
 await linkEmailChecks()
 dueReminderChecks()
 dueStorageChecks()
+appTimeChecks()
 oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()
 

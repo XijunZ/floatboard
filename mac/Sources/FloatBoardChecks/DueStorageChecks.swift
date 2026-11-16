@@ -130,3 +130,88 @@ import FloatBoardCore
         }
     }
 }
+
+/// The app's time zone: London unless set, saved on the board, and every date and time on screen follows it.
+@MainActor func appTimeChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-apptime-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let savedSetting = AppTime.setting
+    defer { AppTime.apply(savedSetting) }
+    let savedTZ = ProcessInfo.processInfo.environment["TZ"]
+    func setProcessZone(_ id: String) { setenv("TZ", id, 1); tzset(); NSTimeZone.resetSystemTimeZone() }
+    defer { if let savedTZ { setenv("TZ", savedTZ, 1) } else { unsetenv("TZ") }; tzset(); NSTimeZone.resetSystemTimeZone() }
+    let london = TimeZone(identifier: "Europe/London")!, shanghai = TimeZone(identifier: "Asia/Shanghai")!
+
+    let db: DB
+    do { db = try DB(url: root.appendingPathComponent("board.sqlite")) } catch { check(false, "app time setup: \(error)"); return }
+    AppTime.load(from: db)
+    check(AppTime.zone == london && !AppTime.followsMac && AppTime.setting == "Europe/London", "app_time_default_is_london")
+
+    setProcessZone("Asia/Tokyo")
+    do {
+        try AppTime.save("mac", to: db)
+        check(AppTime.followsMac && AppTime.zone == TimeZone(identifier: "Asia/Tokyo")! && AppTime.calendar.timeZone == AppTime.zone, "app_time_follow_mac_uses_system_zone")
+        setProcessZone("America/New_York")
+        check(AppTime.zone == TimeZone(identifier: "America/New_York")!, "app_time_follow_mac_tracks_the_mac_zone")
+        AppTime.apply("Europe/London")
+        AppTime.load(from: db)
+        check(AppTime.followsMac, "app_time_setting_is_saved_on_the_board")
+        try AppTime.save("Asia/Shanghai", to: db)
+        AppTime.apply("Europe/London")
+        AppTime.load(from: db)
+        check(AppTime.zone == shanghai && !AppTime.followsMac, "app_time_fixed_zone_is_saved_on_the_board")
+        try AppTime.save("Not/AZone", to: db)
+        check(AppTime.zone == shanghai, "app_time_rejects_an_unknown_zone")
+        try db.run("INSERT OR REPLACE INTO meta(key,value) VALUES('time_zone','Not/AZone')")
+        AppTime.load(from: db)
+        check(AppTime.zone == london, "app_time_unknown_saved_zone_falls_back_to_london")
+    } catch { check(false, "app time save: \(error)") }
+    AppTime.apply("Europe/London")
+
+    // Every formatter reads the zone at call time: 09:00 UTC in July is 10:00 in London and 17:00 in Shanghai.
+    let instant = ISO8601DateFormatter().date(from: "2026-07-01T09:00:00Z")!
+    check(Fmt.clock(instant) == "10:00", "formatters_use_app_zone_london")
+    AppTime.apply("Asia/Shanghai")
+    check(Fmt.clock(instant) == "17:00" && Fmt.withTime(instant) == "2026-07-01 17:00" && Fmt.csvDate(instant) == "2026-07-01 17:00", "formatters_use_app_zone")
+    AppTime.apply("Pacific/Pago_Pago")   // UTC-11: still the day before
+    check(Fmt.short(instant) == "2026-06-30" && Fmt.heading(instant).hasPrefix("2026-06-30"), "formatters_follow_a_zone_change_without_a_restart")
+    AppTime.apply("Europe/London")
+
+    // "Today" is the app zone's today: a date-only due for today in each zone is due today in that zone.
+    var todayOK = true
+    for id in ["Pacific/Kiritimati", "Pacific/Pago_Pago", "Europe/London"] {
+        AppTime.apply(id)
+        let c = Card(id: 1, title: "t", notes: "", area: "Work", importance: .medium, due: Due.startOfDay(Due.dayString(Date())),
+                     status: .todo, created: Date(), started: nil, done: nil, dueHasTime: false)
+        todayOK = todayOK && c.dueInDays == 0 && !c.isOverdue
+    }
+    check(todayOK, "today_follows_app_zone")
+    AppTime.apply("Europe/London")
+
+    // The editor's path: a day picked, no time. A Mac in Shanghai must not move a London date-only task.
+    setProcessZone("Asia/Shanghai")
+    let picked = AppTime.calendar.date(from: DateComponents(year: 2026, month: 11, day: 20, hour: 0, minute: 30))!
+    let due = Due.combine(day: picked, time: nil)
+    let store = Store(db: db)
+    store.add(title: "Editor path", area: "Personal", importance: .medium, due: due)
+    let storedDay = (try? db.query("SELECT due_day FROM cards WHERE title='Editor path'") { DB.text($0, 0) })?.first // try?-ok: nil fails the check
+    let shown = store.cards.last { $0.title == "Editor path" }?.due
+    check(storedDay == "2026-11-20" && shown == AppTime.calendar.date(from: DateComponents(year: 2026, month: 11, day: 20))
+          && shown.map(Fmt.short) == "2026-11-20", "date_only_via_editor_path_keeps_day_under_shanghai")
+    check(Reconciler.parseDue("2026-11-20").map { Due.dayString($0) } == "2026-11-20" && Reconciler.parseDue("2026-07-01T09:00") == ISO8601DateFormatter().date(from: "2026-07-01T08:00:00Z"),
+          "parse_due_defaults_to_app_zone")
+
+    // And on a Mac in New York everything treats it as the 20th.
+    setProcessZone("America/New_York")
+    let nov20 = Due.startOfDay("2026-11-20")!
+    let task = Card(id: 2, title: "t", notes: "", area: "Work", importance: .medium, due: nov20, status: .todo, created: Date(), started: nil, done: nil, dueHasTime: false)
+    let url = task.googleCalendarURL?.absoluteString ?? ""
+    check(Fmt.short(nov20) == "2026-11-20" && Fmt.due(nov20, hasTime: false) == "2026-11-20" && Fmt.heading(nov20).hasPrefix("2026-11-20")
+          && url.contains("dates=20261120/20261121") && task.dueSortKey.map { Due.dayString($0) } == "2026-11-20"
+          && task.dueInDays != nil, "date_only_shown_same_day_in_new_york")
+    var nyOverdue = Card(id: 3, title: "t", notes: "", area: "Work", importance: .medium, due: Due.startOfDay("2020-01-01"), status: .todo, created: Date(), started: nil, done: nil, dueHasTime: false)
+    check(nyOverdue.isOverdue && Fmt.short(nyOverdue.due!) == "2020-01-01", "date_only_overdue_in_new_york")
+    nyOverdue.due = Due.startOfDay(Due.dayString(Date()))
+    check(nyOverdue.dueInDays == 0 && !nyOverdue.isOverdue, "date_only_today_in_new_york")
+}
