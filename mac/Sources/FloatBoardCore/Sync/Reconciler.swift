@@ -279,7 +279,11 @@ public enum Reconciler {
 
     private static func dueValue(_ p: Proposal, _ info: (String, ActivityLevel) -> Void) -> (date: Date?, hasTime: Bool, invalid: Bool) {
         guard let s = p.due, !s.isEmpty else { return (nil, false, false) }
-        if let d = parseDue(s) { return (d, s.contains("T"), false) }
+        if let d = parseDue(s) {
+            // The engine's has_time decides; a due with no "T" is never timed. Without has_time (older engine): the old rule.
+            let timed = s.contains("T") && (p.hasTimeMissing ? Due.hasTime(d) : p.hasTime)
+            return (d, timed, false)
+        }
         info("Ignored unreadable due date \"\(s)\"", .warning)
         return (nil, false, true)
     }
