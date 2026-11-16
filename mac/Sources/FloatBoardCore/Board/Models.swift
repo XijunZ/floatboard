@@ -212,12 +212,14 @@ public struct Card: Identifiable, Equatable {
     }
 }
 
-/// Search: every word in the query must appear somewhere in the task (any order, any case).
+/// Search: every word in the query must appear somewhere in the task (any order, any case). A query that is an id
+/// ("T-142") finds exactly that task, never T-1420 or a task that mentions the id.
 public enum Search {
     public static func words(_ q: String) -> [String] {
         q.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
     }
     public static func matches(_ card: Card, _ q: String) -> Bool {
+        if let id = ShortID.parse(q) { return id == ShortID(kind: .task, number: card.id) }
         let w = words(q)
         guard !w.isEmpty else { return true }
         let hay = [card.title, card.notes, card.area, card.link, ShortID(kind: .task, number: card.id).text].joined(separator: " ")

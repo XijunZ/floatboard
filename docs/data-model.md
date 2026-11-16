@@ -425,7 +425,8 @@ How each proposal kind lands in the board:
 | Board `corrections` | `proposed_json`, `detail` | Email-derived text | Kept forever (rebuilds learning). |
 | Board `outbox` | `payload_json` (source key, verdict, changed titles, draft `notes`) | Email-derived text | Kept after sending (no pruning today). |
 | Board `connectors`, `connector_archive` | `settings_json` (group notes, own rules, sender lists, learned preferences), `base_url` | Preferences, addresses | Until removed; archived copy kept. |
-| Board `cal_calendars`, `cal_events` | Calendar names, event titles, places, video links, descriptions | Your calendar contents | Until the calendar is removed; cancelled events stay hidden (ids are never reused). |
+| Board `cal_calendars`, `cal_events` | Calendar names, event titles, places, video links, descriptions | Your calendar contents | Kept for good today: nothing prunes them. A removed account's (or a calendar's) rows stay saved but hidden and show again if it is added back; cancelled events stay hidden (ids are never reused). Events beyond the sync window are not deleted either. |
+| Board `cal_outbox` | `payload_json` (event titles, times, task notes for a new event's description), `last_error` (Google's reply) | Your calendar contents | Kept after sending (no pruning today). A change Google refused for good stays (with `failed_at`) until you discard it (new events) or for good (other changes). |
 | Board `links` | Which items are linked to which (ids only) | Structure only | Until unlinked or the task is deleted (undoable). |
 | Board `instructions` | Every version of your rules and learned preferences | Preferences | Kept for good (restorable). |
 | Board `activity` | `detail` (titles are left out of change details; errors may quote text) | Diagnostics | Pruned after 90 days. |
