@@ -9,11 +9,26 @@ public enum CalendarSettings {
         return connected.first
     }
 
-    /// True when the account has to sign in again to show its calendars: none are listed (the permission to list them
-    /// was never given) or Google refused one of them.
-    public static func needsReconnect(account: String, calendars: [CalCalendar]) -> Bool {
+    /// What the last attempt to read an account's calendar list found.
+    public enum ListOutcome: Equatable { case listed, needsReconnect, failed }
+
+    /// What Settings shows for one account.
+    public enum AccountState: Equatable {
+        /// The first calendar list has not come back yet: say so quietly.
+        case loading
+        /// Google refused the list (permission missing) or one of the account's calendars: ask to sign in again.
+        case reconnect
+        /// Show the account's calendars with their switches.
+        case calendars
+    }
+
+    /// Decides what to show for an account. A new account is "loading" until its first list attempt has finished, and only an
+    /// attempt that really reported a missing sign-in or permission (or a calendar flagged by the sync) asks to reconnect.
+    public static func state(account: String, calendars: [CalCalendar], lastList: ListOutcome?) -> AccountState {
         let mine = calendars.filter { $0.account == account }
-        return mine.isEmpty || mine.contains { $0.needsReconnect }
+        if mine.contains(where: \.needsReconnect) || lastList == .needsReconnect { return .reconnect }
+        if !mine.isEmpty || lastList == .listed { return .calendars }
+        return .loading
     }
 
     /// One account's calendars, the ones the user owns first, then by name.
@@ -48,4 +63,15 @@ extension Store {
             return false
         }
     }
+}
+
+/// Remembers, while the app runs, how the last calendar-list read went for each account. Kept in memory: the list is read
+/// again at every start, and calendars already saved still show meanwhile.
+@MainActor
+public enum CalendarListAttempts {
+    private static var outcomes: [String: CalendarSettings.ListOutcome] = [:]
+    public static func outcome(_ account: String) -> CalendarSettings.ListOutcome? { outcomes[account] }
+    public static func record(_ account: String, _ outcome: CalendarSettings.ListOutcome) { outcomes[account] = outcome }
+    /// After a fresh sign-in: the next list read decides again.
+    public static func forget(_ account: String) { outcomes[account] = nil }
 }

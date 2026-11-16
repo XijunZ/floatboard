@@ -172,6 +172,7 @@ struct CalendarSettingsView: View {
             }
         }
         .frame(maxWidth: 520, alignment: .leading)
+        .onReceive(NotificationCenter.default.publisher(for: .floatBoardCalendarSynced)) { _ in tick += 1 }
     }
 
     private func account(_ email: String, all: [CalCalendar]) -> some View {
@@ -187,7 +188,11 @@ struct CalendarSettingsView: View {
                         action: "Remove") { google.remove(email); tick += 1 }
                 }
             }
-            if CalendarSettings.needsReconnect(account: email, calendars: all) {
+            let state = CalendarSettings.state(account: email, calendars: all, lastList: CalendarListAttempts.outcome(email))
+            if state == .loading {
+                Text("Loading your calendars…").font(.system(size: 12)).foregroundStyle(.secondary).padding(.leading, 22)
+            }
+            if state == .reconnect {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.system(size: 11))
                     if snapshot {

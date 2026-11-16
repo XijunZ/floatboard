@@ -14,11 +14,24 @@ import FloatBoardCore
     check(CalendarSettings.effectiveDefault(saved: "", connected: [a]) == a, "settings: an empty saved default counts as none")
     check(CalendarSettings.effectiveDefault(saved: a, connected: []) == nil, "settings: no accounts, no default")
 
-    // Reconnect: no calendars listed for the account, or any of its calendars needs it.
+    // What an account shows: loading until its first list attempt ends; reconnect only on a real refusal or a flagged calendar.
     let all = [cal(a, a, "Me"), cal(a, "x", "Team", owned: false, reconnect: true), cal(b, b, "Other")]
-    check(CalendarSettings.needsReconnect(account: a, calendars: all), "settings: one calendar needing reconnect flags the account")
-    check(!CalendarSettings.needsReconnect(account: b, calendars: all), "settings: a healthy account is not flagged")
-    check(CalendarSettings.needsReconnect(account: "c@example.com", calendars: all), "settings: an account with no calendars listed is flagged")
+    func st(_ acct: String, _ cals: [CalCalendar], _ last: CalendarSettings.ListOutcome?) -> CalendarSettings.AccountState {
+        CalendarSettings.state(account: acct, calendars: cals, lastList: last)
+    }
+    let c = "c@example.com"
+    check(st(c, all, nil) == .loading, "settings: a fresh account with no list attempt yet is loading, not reconnect")
+    check(st(c, all, .failed) == .loading, "settings: a failed attempt that is not a refusal stays quiet (loading)")
+    check(st(c, all, .needsReconnect) == .reconnect, "settings: a list refused for permission asks to reconnect")
+    check(st(c, all, .listed) == .calendars, "settings: a successful list with nothing in it shows calendars (empty)")
+    check(st(b, all, nil) == .calendars, "settings: saved calendars show right away")
+    check(st(a, all, .listed) == .reconnect, "settings: one calendar flagged needs-reconnect flags the account")
+    check(st(b, all, .needsReconnect) == .reconnect, "settings: a refused list flags an account that has calendars")
+    // The attempt memory: recorded, replaced, forgotten after a fresh sign-in.
+    CalendarListAttempts.record(c, .needsReconnect)
+    check(CalendarListAttempts.outcome(c) == .needsReconnect, "settings: list attempt is remembered")
+    CalendarListAttempts.forget(c)
+    check(CalendarListAttempts.outcome(c) == nil, "settings: a fresh sign-in forgets the old attempt")
 
     // An account's calendars: owned first, then by name.
     let mixed = [cal(a, "z", "Zed", owned: false), cal(a, "m", "Mine"), cal(a, "h", "Holidays", owned: false), cal(b, "o", "Other")]
