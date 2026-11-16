@@ -152,7 +152,7 @@ func goodEngine(status: String = okStatus) -> FakeEngine {
         check(r1.error == nil && put?["version"] as? Int == 3 && values?["default_group"] == nil && values?["auto_add"] == nil && values?["learned"] as? String == "L"
               && (values?["groups"] as? [String]) == store.areas.map(\.name) && values?["vip"] as? [String] == ["a", "b"],
               "settings_pushed_without_app_only_keys_with_groups")
-        check(values?["time_zone"] as? String == TimeZone.current.identifier, "settings_push_includes_device_time_zone")
+        check(values?["time_zone"] as? String == AppTime.zone.identifier, "settings_push_includes_app_time_zone")
         let st = ConnectorSync.storedStatus(connector: "eb", store: store)
         check(st?.schema.first?.key == "vip" && st?.needsAttention == ["x"], "status_saved_in_connector_row")
         check(connectorRow(store, "eb", "engine_settings_version") == "2", "engine_version_taken_from_status")
@@ -178,7 +178,7 @@ func goodEngine(status: String = okStatus) -> FakeEngine {
 
     // Device time zone: a zone different from the one last pushed bumps the version and is pushed; the same zone is not.
     do {
-        let zone = TimeZone.current.identifier
+        let zone = AppTime.zone.identifier
         store.performForTest("INSERT OR REPLACE INTO connectors(id,name,settings_json,settings_version,engine_settings_version) VALUES('tz','tz','{}',4,4)")
         store.performForTest("INSERT OR REPLACE INTO meta(key,value) VALUES('pushed_time_zone:tz','\(zone)')")
         let same = goodEngine(status: #"{"settings_version":4,"schema":[],"needs_attention":[],"waiting":0,"last_run_ok":null,"last_run_error":null,"oldest_unprocessed_event":null}"#)

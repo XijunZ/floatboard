@@ -5,10 +5,11 @@ import SwiftUI
 
 /// The sections of Settings (docs/architecture.md, Edition 2): what the product is, in the order you set it up.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case mode, connections, rules, keys
+    case general, mode, connections, rules, keys
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .general: "General"
         case .mode: "Mode"
         case .connections: "Connections"
         case .rules: "Rules & learning"
@@ -17,6 +18,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
     var icon: String {
         switch self {
+        case .general: "gearshape"
         case .mode: "server.rack"
         case .connections: "point.3.connected.trianglepath.dotted"
         case .rules: "text.book.closed"
@@ -25,6 +27,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
     var blurb: String {
         switch self {
+        case .general: "How this Mac shows dates and times."
         case .mode: "Where screening runs."
         case .connections: "Where tasks come from, your phone, and where tasks and alerts go."
         case .rules: "What FloatBoard follows, and what it has learned."
@@ -69,6 +72,7 @@ struct SettingsView: View {
                         Text(ui.settingsSection.blurb).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     switch ui.settingsSection {
+                    case .general: GeneralSection()
                     case .mode: ModeSection()
                     case .connections: ConnectionsSection()
                     case .rules: RulesSection()
@@ -480,7 +484,7 @@ struct OnDeviceCompare: View {
             defer { running = false }
             do {
                 let c = try await client.compareModels(limit: 10)
-                let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "d MMM"
+                let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.timeZone = AppTime.zone; f.dateFormat = "d MMM"
                 let text = c.n == 0 ? (c.note ?? "No chats to compare yet.")
                     : "Agreed with Haiku on \(c.agree) of \(c.n) chats (\(f.string(from: Date())))" + ((c.unusable ?? 0) > 0 ? "; \(c.unusable!) answers unusable" : "")
                 result = text
@@ -575,6 +579,46 @@ struct RulebookEditor: View {
             message = "Back to the built-in rulebook."
             NotificationCenter.default.post(name: .floatBoardSyncConnectors, object: nil)
         } catch { message = "Couldn't reset: \(error)" }
+    }
+}
+
+// MARK: - General
+
+/// Time zone: UK time by default, "Follow this Mac", or any zone. A date-only task keeps its day; a timed one keeps
+/// its moment and shows at that moment's time in the chosen zone.
+struct GeneralSection: View {
+    @EnvironmentObject var store: Store
+    @State private var setting = AppTime.setting
+    @State private var search = ""
+    @State private var error: String?
+
+    private var zones: [String] {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "_")
+        return q.isEmpty ? AppTime.allZones : AppTime.allZones.filter { $0.lowercased().contains(q) }
+    }
+
+    var body: some View {
+        SettingsBlock(title: "Time zone", help: "Every date and time on the board, the bar and your phone is shown in this zone. Europe/London is UK time (GMT in winter, BST in summer). Changing it never moves a task's day; a task with a time stays at the same moment.") {
+            Picker("Use", selection: $setting) {
+                Text("Follow this Mac (\(TimeZone.current.identifier))").tag(AppTime.macSetting)
+                Divider()
+                ForEach(zones, id: \.self) { Text($0).tag($0) }
+                if !zones.contains(setting) && setting != AppTime.macSetting { Text(setting).tag(setting) }
+            }
+            .labelsHidden().frame(width: 360)
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search zones, e.g. Shanghai", text: $search).textFieldStyle(.roundedBorder).frame(width: 330)
+            }
+            Text("Now: \(Fmt.withTime(Date())) in \(setting == AppTime.macSetting ? TimeZone.current.identifier : setting)")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            if let error { Text(error).font(.system(size: 11)).foregroundStyle(.red) }
+        }
+        .onChange(of: setting) { _, new in
+            guard new != AppTime.setting else { return }
+            do { try AppTime.save(new, to: store.db); error = nil }
+            catch { self.error = "Couldn't save the time zone: \(error)"; setting = AppTime.setting; store.activity("settings", .error, "Couldn't save the time zone", detail: "\(error)") }
+        }
     }
 }
 

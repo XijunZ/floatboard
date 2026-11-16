@@ -63,7 +63,7 @@ struct Column: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     if status == .done && sort.key == nil {
                         // Sorted by date finished: grouped by the day they were done, newest day first (oldest when ascending).
-                        let groups = Dictionary(grouping: cards) { Calendar.current.startOfDay(for: $0.done ?? $0.created) }
+                        let groups = Dictionary(grouping: cards) { AppTime.calendar.startOfDay(for: $0.done ?? $0.created) }
                         ForEach(groups.keys.sorted(by: sort.ascending ? (<) : (>)), id: \.self) { day in
                             let items = groups[day] ?? []
                             Text("\(Fmt.heading(day)) · \(items.count) done")

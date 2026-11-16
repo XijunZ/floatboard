@@ -179,9 +179,10 @@ struct Chip: View {
     @EnvironmentObject var store: Store
     let card: Card
 
-    private static let monthDay: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "MM-dd"; return f
-    }()
+    /// Built on each use: it must follow the app time zone as it changes.
+    private static func monthDay(_ d: Date) -> String {
+        let f = DateFormatter(); f.timeZone = AppTime.zone; f.dateFormat = "MM-dd"; return f.string(from: d)
+    }
 
     @ViewBuilder private func field(_ f: BarConfig.Field) -> some View {
         switch f {
@@ -191,7 +192,7 @@ struct Chip: View {
             Text(card.title).lineLimit(1)
         case .dueDate:
             if let due = card.due {
-                Text(Self.monthDay.string(from: due)).monospacedDigit()
+                Text(Self.monthDay(due)).monospacedDigit()
                     .foregroundStyle(card.isOverdue ? Color.red : Color.secondary)
             }
         case .dueTime:

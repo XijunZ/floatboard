@@ -153,7 +153,7 @@ public enum PhoneBoard {
     /// Open tasks (board order) then tasks done today (local day, newest first), at most 500.
     /// Each card carries `status_at`: its last step change on this Mac (see `Store.lastStepChanges`).
     @MainActor
-    public static func payload(store: Store, now: Date, calendar: Calendar = .current) -> [BoardCard] {
+    public static func payload(store: Store, now: Date, calendar: Calendar = AppTime.calendar) -> [BoardCard] {
         let colors = Dictionary(store.areas.map { ($0.name, $0.colorHex) }, uniquingKeysWith: { a, _ in a })
         let open = store.active
         let doneToday = store.cards(in: .done).filter { c in c.done.map { calendar.isDate($0, inSameDayAs: now) } ?? false }

@@ -159,7 +159,7 @@ public enum ConnectorSync {
                 do {
                     try await client.putSettings(values: try settingsValues(row.settingsJSON, id, store), version: row.version)
                     try store.db.run("UPDATE connectors SET engine_settings_version=? WHERE id=?", [row.version, id])
-                    try store.db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", [timeZoneKey(id), TimeZone.current.identifier])
+                    try store.db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", [timeZoneKey(id), AppTime.zone.identifier])
                     break
                 } catch ConnectorError.staleSettings(let engine) {
                     guard let engine else {
@@ -433,7 +433,7 @@ public enum ConnectorSync {
         var out: [String: JSONValue] = [:]
         for (k, v) in try parse(json, id) where !appOnlySettings.contains(k) { if let j = JSONValue.from(any: v) { out[k] = j } }
         out["groups"] = .strings(store.areas.map(\.name))
-        out["time_zone"] = .string(TimeZone.current.identifier)
+        out["time_zone"] = .string(AppTime.zone.identifier)
         return out
     }
 
@@ -444,7 +444,7 @@ public enum ConnectorSync {
     @MainActor
     private static func bumpIfTimeZoneChanged(_ id: String, _ store: Store) throws {
         let pushed = try store.db.query("SELECT value FROM meta WHERE key=?", [timeZoneKey(id)]) { DB.text($0, 0) }.first
-        guard pushed != TimeZone.current.identifier else { return }
+        guard pushed != AppTime.zone.identifier else { return }
         try store.db.run("UPDATE connectors SET settings_version=engine_settings_version+1 WHERE id=? AND settings_version<=engine_settings_version", [id])
     }
 

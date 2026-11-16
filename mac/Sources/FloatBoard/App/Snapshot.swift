@@ -26,7 +26,7 @@ enum Snapshot {
             print("meet from notes:", c.meetLink?.absoluteString ?? "none")
         }
         if ProcessInfo.processInfo.environment["FLOATBOARD_INPUTTEST"] != nil {
-            let cal = Calendar.current
+            let cal = AppTime.calendar
             let base = cal.date(from: DateComponents(year: 2026, month: 11, day: 7, hour: 0, minute: 0))!
             func run(_ m: inout SegmentModel, _ keys: String) {
                 for k in keys {
@@ -35,8 +35,8 @@ enum Snapshot {
                 }
                 m.commit()
             }
-            let f = DateFormatter(); f.dateFormat = "HH:mm"
-            let g = DateFormatter(); g.dateFormat = "yyyy-MM-dd"
+            let f = DateFormatter(); f.timeZone = AppTime.zone; f.dateFormat = "HH:mm"
+            let g = DateFormatter(); g.timeZone = AppTime.zone; g.dateFormat = "yyyy-MM-dd"
             for keys in ["1430", "930", "9", "1430<<09", "2>", "23^", "00v", "1x45"] {
                 var m = SegmentModel.time(base); run(&m, keys); print("time", keys.padding(toLength: 10, withPad: " ", startingAt: 0), "->", f.string(from: m.applyTime(to: base)))
             }
@@ -45,7 +45,7 @@ enum Snapshot {
             }
         }
         if ProcessInfo.processInfo.environment["FLOATBOARD_TIMETEST"] != nil {
-            let cal = Calendar.current
+            let cal = AppTime.calendar
             let today = Date()
             let tomorrow = cal.date(byAdding: .day, value: 1, to: today)!
             let t1530 = cal.date(bySettingHour: 15, minute: 30, second: 0, of: today)!
@@ -128,6 +128,7 @@ enum Snapshot {
             let page = VStack(alignment: .leading, spacing: 14) {
                 Text(s.title).font(.system(size: 15, weight: .semibold))
                 switch s {
+                case .general: GeneralSection()
                 case .mode: ModeSection()
                 case .connections: ConnectionsSection()
                 case .rules: RulesSection()

@@ -231,8 +231,8 @@ final class Google: ObservableObject {
         if card.dueHasTime {
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime]
-            iso.timeZone = .current
-            let tz = TimeZone.current.identifier
+            iso.timeZone = AppTime.zone
+            let tz = AppTime.zone.identifier
             body["start"] = ["dateTime": iso.string(from: due), "timeZone": tz]
             body["end"] = ["dateTime": iso.string(from: due.addingTimeInterval(30 * 60)), "timeZone": tz]
         } else {

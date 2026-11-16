@@ -132,11 +132,14 @@ public struct Card: Identifiable, Equatable {
         let dates: String
         if dueHasTime {
             let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
             f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
             f.timeZone = TimeZone(identifier: "UTC")
             dates = f.string(from: due) + "/" + f.string(from: due.addingTimeInterval(30 * 60))
         } else {
             let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = AppTime.zone
             f.dateFormat = "yyyyMMdd"
             let next = AppTime.calendar.date(byAdding: .day, value: 1, to: due) ?? due
             dates = f.string(from: due) + "/" + f.string(from: next)
@@ -171,9 +174,9 @@ public struct Card: Identifiable, Equatable {
     }
 
     /// 0 = due today, 1 = tomorrow, negative = overdue, nil = no due date. Done tasks return nil.
-    var dueInDays: Int? {
+    public var dueInDays: Int? {
         guard let due, status != .done else { return nil }
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         return cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: due)).day
     }
 
@@ -191,7 +194,8 @@ public struct Card: Identifiable, Equatable {
     public var isOverdue: Bool {
         guard let due, status != .done else { return false }
         if dueHasTime { return due < Date() }
-        return Calendar.current.startOfDay(for: due) < Calendar.current.startOfDay(for: Date())
+        let cal = AppTime.calendar
+        return cal.startOfDay(for: due) < cal.startOfDay(for: Date())
     }
 
     /// For ordering: a date-only task counts as due at the end of that day,
@@ -199,7 +203,8 @@ public struct Card: Identifiable, Equatable {
     public var dueSortKey: Date? {
         guard let due else { return nil }
         if dueHasTime { return due }
-        return Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: Calendar.current.startOfDay(for: due))
+        let cal = AppTime.calendar
+        return cal.date(byAdding: DateComponents(day: 1, second: -1), to: cal.startOfDay(for: due))
     }
 }
 
@@ -244,7 +249,7 @@ public enum Due {
     }
     /// Day from `day`, plus hour:minute from `time` if given; otherwise 00:00 (date only).
     public static func combine(day: Date, time: Date?) -> Date {
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         let start = cal.startOfDay(for: day)
         guard let time else { return start }
         let t = cal.dateComponents([.hour, .minute], from: time)
@@ -252,32 +257,36 @@ public enum Due {
     }
     /// A sensible default time for a new meeting: next whole hour.
     public static var nextHour: Date {
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         let h = cal.component(.hour, from: Date())
         return cal.date(bySettingHour: min(h + 1, 23), minute: 0, second: 0, of: Date()) ?? Date()
     }
 }
 
 public enum Fmt {
-    private static let day: DateFormatter = make("yyyy-MM-dd")
-    private static let dayYear: DateFormatter = make("yyyy-MM-dd")
-    private static let dayTime: DateFormatter = make("yyyy-MM-dd HH:mm")
-    private static let time: DateFormatter = make("HH:mm")
-    private static let longDay: DateFormatter = make("yyyy-MM-dd EEEE")
-    private static let csv: DateFormatter = make("yyyy-MM-dd HH:mm")
+    /// Formatters are cached per pattern and zone, and the zone is read at every call, so a change of time zone shows at once.
+    nonisolated(unsafe) private static var cache: [String: DateFormatter] = [:]
+    private static let lock = NSLock()
 
-    private static func make(_ f: String) -> DateFormatter {
-        let d = DateFormatter(); d.locale = Locale(identifier: "en_US_POSIX"); d.dateFormat = f; return d
+    private static func formatter(_ f: String) -> DateFormatter {
+        let zone = AppTime.zone
+        let key = f + "|" + zone.identifier
+        lock.lock(); defer { lock.unlock() }
+        if let d = cache[key] { return d }
+        let d = DateFormatter(); d.locale = Locale(identifier: "en_US_POSIX"); d.timeZone = zone; d.dateFormat = f
+        cache[key] = d
+        return d
     }
     public static func short(_ d: Date) -> String {
-        Calendar.current.isDate(d, equalTo: Date(), toGranularity: .year) ? day.string(from: d) : dayYear.string(from: d)
+        let f = formatter("yyyy-MM-dd")
+        return f.string(from: d)
     }
-    public static func withTime(_ d: Date) -> String { dayTime.string(from: d) }
+    public static func withTime(_ d: Date) -> String { formatter("yyyy-MM-dd HH:mm").string(from: d) }
     /// "12 Nov" for date-only, "12 Nov 14:30" when a time is set.
     public static func due(_ d: Date, hasTime: Bool) -> String { hasTime ? withTime(d) : short(d) }
-    public static func clock(_ d: Date) -> String { time.string(from: d) }
-    public static func heading(_ d: Date) -> String { longDay.string(from: d) }
-    public static func csvDate(_ d: Date?) -> String { d.map { csv.string(from: $0) } ?? "" }
+    public static func clock(_ d: Date) -> String { formatter("HH:mm").string(from: d) }
+    public static func heading(_ d: Date) -> String { formatter("yyyy-MM-dd EEEE").string(from: d) }
+    public static func csvDate(_ d: Date?) -> String { d.map { formatter("yyyy-MM-dd HH:mm").string(from: $0) } ?? "" }
     public static func duration(from a: Date, to b: Date) -> String {
         let mins = Int(b.timeIntervalSince(a) / 60)
         if mins < 60 { return "\(max(mins, 1))m" }

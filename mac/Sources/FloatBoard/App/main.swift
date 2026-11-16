@@ -55,7 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let p = check.problem { preMigrateNote = p }
         }
         do {
-            store = Store(db: try DB())
+            let db = try DB()
+            AppTime.load(from: db)   // before the board loads: date-only dues are read in this zone
+            store = Store(db: db)
             google.attach(store: store)
             if let preMigrateError { store.activity("backup", .error, "Backup (pre-migrate) failed", detail: "\(preMigrateError)") }
             if let preMigrateNote { store.activity("backup", .warning, "Could not read schema version; backed up as a precaution", detail: preMigrateNote) }
@@ -132,6 +134,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.connectors.whatsappTick() }
         }
         startDueReminders()
+        // A new time zone (chosen in Settings, or the Mac's own when following it) re-reads the board, so every screen
+        // and the reminders redraw in it.
+        for name in [AppTime.didChange, .NSSystemTimeZoneDidChange] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.store.reload() }
+            }
+        }
         modeWatch = ui.$mode.removeDuplicates().sink { [weak self] m in
             guard m == .expanded else { return }
             self?.connectors.boardOpened()
@@ -287,7 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let a = NSAlert(); a.messageText = "No backups yet"
             a.informativeText = "A backup is made once a day while FloatBoard runs."; a.runModal(); return
         }
-        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
+        let f = DateFormatter(); f.timeZone = AppTime.zone; f.dateStyle = .medium; f.timeStyle = .short
         let pick = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26))
         for b in all { pick.addItem(withTitle: "\(f.string(from: b.date)) · \(b.reason)") }
         let a = NSAlert()
