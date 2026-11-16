@@ -159,11 +159,9 @@ import FloatBoardConnectors
         var delA = false, delUUID = ""
         if rowsA.count == 1, case .delete(let eid)? = rowsA[0].write { delA = eid == "ga"; delUUID = rowsA[0].uuid }
         store.undoDelete()
+        // Undone before it was sent: the delete is taken back and the task keeps its event (final review: no cancel + recreate).
         let afterUndo = unsent(outbox)
-        var recreated = false
-        if afterUndo.count == 2, case .create(let f, let cid, _)? = afterUndo[1].write {
-            recreated = cid == a && f.fbCard == a && f.title == "Made here" && f.start == at(d1, 11) && afterUndo[1].uuid != delUUID
-        }
+        let kept = afterUndo.isEmpty && link(store, a).event == "ga" && !delUUID.isEmpty
         drop(outbox)
         store.delete(store.card(b)!)
         let afterB = unsent(outbox).count
@@ -171,7 +169,7 @@ import FloatBoardConnectors
         var delC = false
         if unsent(outbox).count == 1, case .delete(let eid)? = unsent(outbox)[0].write { delC = eid == "gc" }
         check(delA && afterB == 0 && delC, "task_delete_deletes_only_fb_event")
-        check(recreated, "undo_delete_recreates_event")
+        check(kept, "undo_delete_before_send_keeps_the_event")
     } catch { check(false, "tdel setup: \(error)") }
 
     do {

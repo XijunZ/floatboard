@@ -51,6 +51,8 @@ public final class CalendarSender {
             return
         }
         let api = apiFor(row.account)
+        outbox.setInFlight(row.uuid, true)   // while on the wire, undo can't take it back
+        defer { outbox.setInFlight(row.uuid, false) }
         do {
             let saved: Bool
             switch write {

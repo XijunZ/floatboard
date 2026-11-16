@@ -17,8 +17,9 @@ public final class Store: ObservableObject {
     private var lastDeletedOutbox: String?
     /// The links delete took off that task, so undo can put back exactly those.
     private var lastDeletedLinks: [StoredLink] = []
-    /// The Google event queued for deletion with that task, so undo can queue it again.
-    private var lastDeletedEvent: EventLink?
+    /// The Google event queued for deletion with that task and the calendar outbox row that deletes it, so undo can take the
+    /// delete back (or, once sent, make the event again).
+    private var lastDeletedEvent: (link: EventLink, row: String)?
     /// What the health watchdog last found (set by `Health.refresh`); the bar warning reads this and nothing else.
     @Published public internal(set) var healthProblems: [HealthProblem] = []
     public let db: DB
@@ -27,6 +28,8 @@ public final class Store: ObservableObject {
     var txActivity: [(Date, String, ActivityLevel, String, String?, String?)] = []
     /// Outbox rows whose send request is on the wire (set by the connector sync around the request).
     var outboxInFlight = Set<String>()
+    /// Calendar outbox rows on their way to Google (set by the calendar sender around the request).
+    var calendarInFlight = Set<String>()
 
     public init(db: DB) {
         self.db = db
@@ -242,7 +245,7 @@ public final class Store: ObservableObject {
     /// `not_action` / `wrong_details` / `duplicate`, a correction) in the same transaction. The engine learns from the
     /// first two; `duplicate` is only logged there.
     public func deleteCard(_ card: Card, verdict: String?, now: Date = Date()) {
-        var done: (DeletedTask, String?, [StoredLink], EventLink?)?
+        var done: (DeletedTask, String?, [StoredLink], (link: EventLink, row: String)?)?
         perform {
             guard let cur = try currentCard(card.id), !cur.deleted else { return }
             try db.run("UPDATE cards SET deleted=1, updated=? WHERE id=?", [now, card.id])
@@ -268,7 +271,7 @@ public final class Store: ObservableObject {
             try db.run("UPDATE cards SET deleted=0, updated=? WHERE id=?", [now, d.id])
             try log(d.id, "restored", nil, row.0, now)
             try restoreLinks(links)
-            if let event { try queueCalendarRecreate(cardID: d.id, target: event, now: now) }
+            if let event { try undoCalendarDelete(cardID: d.id, target: event.link, row: event.row, now: now) }
             if let uuid = outbox {
                 let unsent = try db.query("SELECT count(*) FROM outbox WHERE uuid=? AND sent IS NULL", [uuid]) { DB.int($0, 0) }.first ?? 0
                 if unsent > 0 && !outboxInFlight.contains(uuid) {

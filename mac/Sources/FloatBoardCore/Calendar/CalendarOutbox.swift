@@ -43,6 +43,15 @@ public final class CalendarOutbox {
         self.db = store.db; self.store = store; self.cache = CalendarCache(store: store)
     }
 
+    /// Called after a change the user made on the board (an edit, a delete, an undo, a drag) was queued, so the app can send
+    /// it right away instead of at the next timed run. The sync's own catch-up writes do not call it. Set by the app.
+    public static var nudge: (@MainActor () -> Void)?
+
+    /// Marks a change as being on its way to Google (the sender sets this around the request), so undo leaves it alone.
+    public func setInFlight(_ uuid: String, _ on: Bool) {
+        if on { store.calendarInFlight.insert(uuid) } else { store.calendarInFlight.remove(uuid) }
+    }
+
     /// Saves the change and returns its id. Returns "" (and logs to Activity) if it could not be saved.
     @discardableResult
     public func enqueue(_ w: CalWrite, account: String, calendarID: String, now: Date = Date()) -> String {
