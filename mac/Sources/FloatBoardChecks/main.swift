@@ -707,7 +707,7 @@ MainActor.assumeIsolated {
     check(store.recentActivity(limit: 100).allSatisfy { $0.seen }, "activity_mark_seen")
 }
 
-check(GoogleAuthConfig.scopes == ["https://www.googleapis.com/auth/calendar.events", "openid", "email"]
+check(GoogleAuthConfig.scopes == ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "openid", "email"]
       && !GoogleAuthConfig.scopes.contains { $0.contains("mail.google") || $0.lowercased().contains("gm" + "ail") }, "google_scopes_calendar_only")
 
 await connectorChecks(sharedStore!)
@@ -740,6 +740,7 @@ dueReminderChecks()
 dueStorageChecks()
 linkChecks()
 calendarCacheChecks()
+await googleCalendarChecks()
 appTimeChecks()
 oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()

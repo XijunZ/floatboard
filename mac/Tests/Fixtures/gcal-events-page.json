@@ -1,0 +1,42 @@
+{
+  "_note": "documented shape; recapture live after reconnect",
+  "page1": {
+    "kind": "calendar#events", "summary": "Alex Example", "timeZone": "Europe/London", "accessRole": "owner",
+    "nextPageToken": "PageTokenExample2",
+    "items": [
+      {"kind": "calendar#event", "id": "evt1example", "status": "confirmed", "summary": "Design review",
+       "htmlLink": "https://www.google.com/calendar/event?eid=evt1example",
+       "start": {"dateTime": "2026-11-20T10:00:00Z", "timeZone": "Europe/London"},
+       "end": {"dateTime": "2026-11-20T11:00:00Z", "timeZone": "Europe/London"},
+       "updated": "2026-11-10T09:30:00.123Z", "location": "Room 4",
+       "hangoutLink": "https://meet.google.com/abc-defg-hij",
+       "extendedProperties": {"private": {"floatboard_card": "42"}}},
+      {"kind": "calendar#event", "id": "evt2allday", "status": "confirmed", "summary": "Offsite",
+       "htmlLink": "https://www.google.com/calendar/event?eid=evt2allday",
+       "start": {"date": "2026-11-23"}, "end": {"date": "2026-11-25"},
+       "updated": "2026-11-11T12:00:00.000Z"},
+      {"kind": "calendar#event", "id": "evt3weekly_20261124T090000Z", "status": "confirmed", "summary": "Weekly sync",
+       "recurringEventId": "evt3weekly",
+       "htmlLink": "https://www.google.com/calendar/event?eid=evt3weekly_20261124",
+       "start": {"dateTime": "2026-11-24T09:00:00+01:00", "timeZone": "Europe/Berlin"},
+       "end": {"dateTime": "2026-11-24T09:30:00+01:00", "timeZone": "Europe/Berlin"},
+       "updated": "2026-11-01T08:00:00Z"}
+    ]
+  },
+  "page2": {
+    "kind": "calendar#events", "summary": "Alex Example", "timeZone": "Europe/London", "accessRole": "owner",
+    "nextSyncToken": "SyncTokenExample1",
+    "items": [
+      {"kind": "calendar#event", "id": "evt4conf", "status": "confirmed", "summary": "Customer call",
+       "start": {"dateTime": "2026-11-25T14:00:00Z"}, "end": {"dateTime": "2026-11-25T14:45:00Z"},
+       "updated": "2026-11-12T10:00:00Z",
+       "conferenceData": {"entryPoints": [
+         {"entryPointType": "phone", "uri": "tel:+44-20-5555-0100"},
+         {"entryPointType": "video", "uri": "https://teams.example.com/meet/123"}]}},
+      {"kind": "calendar#event", "id": "evt5desc", "status": "confirmed", "summary": "Vendor intro",
+       "description": "Agenda below. Join: https://example.zoom.us/j/123456789?pwd=abc and bring notes.",
+       "start": {"dateTime": "2026-11-26T15:00:00Z"}, "end": {"dateTime": "2026-11-26T16:00:00Z"},
+       "updated": "2026-11-12T11:00:00Z"}
+    ]
+  }
+}
