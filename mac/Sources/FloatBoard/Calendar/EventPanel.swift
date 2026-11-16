@@ -14,6 +14,8 @@ struct EventPanel: View {
     @State private var start: Date
     @State private var end: Date
     @State private var confirmDelete = false
+    /// Set by Delete: the panel closing after it must not queue a change for an event that is going away.
+    @State private var deleted = false
 
     init(event: CalEvent, calendar: CalCalendar?, waiting: Bool) {
         self.event = event; self.calendar = calendar; self.waiting = waiting
@@ -31,7 +33,7 @@ struct EventPanel: View {
     }
 
     private func save() {
-        guard editable else { return }
+        guard editable, !deleted else { return }
         edits.rename(event, to: title)
         guard !event.allDay else { return }
         let s = on(start), e = max(on(end), s.addingTimeInterval(Double(CalendarLayout.stepMinutes * 60)))
@@ -44,7 +46,7 @@ struct EventPanel: View {
                 TextField("Title", text: $title)
                     .textFieldStyle(.plain).font(.system(size: 15, weight: .semibold))
                     .disabled(!editable)
-                    .onSubmit { save(); dismiss() }
+                    .onSubmit { dismiss() } // closing the panel saves, once
                 IDChip(id: event.id).font(.system(size: 10)).foregroundStyle(.secondary)
             }
             if event.allDay {
@@ -64,6 +66,7 @@ struct EventPanel: View {
                     Circle().fill(Color(hex: calendar.color)).frame(width: 8, height: 8)
                     Text(calendar.name)
                     Text(calendar.account).foregroundStyle(.secondary)
+                        .help("The calendar can't be changed here. To move the event to another calendar, open it in Google Calendar.")
                 }
             }
             if !event.videoLink.isEmpty, let url = URL(string: event.videoLink) {
@@ -83,7 +86,7 @@ struct EventPanel: View {
             HStack {
                 if editable {
                     if confirmDelete {
-                        Button("Delete this event?", role: .destructive) { edits.delete(event); dismiss() }
+                        Button("Delete this event?", role: .destructive) { deleted = true; edits.delete(event); dismiss() }
                         Button("Keep") { confirmDelete = false }
                     } else {
                         Button("Delete", role: .destructive) { confirmDelete = true }

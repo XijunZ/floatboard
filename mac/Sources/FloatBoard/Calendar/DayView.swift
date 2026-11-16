@@ -31,8 +31,9 @@ struct TimeGrid: View {
         let from = days.first.map { cal.startOfDay(for: $0) } ?? Date()
         let to = cal.date(byAdding: .day, value: days.count, to: from) ?? from
         let calendars = Dictionary(cache.calendars().map { (TaskEventRules.key($0.account, $0.calendarID), $0) }, uniquingKeysWith: { a, _ in a })
-        let events = cache.events(from: from, to: to).filter { !edits.deleted.contains($0.shortID) }.map(edits.shown)
-        let pending = Set(events.filter { outbox.pending(eventShortID: $0.shortID) }.map(\.shortID))
+        let waitingNew = outbox.pendingNewEvents(from: from, to: to)
+        let events = cache.events(from: from, to: to).filter { !edits.deleted.contains($0.shortID) }.map(edits.shown) + waitingNew
+        let pending = Set(waitingNew.map(\.shortID)).union(events.filter { outbox.pending(eventShortID: $0.shortID) }.map(\.shortID))
         let tasks = store.cards.filter { !$0.withdrawn }
         let placed = days.map { CalendarLayout.columns(for: events, tasks: tasks, day: $0) }
 
@@ -238,7 +239,9 @@ private struct EventBlock: View {
     @State private var grow: CGFloat = 0
 
     private var colour: Color { calendar.map { Color(hex: $0.color) } ?? .gray }
-    private var editable: Bool { calendar?.owned ?? false }
+    /// A new event that Google has not confirmed yet (no E-n): shown, but not editable until it arrives.
+    private var placeholder: Bool { event.shortID < 0 }
+    private var editable: Bool { !placeholder && (calendar?.owned ?? false) }
 
     var body: some View {
         let narrow = columnWidth / CGFloat(item.columns) < 110
@@ -255,7 +258,7 @@ private struct EventBlock: View {
                         }
                     }
                     if h >= 30 { Text("\(Fmt.clock(event.start))–\(Fmt.clock(event.end))").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
-                    if !narrow && h >= 44 { IDChip(id: event.id).font(.system(size: 9)).foregroundStyle(.tertiary) }
+                    if !narrow && h >= 44 && !placeholder { IDChip(id: event.id).font(.system(size: 9)).foregroundStyle(.tertiary) }
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 5).padding(.vertical, 3)
@@ -266,7 +269,7 @@ private struct EventBlock: View {
             .background(RoundedRectangle(cornerRadius: 5).fill(colour.opacity(0.16)))
             .clipShape(RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
-            .onTapGesture { open = true }
+            .onTapGesture { if !placeholder { open = true } }
             .gesture(DragGesture(minimumDistance: 4)
                 .onChanged { if editable { drag = $0.translation } }
                 .onEnded { v in
