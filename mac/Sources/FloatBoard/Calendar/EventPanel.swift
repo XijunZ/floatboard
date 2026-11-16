@@ -16,28 +16,24 @@ struct EventPanel: View {
     @State private var confirmDelete = false
     /// Set by Delete: the panel closing after it must not queue a change for an event that is going away.
     @State private var deleted = false
+    /// The fields as they were when the panel opened: only what the user changed from these is sent.
+    private let opened: EventPanelEdit.Fields
 
     init(event: CalEvent, calendar: CalCalendar?, waiting: Bool) {
         self.event = event; self.calendar = calendar; self.waiting = waiting
+        opened = EventPanelEdit.Fields(event)
         _title = State(initialValue: event.title); _day = State(initialValue: event.start)
         _start = State(initialValue: event.start); _end = State(initialValue: event.end)
     }
 
     private var editable: Bool { calendar?.owned ?? false }
 
-    /// The time fields as dates: the chosen day with each time of day.
-    private func on(_ time: Date) -> Date {
-        let c = AppTime.calendar
-        let t = c.dateComponents([.hour, .minute], from: time)
-        return c.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: day) ?? time
-    }
-
+    /// Sends only the fields the user changed since the panel opened (an untouched panel sends nothing).
     private func save() {
         guard editable, !deleted else { return }
-        edits.rename(event, to: title)
-        guard !event.allDay else { return }
-        let s = on(start), e = max(on(end), s.addingTimeInterval(Double(CalendarLayout.stepMinutes * 60)))
-        if s != event.start || e != event.end { edits.move(event, start: s, end: e) }
+        let change = EventPanelEdit.changes(event: event, opened: opened, now: .init(title: title, day: day, start: start, end: end))
+        if let t = change.title { edits.rename(event, to: t) }
+        if let m = change.move { edits.move(event, start: m.start, end: m.end) }
     }
 
     var body: some View {

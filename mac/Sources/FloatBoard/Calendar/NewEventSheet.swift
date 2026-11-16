@@ -22,16 +22,10 @@ struct NewEventSheet: View {
     private var options: [CalCalendar] { CalendarCache(store: store).connectedCalendars().filter { $0.owned && $0.shown } }
     private var calendar: CalCalendar? { chosen ?? edits.defaultCalendar(in: options) }
 
-    private func on(_ time: Date) -> Date {
-        let c = AppTime.calendar
-        let t = c.dateComponents([.hour, .minute], from: time)
-        return c.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: day) ?? time
-    }
-
     private func add() {
         guard let calendar, !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        let s = on(start)
-        edits.create(title: title, start: s, end: max(on(end), s.addingTimeInterval(Double(CalendarLayout.stepMinutes * 60))), calendar: calendar)
+        let span = EventPanelEdit.span(day: day, start: start, end: end)   // an end before the start is the next day
+        edits.create(title: title, start: span.start, end: span.end, calendar: calendar)
         dismiss()
     }
 
