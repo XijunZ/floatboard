@@ -66,11 +66,15 @@ public final class CalendarSync {
         guard !running else { return }
         running = true
         defer { running = false }
-        for c in cache.calendars() where c.shown { await sync(c) }
-        TaskEventRules.reconcile(store: store, cache: cache, now: now())
+        var unread = Set<String>()
+        for c in cache.calendars() where c.shown {
+            if !(await sync(c)) { unread.insert(TaskEventRules.key(c.account, c.calendarID)) }
+        }
+        TaskEventRules.reconcile(store: store, cache: cache, now: now(), unreadCalendars: unread)
     }
 
-    private func sync(_ c: CalCalendar) async {
+    /// Returns false when the calendar could not be read this time.
+    private func sync(_ c: CalCalendar) async -> Bool {
         let key = c.account + "|" + c.calendarID
         let api = apiFor(c.account)
         let from = now().addingTimeInterval(-TaskEventRules.windowBack), to = now().addingTimeInterval(TaskEventRules.windowAhead)
@@ -80,20 +84,25 @@ public final class CalendarSync {
                 result = try await api.listEvents(calendarID: c.calendarID, syncToken: c.syncToken, timeMin: from, timeMax: to)
             } catch GoogleCalendarError.syncExpired {
                 // The bookmark is too old: forget it (events are hidden until the full read brings them back) and read it all again.
-                guard cache.resetSync(account: c.account, calendarID: c.calendarID) else { return }
+                guard cache.resetSync(account: c.account, calendarID: c.calendarID) else { return false }
                 result = try await api.listEvents(calendarID: c.calendarID, syncToken: nil, timeMin: from, timeMax: to)
             }
             if cache.apply(account: c.account, calendarID: c.calendarID, changes: result.changes, nextToken: result.nextToken, now: now()) {
                 if c.needsReconnect { cache.setNeedsReconnect(account: c.account, calendarID: c.calendarID, false) }
                 lastProblem[key] = nil
+                return true
             }
+            return false
         } catch GoogleCalendarError.notConnected {
             flagReconnect(account: c.account, calendarID: c.calendarID)
+            return false
         } catch GoogleCalendarError.needsReconnect(let body) {
             if !c.needsReconnect { cache.setNeedsReconnect(account: c.account, calendarID: c.calendarID, true) }
             problem(key, "Google Calendar sign-in for \(c.account) needs to be renewed (\(c.name))", body)
+            return false
         } catch {
             problem(key, "Could not read calendar \"\(c.name)\" (\(c.account)) from Google; will try again", "\(error)")
+            return false
         }
     }
 

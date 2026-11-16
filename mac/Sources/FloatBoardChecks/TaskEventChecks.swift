@@ -132,6 +132,14 @@ import FloatBoardConnectors
         cache.resetSync(account: acct, calendarID: cal)
         TaskEventRules.reconcile(store: store, cache: cache, now: t)
         check(link(store, far).event == "gfar" && store.card(far)?.dueHasTime == true, "reset_outside_window_is_not_a_delete")
+        // Time passes: the hidden event is still not a deletion when the window reaches it, nor is any other reset-hidden one.
+        TaskEventRules.reconcile(store: store, cache: cache, now: t.addingTimeInterval(120 * 86400))
+        check(link(store, far).event == "gfar" && store.card(far)?.dueHasTime == true && cache.event(account: acct, calendarID: cal, eventID: "gfar")?.cancelled == false,
+              "reset_then_time_passes_keeps_link")
+        // A real cancellation after that still drops it.
+        cache.apply(account: acct, calendarID: cal, changes: [GoogleEventChange(eventID: "gfar", cancelled: true, fields: nil)], nextToken: nil)
+        TaskEventRules.reconcile(store: store, cache: cache, now: t.addingTimeInterval(120 * 86400))
+        check(link(store, far).event == "" && cache.event(account: acct, calendarID: cal, eventID: "gfar")?.cancelled == true, "cancellation_after_reset_still_drops_link")
     } catch { check(false, "gdel setup: \(error)") }
 
     do {
@@ -336,6 +344,14 @@ import FloatBoardConnectors
         check(reqs.count == 2 && query(reqs[0], "syncToken") == "T2" && query(reqs[1], "syncToken") == nil && query(reqs[1], "timeMin") != nil
               && cache.calendars().first?.syncToken == "T3" && cache.event(account: acct, calendarID: cal, eventID: "g1")?.gone == false,
               "sync_410_resets_and_reads_full_window")
+
+        // A 410 whose full re-read then fails: the task keeps its time and link.
+        fake.handler = { r in query(r, "syncToken") != nil ? (#"{"error":{"code":410}}"#, 410) : (#"{"error":"backendError"}"#, 500) }
+        await sync.syncOnce()
+        check(link(store, id).event == "g1" && store.card(id)?.dueHasTime == true && cache.calendars().first?.syncToken == nil,
+              "sync_reset_then_failed_reread_keeps_link")
+        fake.handler = { _ in (page3, 200) }
+        await sync.syncOnce()
 
         // 401 twice: flagged, and the next good sync clears the flag.
         fake.handler = { _ in (#"{"error":"unauthorized"}"#, 401) }
