@@ -98,6 +98,7 @@ extension Store {
                 activity("calendar", .warning, "No Google calendar to put this task on; connect an account in Settings")
             }
         }
+        if queued { calendarQueued() }
         return queued
     }
 
@@ -121,6 +122,7 @@ extension Store {
             CalendarOutbox(store: self).enqueue(.create(f, cardID: card.id, addMeet: addMeet), account: acct, calendarID: calID, now: now)
             queued = true
         }
+        if queued { calendarQueued() }
         return queued
     }
 
@@ -142,29 +144,53 @@ extension Store {
                 allDayStart = Due.dayString(due)
             }
         }
-        CalendarOutbox(store: self).enqueue(.patch(eventID: t.event, title: titleChanged ? new.title : nil, start: start, end: end, allDayStart: allDayStart),
-                                            account: t.account, calendarID: t.calendar, now: now)
+        let row = CalendarOutbox(store: self).enqueue(.patch(eventID: t.event, title: titleChanged ? new.title : nil, start: start, end: end, allDayStart: allDayStart),
+                                                      account: t.account, calendarID: t.calendar, now: now)
+        if !row.isEmpty { calendarQueued() }
     }
 
     /// Task deleted: delete the event FloatBoard made for it. An event that came from Google (not marked as ours in the
-    /// cache) is left alone. Returns the event targeted, so undo can recreate it.
-    func queueCalendarDelete(cardID: Int64, now: Date) throws -> EventLink? {
+    /// cache) is left alone. Returns the event targeted and the outbox row that deletes it, so undo can take it back.
+    func queueCalendarDelete(cardID: Int64, now: Date) throws -> (link: EventLink, row: String)? {
         guard let t = try eventTarget(cardID) else { return nil }
         // An event marked as made for another task is not this one's. Events from before the mark existed carry none: they are ours.
         if let cached = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event),
            let mark = cached.fbCard, mark != cardID {
             return nil
         }
-        CalendarOutbox(store: self).enqueue(.delete(eventID: t.event), account: t.account, calendarID: t.calendar, now: now)
-        return t
+        let row = CalendarOutbox(store: self).enqueue(.delete(eventID: t.event), account: t.account, calendarID: t.calendar, now: now)
+        guard !row.isEmpty else { return nil }   // not queued (logged by enqueue): the event stays, nothing to undo
+        calendarQueued()
+        return (t, row)
     }
 
-    /// Delete undone: queue the event again, under a new outbox id; the send links the task to the new event.
+    /// Delete undone. A delete that has not reached Google is taken back: its outbox row is removed and the task keeps its link,
+    /// so the event stays exactly as it is (guests, Meet link, description; nobody is sent a cancellation). Only a delete that
+    /// was sent, or is being sent right now, is followed by a new event.
+    func undoCalendarDelete(cardID: Int64, target: EventLink, row: String, now: Date) throws {
+        let unsent = try db.query("SELECT count(*) FROM cal_outbox WHERE uuid=? AND sent IS NULL", [row]) { DB.int($0, 0) }.first ?? 0
+        if unsent > 0 && !calendarInFlight.contains(row) {
+            try db.run("DELETE FROM cal_outbox WHERE uuid=?", [row])
+            activity("calendar", .info, "Task \(cardID) is back; its calendar event was not deleted after all", trace: row)
+            return
+        }
+        try queueCalendarRecreate(cardID: cardID, target: target, now: now)
+    }
+
+    /// The event was already deleted in Google: queue a new one, under a new outbox id; the send links the task to it.
+    /// A task with no due can't have one made: one Activity line says so.
     func queueCalendarRecreate(cardID: Int64, target: EventLink, now: Date) throws {
         guard let c = try cardForEvent(cardID) else { return }
-        guard let f = eventFields(for: c, now: now) else { return }
-        CalendarOutbox(store: self).enqueue(.create(f, cardID: cardID, addMeet: false), account: target.account, calendarID: target.calendar, now: now)
+        guard let f = eventFields(for: c, now: now) else {
+            activity("calendar", .warning, "Task \(cardID) is back, but its calendar event was already deleted in Google and can't be made again: the task has no due date")
+            return
+        }
+        guard !CalendarOutbox(store: self).enqueue(.create(f, cardID: cardID, addMeet: false), account: target.account, calendarID: target.calendar, now: now).isEmpty else { return }
+        calendarQueued()
     }
+
+    /// A change the user made on the board was queued for Google: ask the app to send it now.
+    func calendarQueued() { CalendarOutbox.nudge?() }
 
     /// History rows for a board edit, one per field, so the next sync can tell when each last changed (C4).
     func recordFieldChanges(old: Card, new: Card, actor: Actor, now: Date) throws {

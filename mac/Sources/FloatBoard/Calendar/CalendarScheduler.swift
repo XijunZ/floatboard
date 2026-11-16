@@ -12,7 +12,8 @@ extension Notification.Name {
 /// Owns the one calendar sender and the one calendar sync, and decides when they run: every minute while the Calendar tab or
 /// the bar's next meeting is on screen (`fastMode`), every 5 minutes otherwise while the Mac is awake, once on wake, and at once
 /// when asked (`.floatBoardCalendarNow`). Each run sends waiting changes first, then reads Google's, then lets tasks and events
-/// catch up. The calendar list is read at start and every 6 hours (inside `CalendarSync.tick`).
+/// catch up. The calendar list is read at start and every 6 hours, and at the next run for an account whose last read failed
+/// or that was just connected again (inside `CalendarSync.tick`).
 @MainActor
 final class CalendarScheduler {
     static let fastInterval: TimeInterval = 60
@@ -25,6 +26,8 @@ final class CalendarScheduler {
     private var heartbeat: Timer?
     private var lastRun = Date.distantPast
     private var running = false
+    /// Asked to run while a run was going: run once more right after it, so a change made meanwhile is not left for minutes.
+    private var again = false
 
     init(store: Store, google: Google) {
         sender = CalendarSender(store: store, google: google)
@@ -44,6 +47,8 @@ final class CalendarScheduler {
         NotificationCenter.default.addObserver(forName: .floatBoardCalendarNow, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.runNow() }
         }
+        // Board edits, deletes and undo that queue a calendar change ask for a run right away.
+        CalendarOutbox.nudge = { NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil) }
         runNow()
     }
 
@@ -53,14 +58,16 @@ final class CalendarScheduler {
     }
 
     func runNow() {
-        guard !running else { return }
+        guard !running else { again = true; return }
         running = true
+        again = false
         lastRun = Date()
         Task {
             await sender.drain()
             await sync.tick()
             running = false
             NotificationCenter.default.post(name: .floatBoardCalendarSynced, object: nil)
+            if again { runNow() }
         }
     }
 }

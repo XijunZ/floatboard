@@ -106,6 +106,74 @@ import FloatBoardConnectors
         let m2 = Card.editorSave(opened: opened, edited: retitled, current: store.card(id) ?? current)
         check(m2.title == "Budget call v2" && m2.link == "https://meet.google.com/abc-defg-hij" && m2.due == at(10), "popup_saves_fields_the_user_changed")
     } catch { check(false, "popup checks: \(error)") }
+
+    // 4. Undo Delete takes back a delete that has not reached Google (the event keeps its guests and Meet link); only a delete
+    //    already sent is followed by a new event. Board changes for Google ask the scheduler to send at once.
+    do {
+        let (store, cache, outbox) = try setup("undo")
+        var nudges = 0
+        CalendarOutbox.nudge = { nudges += 1 }
+        defer { CalendarOutbox.nudge = nil }
+        func linkedTask(_ title: String, event: String, due: Date?) -> Int64 {
+            store.add(title: title, area: store.areas.first?.name ?? "Work", importance: .medium, due: due, dueHasTime: due != nil)
+            let id = store.cards.last?.id ?? 0
+            store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='\(acct)', gcal_event='\(event)' WHERE id=\(id)")
+            cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: event, cancelled: false,
+                fields: CalEventFields(start: due ?? at(9), end: (due ?? at(9)).addingTimeInterval(1800), title: title,
+                                       videoLink: "https://meet.google.com/abc-defg-hij", googleUpdated: Date(), fbCard: id))], nextToken: nil)
+            return id
+        }
+        func gcalEvent(_ id: Int64) -> String {
+            ((try? store.db.query("SELECT gcal_event FROM cards WHERE id=?", [id]) { DB.text($0, 0) }) ?? []).first ?? "" // try?-ok: "" fails the check
+        }
+        func kinds() -> [String] { outbox.rows(unsent: true).compactMap { r in r.write.map { w in
+            switch w { case .create: "create"; case .patch: "patch"; case .delete: "delete" } } } }
+
+        let a = linkedTask("Team lunch", event: "u1", due: at(12))
+        guard let ca = store.card(a) else { check(false, "undo setup: no card"); return }
+        nudges = 0
+        store.delete(ca)
+        let deleteNudged = nudges > 0 && kinds() == ["delete"]
+        store.undoDelete()
+        check(deleteNudged && outbox.rows(unsent: true).isEmpty && gcalEvent(a) == "u1" && store.card(a) != nil,
+              "undo_before_send_drops_the_delete_and_keeps_the_event")
+
+        // Already sent: the event is gone in Google, so a new one is made (and the scheduler is asked to send it).
+        guard let ca2 = store.card(a) else { check(false, "undo setup: card not back"); return }
+        store.delete(ca2)
+        for r in outbox.rows(unsent: true) { outbox.markSent(uuid: r.uuid, result: nil) }
+        nudges = 0
+        store.undoDelete()
+        check(kinds() == ["create"] && nudges > 0, "undo_after_send_recreates_the_event")
+        for r in outbox.rows(unsent: true) { outbox.markSent(uuid: r.uuid, result: nil) }
+
+        // While the delete is on its way to Google it can't be taken back: a new event follows.
+        let b = linkedTask("Dentist", event: "u2", due: at(15))
+        guard let cb = store.card(b) else { check(false, "undo setup: no card b"); return }
+        store.delete(cb)
+        let inFlight = outbox.rows(unsent: true).first?.uuid ?? ""
+        outbox.setInFlight(inFlight, true)
+        store.undoDelete()
+        outbox.setInFlight(inFlight, false)
+        check(Set(kinds()) == ["delete", "create"], "undo_while_delete_in_flight_recreates")
+        for r in outbox.rows(unsent: true) { outbox.markSent(uuid: r.uuid, result: nil) }
+
+        // No due: the event can't be made again; one Activity line says so.
+        let c = linkedTask("Someday idea", event: "u3", due: at(16))
+        store.performForTest("UPDATE cards SET due=NULL, due_day=NULL, due_has_time=0 WHERE id=\(c)")
+        guard let cc = store.card(c) else { check(false, "undo setup: no card c"); return }
+        store.delete(cc)
+        for r in outbox.rows(unsent: true) { outbox.markSent(uuid: r.uuid, result: nil) }
+        store.undoDelete()
+        let lines = store.recentActivity(limit: 50).filter { $0.message.contains("can't be made again") }.count
+        check(outbox.rows(unsent: true).isEmpty && lines == 1, "undo_without_due_logs_that_the_event_cant_be_remade")
+
+        // A board edit of a task on the calendar asks for a send at once.
+        let d = linkedTask("Board review", event: "u4", due: at(17))
+        nudges = 0
+        if var cd = store.card(d) { cd.title = "Board review (Q4)"; store.update(cd) }
+        check(nudges > 0 && kinds() == ["patch"], "board_edit_of_calendar_task_nudges_the_scheduler")
+    } catch { check(false, "undo checks: \(error)") }
 }
 
 /// A fake Google for the checks: records requests and answers with `handler` (body, status).
