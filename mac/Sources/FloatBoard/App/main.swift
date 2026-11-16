@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var modeWatch: AnyCancellable?
     private var pendingLinks: [URL] = []
     private var connectors: ConnectorRunner!
+    private var calendarScheduler: CalendarScheduler?
     private var backupTimer: Timer?
     private var activityWindow: NSWindow?
     private var localClickMonitor: Any?
@@ -123,6 +124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         connectors = ConnectorRunner(store: store)
         connectors.start()
+        calendarScheduler = CalendarScheduler(store: store, google: google)
+        calendarScheduler?.start()
         Updater.shared.start(store: store)
         NotificationCenter.default.addObserver(forName: .floatBoardShowActivity, object: nil, queue: .main) { [weak self] n in
             MainActor.assumeIsolated { if n.object as? String == "open" { self?.showActivity() } }

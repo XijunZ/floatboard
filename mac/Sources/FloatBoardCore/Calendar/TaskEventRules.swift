@@ -1,0 +1,359 @@
+import Foundation
+
+/// How a task and the Google event made for it stay in step. Pure board logic: it reads the calendar cache and writes
+/// changes for Google into the calendar outbox; the sender in the connectors module talks to Google.
+///
+/// - A task gets an event only when the user puts it there (drag onto a time, "Add to calendar"): D7.
+/// - Its title and time stay in step both ways (D10); the newer change wins per field (C4).
+/// - Deleting the task deletes the event FloatBoard made for it (D8); clearing the due or finishing the task leaves it (D8, C3).
+/// - Deleting the event in Google leaves the task, keeps its date, drops its time and its link (D4).
+/// - Events made in Google never create or change tasks (D9): only tasks that carry a link are looked at.
+@MainActor
+public enum TaskEventRules {
+    /// How far the sync reads: 30 days back, 90 days ahead.
+    public static let windowBack: TimeInterval = 30 * 86400
+    public static let windowAhead: TimeInterval = 90 * 86400
+    /// Length of an event made for a task (C1).
+    public static let eventLength: TimeInterval = 30 * 60
+    /// Meta key holding the account new events go to (Settings › Calendar).
+    public static let defaultAccountKey = "calendar_default_account"
+    /// Who changed a task when Google's value was copied onto it.
+    public static let actor = Actor.connector("calendar")
+
+    /// For every task that carries a link to an event: copies Google's newer title or time onto the task, queues the
+    /// task's newer title or time for Google, and lets go of the link when the event is gone from Google. Tasks with a
+    /// change still waiting to be sent are left alone until it has gone. Returns how many tasks it changed or queued for.
+    @discardableResult
+    public static func reconcile(store: Store, cache: CalendarCache, now: Date) -> Int {
+        var touched = 0
+        let links: [LinkedCard]
+        do { links = try store.linkedCards() } catch {
+            store.activity("calendar", .error, "Could not read which tasks are on the calendar", detail: "\(error)")
+            return 0
+        }
+        for l in links {
+            guard let card = store.card(l.cardID) else { continue }
+            do {
+                if try store.hasUnsentCalendarWrite(cardID: card.id, link: l.link) { continue }
+                guard let ev = cache.event(account: l.link.account, calendarID: l.link.calendar, eventID: l.link.event) else { continue }
+                if ev.gone {
+                    // Only inside the window: after a full re-read every event outside it is hidden too, and is not a deletion.
+                    guard ev.start < now.addingTimeInterval(windowAhead), ev.end > now.addingTimeInterval(-windowBack) else { continue }
+                    try store.performThrowing { try store.dropEventLink(card, now: now) }
+                    touched += 1
+                } else if try store.align(card, with: ev, link: l, cache: cache, now: now) {
+                    touched += 1
+                }
+            } catch {
+                store.activity("calendar", .error, "Could not bring a task and its calendar event in step", detail: "task \(card.id): \(error)")
+            }
+        }
+        return touched
+    }
+}
+
+struct EventLink: Equatable {
+    var account: String, calendar: String, event: String
+}
+
+struct LinkedCard {
+    var cardID: Int64
+    var link: EventLink
+    var syncedAt: Date?
+}
+
+extension Store {
+    // MARK: Putting a task on the calendar
+
+    /// Drag: the task's due becomes `start` (with a time), and its event is created, or moved if it already has one (C1, D7).
+    /// New events go to `account`, else the default account (Settings), else the first connected one; 30 minutes long.
+    /// Returns true when a change for Google was queued.
+    @discardableResult
+    public func placeOnCalendar(cardID: Int64, start: Date, account: String?, now: Date = Date()) -> Bool {
+        guard card(cardID) != nil else { return false }
+        var queued = false
+        perform {
+            let parts = AppTime.calendar.dateComponents([.hour, .minute], from: start)
+            try setDueRow(cardID, day: start, time: parts, actor: .user, now: now, patchCalendar: false)
+            guard let c = try cardForEvent(cardID), let due = c.due else { return }
+            let end = due.addingTimeInterval(TaskEventRules.eventLength)
+            let outbox = CalendarOutbox(store: self)
+            if let t = try eventTarget(cardID) {
+                let length = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event)
+                    .map { $0.allDay ? TaskEventRules.eventLength : $0.end.timeIntervalSince($0.start) } ?? TaskEventRules.eventLength
+                outbox.enqueue(.patch(eventID: t.event, title: nil, start: due, end: due.addingTimeInterval(length), allDayStart: nil),
+                               account: t.account, calendarID: t.calendar, now: now)
+                queued = true
+            } else if let (acct, calID) = try resolveCalendar(account) {
+                let f = CalEventFields(start: due, end: end, title: c.title, description: eventDescription(c), googleUpdated: now, fbCard: cardID)
+                outbox.enqueue(.create(f, cardID: cardID, addMeet: false), account: acct, calendarID: calID, now: now)
+                queued = true
+            } else {
+                activity("calendar", .warning, "No Google calendar to put this task on; connect an account in Settings")
+            }
+        }
+        return queued
+    }
+
+    /// "Add to calendar" on a task: queues an event on the account's main calendar, with a Meet call if asked. A task with a
+    /// time makes a 30-minute event; a date-only task makes an all-day event (D11). A task already on the calendar gets no
+    /// second event. Uses the values of `card` as given (the editor may hold unsaved ones). Returns true when queued.
+    @discardableResult
+    public func addToCalendar(_ card: Card, account: String, addMeet: Bool, now: Date = Date()) -> Bool {
+        guard let due = card.due else {
+            activity("calendar", .warning, "Give the task a due date before adding it to the calendar")
+            return false
+        }
+        var queued = false
+        perform {
+            if try eventTarget(card.id) != nil {
+                activity("calendar", .info, "Task \(card.id) is already on the calendar; no second event made")
+                return
+            }
+            guard let (acct, calID) = try resolveCalendar(account) else { return }
+            var f: CalEventFields
+            if card.dueHasTime {
+                f = CalEventFields(start: due, end: due.addingTimeInterval(TaskEventRules.eventLength), title: card.title,
+                                   description: eventDescription(card), googleUpdated: now, fbCard: card.id)
+            } else {
+                let day = Due.dayString(due)
+                let startOfDay = Due.startOfDay(day) ?? due
+                let next = AppTime.calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay.addingTimeInterval(86400)
+                f = CalEventFields(start: startOfDay, end: next, allDay: true, startDay: day, endDay: Due.dayString(next), title: card.title,
+                                   description: eventDescription(card), googleUpdated: now, fbCard: card.id)
+            }
+            CalendarOutbox(store: self).enqueue(.create(f, cardID: card.id, addMeet: addMeet), account: acct, calendarID: calID, now: now)
+            queued = true
+        }
+        return queued
+    }
+
+    // MARK: Hooks used by the board's own actions
+
+    /// After a title or time edit on a task that has an event (or one on its way): queues a patch with just those fields (D10).
+    /// Clearing the due writes nothing (D8). Called inside the edit's transaction.
+    func queueCalendarPatch(old: Card, new: Card, now: Date) throws {
+        let titleChanged = old.title != new.title
+        let timeChanged = !Store.sameDue(old.due, old.dueHasTime, new.due, new.dueHasTime)
+        guard titleChanged || (timeChanged && new.due != nil), let t = try eventTarget(new.id) else { return }
+        var start: Date?, end: Date?, allDayStart: String?
+        if timeChanged, let due = new.due {
+            if new.dueHasTime {
+                let cached = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event)
+                let length = cached.map { $0.allDay ? TaskEventRules.eventLength : $0.end.timeIntervalSince($0.start) } ?? TaskEventRules.eventLength
+                start = due; end = due.addingTimeInterval(length)
+            } else {
+                allDayStart = Due.dayString(due)
+            }
+        }
+        CalendarOutbox(store: self).enqueue(.patch(eventID: t.event, title: titleChanged ? new.title : nil, start: start, end: end, allDayStart: allDayStart),
+                                            account: t.account, calendarID: t.calendar, now: now)
+    }
+
+    /// Task deleted: delete the event FloatBoard made for it. An event that came from Google (not marked as ours in the
+    /// cache) is left alone. Returns the event targeted, so undo can recreate it.
+    func queueCalendarDelete(cardID: Int64, now: Date) throws -> EventLink? {
+        guard let t = try eventTarget(cardID) else { return nil }
+        if let cached = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event), cached.fbCard != cardID {
+            return nil
+        }
+        CalendarOutbox(store: self).enqueue(.delete(eventID: t.event), account: t.account, calendarID: t.calendar, now: now)
+        return t
+    }
+
+    /// Delete undone: queue the event again, under a new outbox id; the send links the task to the new event.
+    func queueCalendarRecreate(cardID: Int64, target: EventLink, now: Date) throws {
+        guard let c = try cardForEvent(cardID), let due = c.due else { return }
+        let f: CalEventFields
+        if c.dueHasTime {
+            f = CalEventFields(start: due, end: due.addingTimeInterval(TaskEventRules.eventLength), title: c.title,
+                               description: eventDescription(c), googleUpdated: now, fbCard: cardID)
+        } else {
+            let day = Due.dayString(due)
+            let s = Due.startOfDay(day) ?? due
+            let next = AppTime.calendar.date(byAdding: .day, value: 1, to: s) ?? s.addingTimeInterval(86400)
+            f = CalEventFields(start: s, end: next, allDay: true, startDay: day, endDay: Due.dayString(next), title: c.title,
+                               description: eventDescription(c), googleUpdated: now, fbCard: cardID)
+        }
+        CalendarOutbox(store: self).enqueue(.create(f, cardID: cardID, addMeet: false), account: target.account, calendarID: target.calendar, now: now)
+    }
+
+    /// History rows for a board edit, one per field, so the next sync can tell when each last changed (C4).
+    func recordFieldChanges(old: Card, new: Card, actor: Actor, now: Date) throws {
+        if old.title != new.title {
+            try insertEvent(new.id, "title: " + String(new.title.prefix(80)), actor: actor, at: now)
+        }
+        if !Store.sameDue(old.due, old.dueHasTime, new.due, new.dueHasTime) {
+            try insertEvent(new.id, "due: " + (new.due.map { Fmt.due($0, hasTime: new.dueHasTime) } ?? "none"), actor: actor, at: now)
+        }
+    }
+
+    // MARK: Used by the rules
+
+    func linkedCards() throws -> [LinkedCard] {
+        try db.query("""
+            SELECT id, gcal_account, gcal_calendar, gcal_event, gcal_synced_at FROM cards
+            WHERE deleted=0 AND gcal_event<>'' AND gcal_calendar<>'' ORDER BY id
+            """) { s in
+            LinkedCard(cardID: DB.int(s, 0), link: EventLink(account: DB.text(s, 1), calendar: DB.text(s, 2), event: DB.text(s, 3)),
+                       syncedAt: DB.date(s, 4))
+        }
+    }
+
+    /// Where this task's event is (or will be): the newest create still waiting to be sent, else the saved link.
+    func eventTarget(_ cardID: Int64) throws -> EventLink? {
+        if let pending = try db.query("""
+            SELECT uuid, account, calendar_id FROM cal_outbox WHERE sent IS NULL AND kind='create' AND card_id=?
+            ORDER BY created DESC, rowid DESC LIMIT 1
+            """, [cardID], { s in EventLink(account: DB.text(s, 1), calendar: DB.text(s, 2), event: CalendarOutbox.googleEventID(forUUID: DB.text(s, 0))) }).first {
+            return pending
+        }
+        return try db.query("SELECT gcal_account, gcal_calendar, gcal_event FROM cards WHERE id=? AND gcal_event<>'' AND gcal_calendar<>''",
+                            [cardID]) { EventLink(account: DB.text($0, 0), calendar: DB.text($0, 1), event: DB.text($0, 2)) }.first
+    }
+
+    func hasUnsentCalendarWrite(cardID: Int64, link: EventLink) throws -> Bool {
+        let n = try db.query("""
+            SELECT count(*) FROM cal_outbox WHERE sent IS NULL
+            AND (card_id=? OR (account=? AND calendar_id=? AND event_id=?))
+            """, [cardID, link.account, link.calendar, link.event]) { DB.int($0, 0) }.first ?? 0
+        return n > 0
+    }
+
+    /// The account and calendar a new event goes to: `account`, else the default one in settings, else the first connected;
+    /// the account's main calendar (Google names it with the account's address), else its first owned one.
+    private func resolveCalendar(_ account: String?) throws -> (String, String)? {
+        var acct = account
+        let calendars = CalendarCache(store: self).calendars()
+        if acct == nil {
+            acct = try db.query("SELECT value FROM meta WHERE key=?", [TaskEventRules.defaultAccountKey]) { DB.text($0, 0) }.first
+            if acct?.isEmpty == true { acct = nil }
+        }
+        if acct == nil { acct = calendars.map(\.account).sorted().first }
+        guard let acct else {
+            activity("calendar", .warning, "No Google calendar to put this task on; connect an account in Settings")
+            return nil
+        }
+        let mine = calendars.filter { $0.account == acct }
+        let main = mine.first { $0.calendarID.lowercased() == acct.lowercased() } ?? mine.first { $0.owned }
+        return (acct, main?.calendarID ?? acct)
+    }
+
+    /// What the event's description gets: the task's notes and its call link.
+    private func eventDescription(_ c: Card) -> String {
+        var d = c.notes
+        if let m = c.meetLink, !d.contains(m.absoluteString) { d += (d.isEmpty ? "" : "\n\n") + m.absoluteString }
+        return d
+    }
+
+    /// The task with its notes and link, which `currentCard` leaves out.
+    private func cardForEvent(_ id: Int64) throws -> Card? {
+        guard var c = try currentCard(id)?.card else { return nil }
+        if let r = try db.query("SELECT notes, link FROM cards WHERE id=?", [id], { (DB.text($0, 0), DB.text($0, 1)) }).first {
+            c.notes = r.0; c.link = r.1
+        }
+        return c
+    }
+
+    /// Same due: both none, or both date-only on one day, or both timed within the same minute.
+    static func sameDue(_ a: Date?, _ aTime: Bool, _ b: Date?, _ bTime: Bool) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (x?, y?):
+            if aTime != bTime { return false }
+            return aTime ? Int(x.timeIntervalSince1970 / 60) == Int(y.timeIntervalSince1970 / 60) : Due.dayString(x) == Due.dayString(y)
+        default: return false
+        }
+    }
+
+    private func lastBoardChange(_ cardID: Int64, _ kind: String) throws -> Date? {
+        try db.query("SELECT max(at) FROM events WHERE card_id=? AND kind LIKE ? AND actor<>?",
+                     [cardID, kind, TaskEventRules.actor.stored]) { DB.date($0, 0) }.first ?? nil
+    }
+
+    /// Brings one task and its live event in step. Returns true when something was applied or queued.
+    func align(_ card: Card, with ev: CalEvent, link l: LinkedCard, cache: CalendarCache, now: Date) throws -> Bool {
+        var did = false
+        let gT = ev.googleUpdated
+        var patchTitle: String?, patchStart: Date?, patchEnd: Date?, patchDay: String?
+
+        // Title.
+        if !ev.title.isEmpty, ev.title != card.title {
+            let boardAt = try lastBoardChange(card.id, "title:%")
+            if boardAt == nil || gT > boardAt! {
+                try performThrowing {
+                    let old = try currentCard(card.id)?.card
+                    try db.run("UPDATE cards SET title=?, updated=? WHERE id=?", [ev.title, now, card.id])
+                    try insertEvent(card.id, "title: " + String(ev.title.prefix(80)), actor: TaskEventRules.actor, at: now)
+                    if let old { var new = old; new.title = ev.title; try queueChange(old: old, new: new, now: now) }
+                }
+                did = true
+            } else {
+                patchTitle = card.title
+            }
+        }
+
+        // Time. A task with no due (cleared on the board) takes Google's time only if Google changed it after that and since we last looked.
+        let evTimed = !ev.allDay
+        if !Store.sameDue(card.due, card.dueHasTime, ev.start, evTimed) {
+            let boardAt = try lastBoardChange(card.id, "due:%")
+            let googleNewer = boardAt == nil || gT > boardAt!
+            if card.due == nil {
+                if googleNewer, l.syncedAt == nil || gT > l.syncedAt! { try applyGoogleTime(card.id, ev, now: now); did = true }
+            } else if googleNewer {
+                try applyGoogleTime(card.id, ev, now: now); did = true
+            } else if let due = card.due {
+                if card.dueHasTime {
+                    let length = ev.allDay ? TaskEventRules.eventLength : ev.end.timeIntervalSince(ev.start)
+                    patchStart = due; patchEnd = due.addingTimeInterval(length)
+                } else {
+                    patchDay = Due.dayString(due)
+                }
+            }
+        }
+
+        if patchTitle != nil || patchStart != nil || patchDay != nil {
+            CalendarOutbox(store: self).enqueue(.patch(eventID: l.link.event, title: patchTitle, start: patchStart, end: patchEnd, allDayStart: patchDay),
+                                                account: l.link.account, calendarID: l.link.calendar, now: now)
+            did = true
+        }
+
+        // A Meet link Google added to an event we made goes on the task once (as "Add to calendar" with Meet always did).
+        if card.link.trimmingCharacters(in: .whitespaces).isEmpty, ev.fbCard == card.id, !ev.videoLink.isEmpty {
+            let done = try db.query("SELECT count(*) FROM events WHERE card_id=? AND kind='link: from calendar'", [card.id]) { DB.int($0, 0) }.first ?? 0
+            if done == 0 {
+                try performThrowing {
+                    try db.run("UPDATE cards SET link=?, updated=? WHERE id=?", [ev.videoLink, now, card.id])
+                    try insertEvent(card.id, "link: from calendar", actor: TaskEventRules.actor, at: now)
+                }
+                did = true
+            }
+        }
+
+        // Keep the link to the event's page and the time we last looked.
+        if (!ev.htmlLink.isEmpty && ev.htmlLink != card.gcalLink) || l.syncedAt == nil || gT > l.syncedAt! {
+            try performThrowing {
+                try db.run("UPDATE cards SET gcal_link=CASE WHEN ?<>'' THEN ? ELSE gcal_link END, gcal_synced_at=? WHERE id=?",
+                           [ev.htmlLink, ev.htmlLink, now, card.id])
+            }
+        }
+        return did
+    }
+
+    private func applyGoogleTime(_ cardID: Int64, _ ev: CalEvent, now: Date) throws {
+        try performThrowing {
+            let time: DateComponents? = ev.allDay ? nil : AppTime.calendar.dateComponents([.hour, .minute], from: ev.start)
+            try setDueRow(cardID, day: ev.start, time: time, actor: TaskEventRules.actor, now: now, patchCalendar: false)
+        }
+    }
+
+    /// The event is gone from Google: the task keeps its date, loses its time and its link (D4). Runs inside a transaction.
+    func dropEventLink(_ card: Card, now: Date) throws {
+        if card.dueHasTime, let due = card.due {
+            try setDueRow(card.id, day: due, time: nil, actor: TaskEventRules.actor, now: now, patchCalendar: false)
+        }
+        try db.run("UPDATE cards SET gcal_account='', gcal_calendar='', gcal_event='', gcal_link='', gcal_synced_at=NULL, updated=? WHERE id=?",
+                   [now, card.id])
+        try insertEvent(card.id, "event deleted in Google Calendar; kept the date, cleared the time", actor: TaskEventRules.actor, at: now)
+    }
+}
