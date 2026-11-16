@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 10
+    public static let schemaVersion = 11
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -50,7 +50,10 @@ public final class DB {
             } else if version < DB.oldestSupportedVersion {
                 throw DBError.tooOld(file: url.lastPathComponent, version: Int(version))
             } else if version < DB.schemaVersion {
-                try transaction { try exec(DB.upgrade(from: Int(version)) + "PRAGMA user_version = \(DB.schemaVersion);") }
+                try transaction {
+                    try exec(DB.upgrade(from: Int(version)) + "PRAGMA user_version = \(DB.schemaVersion);")
+                    if version < 11 { try backfillDueDays() }
+                }
             }
         } catch {
             sqlite3_close(handle)
@@ -60,6 +63,20 @@ public final class DB {
     }
 
     deinit { sqlite3_close(handle) }
+
+    /// 10 -> 11: fills `due_day` / `due_has_time` for the existing tasks with the old rule (a due at 00:00 in this Mac's
+    /// zone has no time), so nothing changes on screen.
+    private func backfillDueDays() throws {
+        let rows = try query("SELECT id, due FROM cards WHERE due IS NOT NULL") { (DB.int($0, 0), DB.date($0, 1)) }
+        for (id, due) in rows {
+            guard let due else { continue }
+            if Due.hasTime(due) {
+                try run("UPDATE cards SET due_has_time=1 WHERE id=?", [id])
+            } else {
+                try run("UPDATE cards SET due_day=?, due_has_time=0 WHERE id=?", [Due.dayString(due), id])
+            }
+        }
+    }
 
     /// The steps from `version` up to `schemaVersion`. Each only adds, so the upgraded board has exactly `schema`.
     static func upgrade(from version: Int) -> String {
@@ -92,6 +109,15 @@ public final class DB {
                 source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL
             );
             CREATE INDEX instructions_part ON instructions(connector, part, at);
+
+            """
+        }
+        if version < 11 {
+            // 10 -> 11: a due date keeps its day and whether it has a time, so changing time zone never moves a task.
+            // The values are filled in by `backfillDueDays` right after these statements.
+            sql += """
+            ALTER TABLE cards ADD COLUMN due_day TEXT;
+            ALTER TABLE cards ADD COLUMN due_has_time INTEGER NOT NULL DEFAULT 0;
 
             """
         }
@@ -133,7 +159,7 @@ public final class DB {
         reply_draft_link TEXT NOT NULL DEFAULT '',
         reply_draft_error TEXT NOT NULL DEFAULT '',
         reply_draft_request TEXT NOT NULL DEFAULT '',
-        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL
+        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX cards_external_id ON cards(external_id);
     CREATE UNIQUE INDEX cards_source_key ON cards(connector, source_mid, source_sent)

@@ -232,7 +232,7 @@ struct ExpandedView: View {
     private func add() {
         guard !newTitle.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         store.add(title: newTitle, area: store.resolve(newArea), importance: newImportance,
-                  due: hasDue ? Due.combine(day: newDue, time: hasTime ? newTime : nil) : nil, status: newStatus)
+                  due: hasDue ? Due.combine(day: newDue, time: hasTime ? newTime : nil) : nil, dueHasTime: hasDue && hasTime, status: newStatus)
         newTitle = ""
         newStatus = .todo
         // Next task starts fresh: no due date or time.

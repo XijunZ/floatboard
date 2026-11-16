@@ -44,8 +44,7 @@ public enum DueReminders {
                                        title: c.title, body: Watch.chaseText(person: c.watchPerson, at: next, since: since), fireAt: next))
             }
             guard let due = c.due else { continue }
-            let t = calendar.dateComponents([.hour, .minute], from: due)
-            let timed = (t.hour ?? 0) != 0 || (t.minute ?? 0) != 0   // as Due.hasTime, in this calendar
+            let timed = c.dueHasTime
             let fire: Date, until: Date, body: String
             if timed {
                 fire = due.addingTimeInterval(-lead); until = due; body = "Due " + clock.string(from: due)

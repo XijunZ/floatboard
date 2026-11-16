@@ -93,7 +93,7 @@ MainActor.assumeIsolated {
         let t0 = Date(timeIntervalSince1970: 1_800_000_000)
         func mk(_ id: Int64, _ imp: Importance, _ due: Date?, _ area: String, _ created: Date) -> Card {
             Card(id: id, title: "c\(id)", notes: "", area: area, importance: imp, due: due, status: .todo, created: created,
-                 started: nil, done: nil)
+                 started: nil, done: nil, dueHasTime: due != nil)
         }
         let a = mk(1, .low, t0.addingTimeInterval(3600), "B", t0)
         let b = mk(2, .high, nil, "A", t0.addingTimeInterval(10))
@@ -732,6 +732,7 @@ oneTaskChecks()
 phoneLinksChecks()
 await linkEmailChecks()
 dueReminderChecks()
+dueStorageChecks()
 oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()
 

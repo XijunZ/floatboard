@@ -99,7 +99,7 @@ struct CardView: View {
                 }
                 Text("Added \(Fmt.short(card.created))").fixedSize()
                 if let due = card.due {
-                    Text("Due \(Fmt.due(due))")
+                    Text("Due \(Fmt.due(due, hasTime: card.dueHasTime))")
                         .foregroundStyle(card.isOverdue ? Color.red : Color.secondary)
                         .fontWeight(card.isOverdue ? .semibold : .regular)
                         .fixedSize()

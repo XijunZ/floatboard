@@ -67,7 +67,7 @@ private final class PhoneEngine {
     // Board payload: open tasks + done today, the engine's fields, local dates.
     store.add(title: "P all-day", area: "Work", importance: .high, due: Due.combine(day: now, time: nil))
     store.add(title: "P timed", area: "Personal", importance: .low,
-              due: cal.date(bySettingHour: 14, minute: 30, second: 0, of: now), status: .doing)
+              due: cal.date(bySettingHour: 14, minute: 30, second: 0, of: now), dueHasTime: true, status: .doing)
     store.add(title: "P watch", area: "Work", importance: .medium, due: nil, status: .watch)
     store.add(title: "P done today", area: "Work", importance: .medium, due: nil)
     store.add(title: "P done before", area: "Work", importance: .medium, due: nil)

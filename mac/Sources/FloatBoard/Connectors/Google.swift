@@ -236,8 +236,8 @@ final class Google: ObservableObject {
             body["start"] = ["dateTime": iso.string(from: due), "timeZone": tz]
             body["end"] = ["dateTime": iso.string(from: due.addingTimeInterval(30 * 60)), "timeZone": tz]
         } else {
-            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
-            let next = Calendar.current.date(byAdding: .day, value: 1, to: due) ?? due
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = AppTime.zone
+            let next = AppTime.calendar.date(byAdding: .day, value: 1, to: due) ?? due
             body["start"] = ["date": f.string(from: due)]
             body["end"] = ["date": f.string(from: next)]
         }
