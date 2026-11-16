@@ -50,5 +50,37 @@ import FloatBoardCore
     } catch {
         check(false, "settings: could not set up a scratch board: \(error)")
     }
+    // A removed account's events leave the calendar and the bar; its saved shown choices come back with it.
+    do {
+        let store = Store(db: try DB(url: dir.appendingPathComponent("r.sqlite")))
+        let cache = CalendarCache(store: store)
+        let t0 = Date().addingTimeInterval(3600)
+        func ev(_ id: String) -> GoogleEventChange {
+            GoogleEventChange(eventID: id, cancelled: false, fields: CalEventFields(start: t0, end: t0.addingTimeInterval(1800), title: id, googleUpdated: Date()))
+        }
+        cache.upsertCalendars(account: a, [CalCalendar(account: a, calendarID: a, name: "A", color: "#111111", owned: true, shown: true)])
+        cache.upsertCalendars(account: b, [CalCalendar(account: b, calendarID: b, name: "B", color: "#222222", owned: true, shown: true),
+                                           CalCalendar(account: b, calendarID: "x", name: "X", color: "#333333", owned: false, shown: false)])
+        cache.apply(account: a, calendarID: a, changes: [ev("from-a")], nextToken: nil)
+        cache.apply(account: b, calendarID: b, changes: [ev("from-b")], nextToken: nil)
+        let win = (t0.addingTimeInterval(-60), t0.addingTimeInterval(7200))
+        var connected: Set<String> = [a, b]
+        CalendarCache.connectedAccounts = { connected }
+        defer { CalendarCache.connectedAccounts = nil }
+        check(Set(cache.events(from: win.0, to: win.1).map(\.title)) == ["from-a", "from-b"], "settings: both accounts' events show while connected")
+        connected = [a]
+        check(cache.events(from: win.0, to: win.1).map(\.title) == ["from-a"], "settings: a removed account's events are hidden")
+        check(cache.nextMeeting(after: t0.addingTimeInterval(-3600))?.title == "from-a", "settings: the bar's next meeting skips a removed account")
+        check(cache.connectedCalendars().map(\.account) == [a], "settings: a removed account's calendars are not offered")
+        check(cache.calendars().contains { $0.account == b }, "settings: a removed account's calendars stay saved")
+        connected = []
+        check(cache.events(from: win.0, to: win.1).isEmpty && cache.nextMeeting(after: t0.addingTimeInterval(-3600)) == nil, "settings: with no accounts nothing shows")
+        connected = [a, b]
+        let back = cache.connectedCalendars().filter { $0.account == b }.map { "\($0.calendarID)=\($0.shown)" }.sorted()
+        check(back == ["x=false", "\(b)=true"].sorted() && cache.events(from: win.0, to: win.1).count == 2,
+              "settings: a re-added account returns with its saved shown choices and events")
+    } catch {
+        check(false, "settings: could not set up the removed-account board: \(error)")
+    }
     try? FileManager.default.removeItem(at: dir) // try?-ok: scratch folder cleanup; a leftover temp folder is harmless
 }

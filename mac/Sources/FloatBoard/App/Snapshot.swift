@@ -7,6 +7,7 @@ import SwiftUI
 enum Snapshot {
     static func run(dir: String, store: Store, google: Google) {
         let ui = UIState()
+        CalendarCache.connectedAccounts = nil // pictures use made-up accounts that are not signed in
         if ProcessInfo.processInfo.environment["FLOATBOARD_BARTEST"] != nil {
             let open = store.cards.filter { $0.status != .done }
             let groups = store.areas.map(\.name)
@@ -167,7 +168,7 @@ enum Snapshot {
             let cache = CalendarCache(store: store)
             let a = "alex@example.com", b = "sam@example.org"
             func page(_ accounts: [String]) -> some View {
-                SettingsBlock(title: "Calendar", help: "Switch on the calendars to show in the Calendar tab and the bar. Tasks you put on the calendar go to the default account.") {
+                SettingsBlock(title: "Calendar", help: CalendarSettingsView.help) {
                     CalendarSettingsView(accounts: accounts).environment(\.calendarSnapshot, true)
                 }.padding(12).frame(width: 640, alignment: .topLeading).fixedSize(horizontal: false, vertical: true)
             }
