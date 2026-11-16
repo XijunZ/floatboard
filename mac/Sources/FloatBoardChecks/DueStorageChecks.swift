@@ -79,4 +79,28 @@ import FloatBoardCore
               && up("Old timed").map { $0.dueHasTime && $0.due?.timeIntervalSince1970 == half2 } ?? false
               && up("Old no due").map { $0.due == nil && !$0.dueHasTime } ?? false, "due_upgrade_keeps_meaning")
     } catch { check(false, "due_upgrade_keeps_meaning: \(error)") }
+
+    // The upgrade reads the day in this Mac's zone, not the app zone: a midnight due made in Shanghai keeps its day.
+    do {
+        let savedTZ = ProcessInfo.processInfo.environment["TZ"]
+        setenv("TZ", "Asia/Shanghai", 1); tzset(); NSTimeZone.resetSystemTimeZone()
+        defer { if let savedTZ { setenv("TZ", savedTZ, 1) } else { unsetenv("TZ") }; tzset(); NSTimeZone.resetSystemTimeZone() }
+        let shanghai = root.appendingPathComponent("v10-shanghai.sqlite")
+        do {
+            _ = try DB(url: shanghai)
+            var h: OpaquePointer?
+            defer { sqlite3_close(h) }
+            guard sqlite3_open(shanghai.path, &h) == SQLITE_OK else { throw DBError.sql("cannot open") }
+            let midnight = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 20))!.timeIntervalSince1970
+            let sql = """
+                ALTER TABLE cards DROP COLUMN due_day; ALTER TABLE cards DROP COLUMN due_has_time; PRAGMA user_version = 10;
+                INSERT INTO cards(title,area,due,status,created) VALUES('Shanghai midnight','Personal',\(midnight),'todo',1);
+                """
+            guard sqlite3_exec(h, sql, nil, nil, nil) == SQLITE_OK else { throw DBError.sql("v10 setup") }
+            sqlite3_close(h); h = nil
+            let db = try DB(url: shanghai)
+            let rows = try db.query("SELECT due_day, due_has_time FROM cards") { (DB.text($0, 0), DB.int($0, 1)) }
+            check(rows.count == 1 && rows[0].0 == "2026-11-20" && rows[0].1 == 0, "due_upgrade_day_uses_mac_zone_at_upgrade")
+        } catch { check(false, "due_upgrade_day_uses_mac_zone_at_upgrade: \(error)") }
+    }
 }

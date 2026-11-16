@@ -73,7 +73,10 @@ public final class DB {
             if Due.hasTime(due) {
                 try run("UPDATE cards SET due_has_time=1 WHERE id=?", [id])
             } else {
-                try run("UPDATE cards SET due_day=?, due_has_time=0 WHERE id=?", [Due.dayString(due), id])
+                // The day the old screen showed: read in this Mac's zone, not the app zone.
+                let c = Calendar.current.dateComponents([.year, .month, .day], from: due)
+                let day = String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+                try run("UPDATE cards SET due_day=?, due_has_time=0 WHERE id=?", [day, id])
             }
         }
     }
