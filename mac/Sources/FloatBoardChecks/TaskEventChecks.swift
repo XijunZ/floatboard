@@ -421,4 +421,35 @@ import FloatBoardConnectors
         check(query(fake.requests.last!, "syncToken") == nil && (cache.calendars().first?.fullReadAt ?? .distantPast) > (before?.fullReadAt ?? .distantFuture),
               "failed_daily_read_is_retried_next_pass")
     } catch { check(false, "daily setup: \(error)") }
+
+    do {
+        // Changes outside the window between passes are taken in by the incremental read that comes before the daily full read.
+        let (store, cache, _) = try setup("dailyout")
+        final class Clock: @unchecked Sendable { var now: Date; init(_ d: Date) { now = d } }
+        let clock = Clock(t)
+        let fake = Fake()
+        let iso = ISO8601DateFormatter()
+        let farStart = t.addingTimeInterval(150 * 86400)
+        func item(_ id: String, _ title: String, status: String = "confirmed") -> String {
+            #"{"id":"\#(id)","status":"\#(status)","summary":"\#(title)","start":{"dateTime":"\#(iso.string(from: farStart))"},"end":{"dateTime":"\#(iso.string(from: farStart.addingTimeInterval(1800)))"},"updated":"\#(iso.string(from: ago(10)))"}"#
+        }
+        var incremental = ""
+        fake.handler = { r in
+            if query(r, "syncToken") != nil { return ("{\"items\":[" + incremental + "],\"nextSyncToken\":\"INC\"}", 200) }
+            return (#"{"items":[],"nextSyncToken":"FULL"}"#, 200)   // the full window holds nothing of the far events
+        }
+        let id = newCard(store, "Far task")
+        store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='\(cal)', gcal_event='farx', due=\(farStart.timeIntervalSince1970), due_has_time=1 WHERE id=\(id)")
+        cache.apply(account: acct, calendarID: cal, changes: [GoogleEventChange(eventID: "farx", cancelled: false, fields: CalEventFields(start: farStart, end: farStart.addingTimeInterval(1800), title: "Far task", googleUpdated: ago(900)))],
+                    nextToken: "TOK", now: ago(900))
+        store.performForTest("UPDATE cal_calendars SET full_read_at=\(t.timeIntervalSince1970 - 2 * 86400)")
+        // The far linked event was cancelled in Google; only the incremental bookmark knows.
+        incremental = item("farx", "Far task", status: "cancelled")
+        let sync = CalendarSync(store: store, apiFor: { _ in api(fake) }, accounts: { [acct] }, now: { clock.now })
+        await sync.syncOnce()
+        let first = fake.requests.first.flatMap { query($0, "syncToken") }
+        check(first == "TOK" && fake.requests.count == 2 && query(fake.requests[1], "syncToken") == nil
+              && link(store, id).event == "" && cache.calendars().first?.syncToken == "FULL" && (cache.calendars().first?.fullReadAt ?? .distantPast) > ago(5),
+              "daily_pass_takes_in_changes_outside_window_first")
+    } catch { check(false, "dailyout setup: \(error)") }
 }
