@@ -81,10 +81,10 @@ struct GuideView: View {
                     note("Connect a Google account in Settings › Outputs › Calendar to see your calendars on the Calendar tab, as a day or a week. Nothing else needs it. Accounts connected before the Calendar tab existed press Reconnect once, because it needs one more permission.")
                     note("Tasks with a due time sit at that time; tasks with only a date sit in the strip at the top. Events are coloured by their Google calendar. Tick a task's box to mark it done.")
                     note("Drag an event to move it, drag its bottom edge to resize it, click empty time to add one. Changes reach Google right away, or when you are back online. Changes made in Google show here within about a minute.")
-                    note("Drag a task onto a time to put it on your calendar, or use Add to calendar on the task. Moving it in either place moves the other. Deleting the task deletes its event; deleting the event in Google keeps the task and its date.")
+                    note("Drag a task onto a time to put it on your calendar, or use Add to calendar on the task. Moving it in either place moves the other. Deleting the task deletes its event; deleting the event in Google keeps the task and its date. Clearing a task's due leaves its event in Google. To move an event to another calendar, use Open in Google Calendar.")
                     note("Every task has an id like T-142 and every event like E-37. Click one to copy it. Type an id in search to find the item. In an event, “Link a task…” links it to a task; in a task, “Link a meeting…” does the reverse. Linking never changes any time.")
                     note("The bar shows your next meeting, with Join when it has a video link. The phone app has a Today list of meetings and tasks due today.")
-                    note("Settings › General › Time zone: UK time by default, or follow this Mac. Calendars are switched on or off in Settings › Calendar.")
+                    note("Settings › General › Time zone: UK time by default, or follow this Mac. Calendars are switched on or off in Settings › Outputs › Calendar.")
                 }
                 section("Keyboard") {
                     line("⌃⌥N", "New task from anywhere")

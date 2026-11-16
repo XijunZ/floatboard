@@ -47,13 +47,14 @@ your Mac's Keychain; nothing goes through anyone else's server.
 
 The **Calendar** tab (next to Board) shows your Google calendars and your tasks together, as a day or a week.
 
-- Every calendar of every connected Google account shows, each with its own on/off switch (Settings, Calendar). Tasks with a due time sit at that time; date-only tasks sit in a strip at the top.
+- Every calendar of every connected Google account shows, each with its own on/off switch (Settings › Outputs › Calendar). Tasks with a due time sit at that time; date-only tasks sit in a strip at the top.
 - Changes from FloatBoard go to Google: drag an event to move it, drag its bottom edge to resize, click empty time to add one. Changes made in Google show up here within about a minute. Offline, your changes wait and send when you are back.
-- A task only goes to Google when you drag it onto a time or press Add to calendar. Deleting that task deletes its event. Deleting the event in Google keeps the task and its date.
+- A task only goes to Google when you drag it onto a time or press Add to calendar. Deleting that task deletes its event. Deleting the event in Google keeps the task and its date. Clearing a task's due leaves its event in Google.
+- To move an existing event to another calendar, use Open in Google Calendar; FloatBoard cannot do that yet.
 - Every task has an id like `T-142` and every event like `E-37`. Click an id to copy it, type it into search, or use it to link a meeting to a task (and back) from either side.
 - The bar shows your next meeting, with **Join** when it has a video link. The phone app has a read-only **Today** list.
-- Reconnect each Google account once: the calendar needs one more permission than before (Settings, Calendar shows a Reconnect button).
-- Settings, General, Time zone: UK time by default, or follow this Mac. Times then stay put when you travel.
+- Reconnect each Google account once: the calendar needs one more permission than before (Settings › Outputs › Calendar shows a Reconnect button).
+- Settings › General › Time zone: UK time by default, or follow this Mac. Times then stay put when you travel.
 
 ### Keeping windows clear of the bar
 When the bar sits at the bottom, FloatBoard uses the Accessibility API to shrink standard windows whose bottom
