@@ -31,6 +31,15 @@ final class UIState: ObservableObject {
     /// How the one-line bar orders tasks and what it shows (Bar tab).
     @Published var bar = BarConfig() { didSet { bar.save(store: logStore) } }
     private var logStore: Store?
+    /// The meeting the bar shows right now (within 60 minutes of starting, or in progress), if any. Set by `refreshMeeting`.
+    @Published var nextMeeting: CalEvent?
+    /// Set by a click on the bar's meeting: the Calendar tab shows this day, then clears it.
+    @Published var calendarFocus: Date?
+    /// Looks up what the bar should show at `now`. Called when the bar appears, once a minute, and when the calendar changes.
+    func refreshMeeting(store: Store, now: Date = Date()) {
+        let next = (bar.showNextMeeting ?? true) ? BarMeeting.visible(next: CalendarCache(store: store).nextMeeting(after: now), now: now) : nil
+        if next != nextMeeting { nextMeeting = next }
+    }
     /// Loads the saved bar settings once the store exists (so a problem can be logged).
     func loadBar(store: Store) { logStore = store; bar = BarConfig.load(store: store) }
     /// Board search (highlights matching tasks).

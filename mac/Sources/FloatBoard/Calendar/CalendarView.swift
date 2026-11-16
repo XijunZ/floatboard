@@ -128,6 +128,7 @@ struct CalendarView: View {
     enum Span: String, CaseIterable { case day = "Day", week = "Week" }
 
     @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: UIState
     @StateObject private var edits = CalendarEdits()
     @State private var span: Span
     @State private var anchor: Date
@@ -167,7 +168,8 @@ struct CalendarView: View {
         }
         .environmentObject(edits)
         .environment(\.calendarSnapshot, snapshotHours != nil)
-        .onAppear { edits.store = store }
+        .onAppear { edits.store = store; showFocusedDay() }
+        .onChange(of: ui.calendarFocus) { _, _ in showFocusedDay() }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
             edits.prune()
             tick += 1
@@ -194,6 +196,13 @@ struct CalendarView: View {
             .pickerStyle(.segmented).labelsHidden().controlSize(.small).frame(width: 110)
             }
         }
+    }
+
+    /// A click on the bar's meeting asks for its day.
+    private func showFocusedDay() {
+        guard let d = ui.calendarFocus else { return }
+        anchor = d; span = .day
+        ui.calendarFocus = nil
     }
 
     private func step(_ by: Int) {

@@ -5,6 +5,8 @@ import FloatBoardCore
 extension Notification.Name {
     /// Post to send waiting calendar changes and read Google's changes now (after a change the user just made).
     static let floatBoardCalendarNow = Notification.Name("floatBoardCalendarNow")
+    /// Posted after each calendar run, so screens that show calendar information (the bar's next meeting) can look again.
+    static let floatBoardCalendarSynced = Notification.Name("floatBoardCalendarSynced")
 }
 
 /// Owns the one calendar sender and the one calendar sync, and decides when they run: every minute while the Calendar tab or
@@ -58,6 +60,7 @@ final class CalendarScheduler {
             await sender.drain()
             await sync.tick()
             running = false
+            NotificationCenter.default.post(name: .floatBoardCalendarSynced, object: nil)
         }
     }
 }

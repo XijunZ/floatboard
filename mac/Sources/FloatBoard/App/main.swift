@@ -149,9 +149,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard m == .expanded else { return }
             self?.connectors.boardOpened()
         }
-        // While the Calendar tab is open the calendar syncs every minute instead of every five.
-        calendarWatch = ui.$tab.combineLatest(ui.$mode).sink { [weak self] tab, mode in
-            self?.calendarScheduler?.fastMode = tab == .calendar && mode == .expanded
+        // While the Calendar tab is open, or the bar is showing a meeting, the calendar syncs every minute instead of every five.
+        calendarWatch = ui.$tab.combineLatest(ui.$mode, ui.$nextMeeting).sink { [weak self] tab, mode, meeting in
+            self?.calendarScheduler?.fastMode = (tab == .calendar && mode == .expanded) || (meeting != nil && mode == .banner)
         }
         // A connect link opened before launch finished is handled now.
         for link in pendingLinks { handleConnectLink(link) }

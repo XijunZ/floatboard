@@ -67,6 +67,10 @@ struct BannerView: View {
                     HStack(spacing: 6) { ForEach(active) { Chip(card: $0) } }
                 }
             }
+            if !ui.quickAdding, let meeting = ui.nextMeeting {
+                Divider().frame(height: 14)
+                BarMeetingView(event: meeting)
+            }
             Divider().frame(height: 14)
             if !ui.quickAdding {
                 BarButton("plus", "Quick add a task here (⌃⌥N)") { ui.openAdd() }
@@ -75,9 +79,48 @@ struct BannerView: View {
             BarButton("xmark", "Close (⌃⌥B or menu bar icon to reopen)") { ui.mode = .hidden }
         }
         .padding(.horizontal, 8)
+        // The meeting is looked up when the bar appears, once a minute (it appears 60 minutes before and goes at its end),
+        // after each calendar run, and when the setting changes.
+        .onAppear { ui.refreshMeeting(store: store) }
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { _ in ui.refreshMeeting(store: store) }
+        .onReceive(NotificationCenter.default.publisher(for: .floatBoardCalendarSynced)) { _ in ui.refreshMeeting(store: store) }
+        .onChange(of: ui.bar.showNextMeeting) { _, _ in ui.refreshMeeting(store: store) }
         // Double-click anywhere on the bar (not a button, not while typing a quick add) opens the full board.
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { if !ui.quickAdding { ui.mode = .expanded } }
+    }
+}
+
+/// "🕚 11:00 Title  Join" at the right of the bar's tasks: the next meeting, from 60 minutes before it starts until it ends.
+/// Clicking the label opens the Calendar tab on that day; Join (only when the event has a video link) opens the link.
+struct BarMeetingView: View {
+    @EnvironmentObject var ui: UIState
+    let event: CalEvent
+
+    var body: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "clock").font(.system(size: 10, weight: .semibold))
+                Text(BarMeeting.label(event)).lineLimit(1).truncationMode(.tail)
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: 220, alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                ui.calendarFocus = event.start
+                ui.tab = .calendar
+                ui.mode = .expanded
+            }
+            .help("\(event.title), \(Fmt.clock(event.start))–\(Fmt.clock(event.end)). Click to open it in the Calendar.")
+            if let url = BarMeeting.joinURL(event) {
+                Button("Join") { NSWorkspace.shared.open(url) }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12, weight: .medium))
+                    .help("Open the video call")
+            }
+        }
     }
 }
 

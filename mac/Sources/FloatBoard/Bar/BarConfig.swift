@@ -46,6 +46,8 @@ struct BarConfig: Codable, Equatable {
     /// Counter at the left of the bar, in the board's column order: "7 tasks · 1 watch" or "3 to do · 4 doing · 1 watch".
     /// Counts every open task; Watch is named only when there is one.
     var splitCount: Bool? = false
+    /// The next meeting (from 60 minutes before it starts) on the bar, with Join when it has a video link. On unless turned off.
+    var showNextMeeting: Bool? = true
 
     func countLabel(_ open: [Card]) -> String {
         let watch = open.filter { $0.status == .watch }.count
@@ -194,6 +196,10 @@ struct BarSettingsView: View {
                     }
                     Toggle("Split the count by step (e.g. \u{201C}3 to do · 4 doing · 1 watch\u{201D})",
                            isOn: Binding(get: { ui.bar.splitCount ?? false }, set: { ui.bar.splitCount = $0 }))
+                        .toggleStyle(.checkbox)
+                        .font(.system(size: 12))
+                    Toggle("Show next meeting (from 60 minutes before it starts)",
+                           isOn: Binding(get: { ui.bar.showNextMeeting ?? true }, set: { ui.bar.showNextMeeting = $0 }))
                         .toggleStyle(.checkbox)
                         .font(.system(size: 12))
                 }
