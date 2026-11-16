@@ -60,6 +60,9 @@ public struct Card: Identifiable, Equatable {
     /// Set once the task has been added to Google Calendar from FloatBoard.
     public var gcalAccount: String = ""
     public var gcalLink: String = ""
+    /// The calendar and Google event id of the task's event (empty when it has none).
+    public var gcalCalendar: String = ""
+    public var gcalEvent: String = ""
     /// Set when a connector created the card (e.g. "email"); empty for cards typed in.
     public var source: String = ""
     public var externalID: String = ""
@@ -99,8 +102,9 @@ public struct Card: Identifiable, Equatable {
                 sourceMeta: [String: String] = [:], importedAt: Date? = nil, sourceKey: SourceKey? = nil,
                 withdrawn: Bool = false, aiSummary: String = "", connector: String = "",
                 replyDraftState: ReplyDraftState? = nil, replyDraftLink: String = "", replyDraftError: String = "",
-                replyDraftRequest: String = "", replyDraftSentAt: Date? = nil, dueHasTime: Bool = false) {
+                replyDraftRequest: String = "", replyDraftSentAt: Date? = nil, dueHasTime: Bool = false, gcalCalendar: String = "", gcalEvent: String = "") {
         self.dueHasTime = dueHasTime
+        self.gcalCalendar = gcalCalendar; self.gcalEvent = gcalEvent
         self.replyDraftState = replyDraftState; self.replyDraftLink = replyDraftLink; self.replyDraftError = replyDraftError
         self.replyDraftRequest = replyDraftRequest; self.replyDraftSentAt = replyDraftSentAt
         self.sourceKey = sourceKey; self.withdrawn = withdrawn; self.aiSummary = aiSummary; self.connector = connector

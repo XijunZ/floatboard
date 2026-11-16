@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var avoider: WindowAvoider!
     private var clickMonitor: Any?
     private var modeWatch: AnyCancellable?
+    private var calendarWatch: AnyCancellable?
     private var pendingLinks: [URL] = []
     private var connectors: ConnectorRunner!
     private var calendarScheduler: CalendarScheduler?
@@ -147,6 +148,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modeWatch = ui.$mode.removeDuplicates().sink { [weak self] m in
             guard m == .expanded else { return }
             self?.connectors.boardOpened()
+        }
+        // While the Calendar tab is open the calendar syncs every minute instead of every five.
+        calendarWatch = ui.$tab.combineLatest(ui.$mode).sink { [weak self] tab, mode in
+            self?.calendarScheduler?.fastMode = tab == .calendar && mode == .expanded
         }
         // A connect link opened before launch finished is handled now.
         for link in pendingLinks { handleConnectLink(link) }

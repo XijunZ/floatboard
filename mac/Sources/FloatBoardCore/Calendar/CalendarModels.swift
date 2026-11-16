@@ -87,6 +87,15 @@ public struct CalEvent: Equatable {
     /// True only when Google itself reported the event cancelled (deleted). A reset hides events (`gone`) without cancelling them.
     public var cancelled: Bool = false
 
+    public init(shortID: Int64, account: String, calendarID: String, eventID: String, start: Date, end: Date, allDay: Bool,
+                title: String, location: String, videoLink: String, description: String, htmlLink: String,
+                recurringID: String?, googleUpdated: Date, fbCard: Int64?, gone: Bool = false, cancelled: Bool = false) {
+        self.shortID = shortID; self.account = account; self.calendarID = calendarID; self.eventID = eventID
+        self.start = start; self.end = end; self.allDay = allDay; self.title = title; self.location = location
+        self.videoLink = videoLink; self.description = description; self.htmlLink = htmlLink; self.recurringID = recurringID
+        self.googleUpdated = googleUpdated; self.fbCard = fbCard; self.gone = gone; self.cancelled = cancelled
+    }
+
     /// "E-37".
     public var id: ShortID { ShortID(kind: .event, number: shortID) }
 }

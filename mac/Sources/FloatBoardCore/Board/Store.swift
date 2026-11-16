@@ -48,7 +48,7 @@ public final class Store: ObservableObject {
                        source,external_id,source_link,source_meta,imported_at,
                        source_mid,source_sent,withdrawn,ai_summary,connector,
                        reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at,
-                       watch_person,watch_contact,watch_since,due_day,due_has_time
+                       watch_person,watch_contact,watch_since,due_day,due_has_time,gcal_calendar,gcal_event
                 FROM cards WHERE deleted=0 ORDER BY created
                 """) { s in
                 var c = Card(
@@ -81,6 +81,7 @@ public final class Store: ObservableObject {
                     replyDraftRequest: DB.text(s, 26),
                     replyDraftSentAt: DB.date(s, 27)
                 )
+                c.gcalCalendar = DB.text(s, 33); c.gcalEvent = DB.text(s, 34)
                 c.watchPerson = DB.text(s, 28); c.watchContact = DB.text(s, 29); c.watchSince = DB.date(s, 30)
                 (c.due, c.dueHasTime) = Self.loadedDue(due: c.due, day: sqlite3_column_type(s, 31) == SQLITE_NULL ? nil : DB.text(s, 31),
                                                        hasTime: DB.int(s, 32) != 0)
