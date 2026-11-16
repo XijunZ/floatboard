@@ -197,6 +197,7 @@ final class Google: ObservableObject {
             if !accounts.contains(email) { accounts.append(email) }
             UserDefaults.standard.set(accounts, forKey: "googleAccounts")
             status = "Connected \(email)."
+            CalendarListAttempts.forget(email)
             // Read the account's calendar list and events now, so Settings › Calendar fills in (and a reconnect clears).
             NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
         } catch {

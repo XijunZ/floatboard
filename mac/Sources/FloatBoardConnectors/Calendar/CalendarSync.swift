@@ -54,12 +54,16 @@ public final class CalendarSync {
                     CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned, shown: $0.owned || $0.primary)
                 })
                 lastProblem[key] = nil
+                CalendarListAttempts.record(account, .listed)
             } catch GoogleCalendarError.notConnected {
+                CalendarListAttempts.record(account, .needsReconnect)
                 flagReconnect(account: account, calendarID: nil)
             } catch GoogleCalendarError.needsReconnect(let body) {
+                CalendarListAttempts.record(account, .needsReconnect)
                 flagReconnect(account: account, calendarID: nil)
                 problem(key, "Google Calendar sign-in for \(account) needs to be renewed", body)
             } catch {
+                CalendarListAttempts.record(account, .failed)
                 problem(key, "Could not read the calendar list for \(account)", "\(error)")
             }
         }

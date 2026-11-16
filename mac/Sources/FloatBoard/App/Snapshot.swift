@@ -172,8 +172,12 @@ enum Snapshot {
                 }.padding(12).frame(width: 640, alignment: .topLeading).fixedSize(horizontal: false, vertical: true)
             }
             save(page([]), "settings-calendar-none.png", CGSize(width: 640, height: 260))
-            // Connected but no calendars listed yet (the permission to list them is missing).
+            // Just connected: the first calendar list has not come back yet.
+            save(page([a]), "settings-calendar-loading.png", CGSize(width: 640, height: 260))
+            // The list was refused (the permission to list calendars is missing).
+            CalendarListAttempts.record(a, .needsReconnect)
             save(page([a]), "settings-calendar-reconnect.png", CGSize(width: 640, height: 260))
+            CalendarListAttempts.record(a, .listed); CalendarListAttempts.record(b, .listed)
             cache.upsertCalendars(account: a, [
                 CalCalendar(account: a, calendarID: a, name: "Work", color: "#4285f4", owned: true, shown: true),
                 CalCalendar(account: a, calendarID: "home", name: "Home", color: "#33b679", owned: true, shown: true),
