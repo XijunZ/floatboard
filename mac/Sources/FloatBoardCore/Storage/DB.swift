@@ -121,6 +121,13 @@ public final class DB {
             sql += """
             ALTER TABLE cards ADD COLUMN due_day TEXT;
             ALTER TABLE cards ADD COLUMN due_has_time INTEGER NOT NULL DEFAULT 0;
+            -- Links between items by visible id (T-142, E-37); stored once, smaller text first.
+            CREATE TABLE links(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,
+                to_type TEXT NOT NULL, to_id TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL,
+                UNIQUE(from_type, from_id, to_type, to_id)
+            );
+            CREATE INDEX links_to ON links(to_type, to_id);
 
             """
         }
@@ -225,6 +232,13 @@ public final class DB {
         source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL
     );
     CREATE INDEX instructions_part ON instructions(connector, part, at);
+    -- Links between items by visible id (T-142, E-37); stored once, smaller text first.
+    CREATE TABLE links(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,
+        to_type TEXT NOT NULL, to_id TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL,
+        UNIQUE(from_type, from_id, to_type, to_id)
+    );
+    CREATE INDEX links_to ON links(to_type, to_id);
 
     """
 

@@ -244,6 +244,7 @@ struct EditCardView: View {
             emailSection
             if replyDraftCard.canDraftReply { replyDraftSection }
             VStack(alignment: .leading, spacing: 2) {
+                IDChip(id: ShortID(kind: .task, number: draft.id))
                 Text("Added \(Fmt.withTime(draft.created))")
                 if let s = draft.started { Text("Started \(Fmt.withTime(s))") }
                 if let d = draft.done { Text("Done \(Fmt.withTime(d))") }

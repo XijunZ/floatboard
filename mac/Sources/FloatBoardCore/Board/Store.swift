@@ -15,6 +15,8 @@ public final class Store: ObservableObject {
     @Published public private(set) var lastDeleted: DeletedTask?
     /// The outbox row that delete queued, so undo can take it back before it is sent.
     private var lastDeletedOutbox: String?
+    /// The links delete took off that task, so undo can put back exactly those.
+    private var lastDeletedLinks: [StoredLink] = []
     /// What the health watchdog last found (set by `Health.refresh`); the bar warning reads this and nothing else.
     @Published public internal(set) var healthProblems: [HealthProblem] = []
     public let db: DB
@@ -229,15 +231,16 @@ public final class Store: ObservableObject {
     /// `not_action` / `wrong_details` / `duplicate`, a correction) in the same transaction. The engine learns from the
     /// first two; `duplicate` is only logged there.
     public func deleteCard(_ card: Card, verdict: String?, now: Date = Date()) {
-        var done: (DeletedTask, String?)?
+        var done: (DeletedTask, String?, [StoredLink])?
         perform {
             guard let cur = try currentCard(card.id), !cur.deleted else { return }
             try db.run("UPDATE cards SET deleted=1, updated=? WHERE id=?", [now, card.id])
             try log(card.id, "deleted", cur.card.status, nil, now)
             let uuid = try queueOutbox(cur.card, kind: .deleted, verdict: verdict, now: now)
-            done = (DeletedTask(id: card.id, title: cur.card.title, at: now), uuid)
+            let links = try removeLinks(of: ShortID(kind: .task, number: card.id))
+            done = (DeletedTask(id: card.id, title: cur.card.title, at: now), uuid, links)
         }
-        if let done { lastDeleted = done.0; lastDeletedOutbox = done.1 }
+        if let done { lastDeleted = done.0; lastDeletedOutbox = done.1; lastDeletedLinks = done.2 }
     }
 
     /// Brings the last deleted task back where it was. A delete not yet sent to its connector is taken back with its
@@ -245,11 +248,13 @@ public final class Store: ObservableObject {
     public func undoDelete(now: Date = Date()) {
         guard let d = lastDeleted else { return }
         let outbox = lastDeletedOutbox
+        let links = lastDeletedLinks
         perform {
             guard let row = try db.query("SELECT status, deleted FROM cards WHERE id=?", [d.id], {
                 (Status(rawValue: DB.text($0, 0)) ?? .todo, DB.int($0, 1) != 0) }).first, row.1 else { return }
             try db.run("UPDATE cards SET deleted=0, updated=? WHERE id=?", [now, d.id])
             try log(d.id, "restored", nil, row.0, now)
+            try restoreLinks(links)
             if let uuid = outbox {
                 let unsent = try db.query("SELECT count(*) FROM outbox WHERE uuid=? AND sent IS NULL", [uuid]) { DB.int($0, 0) }.first ?? 0
                 if unsent > 0 && !outboxInFlight.contains(uuid) {
@@ -261,7 +266,7 @@ public final class Store: ObservableObject {
                 }
             }
         }
-        lastDeleted = nil; lastDeletedOutbox = nil
+        lastDeleted = nil; lastDeletedOutbox = nil; lastDeletedLinks = []
     }
 
     /// Hide the Undo bar (the menu item still works until the next delete).

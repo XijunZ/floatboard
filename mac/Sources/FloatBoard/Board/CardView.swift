@@ -97,6 +97,7 @@ struct CardView: View {
                                      : "Moves back to To do when they reply (\(card.watchContact.hasPrefix("wa:") ? "on WhatsApp" : "by email")). A reminder every 3 days until then."))
                     }
                 }
+                IDChip(id: ShortID(kind: .task, number: card.id))
                 Text("Added \(Fmt.short(card.created))").fixedSize()
                 if let due = card.due {
                     Text("Due \(Fmt.due(due, hasTime: card.dueHasTime))")
@@ -239,5 +240,25 @@ struct DeleteControl: View {
             .fixedSize()
             .help("Delete")
         }
+    }
+}
+
+
+/// A task's visible id (T-142). Click copies it, so it can be pasted into a chat or a search.
+struct IDChip: View {
+    let id: ShortID
+    @State private var copied = false
+
+    var body: some View {
+        Text(copied ? "Copied" : id.text)
+            .monospacedDigit().fixedSize()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(id.text, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+            }
+            .help("\(id.text): click to copy")
     }
 }

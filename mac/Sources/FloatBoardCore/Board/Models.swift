@@ -216,7 +216,7 @@ public enum Search {
     public static func matches(_ card: Card, _ q: String) -> Bool {
         let w = words(q)
         guard !w.isEmpty else { return true }
-        let hay = [card.title, card.notes, card.area, card.link].joined(separator: " ")
+        let hay = [card.title, card.notes, card.area, card.link, ShortID(kind: .task, number: card.id).text].joined(separator: " ")
         return w.allSatisfy { hay.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
     }
 }
