@@ -237,6 +237,7 @@ struct EditCardView: View {
             }
             .buttonStyle(.borderless)
             .font(.system(size: 12))
+            LinkedMeetings(taskID: draft.id)
             emailSection
             if replyDraftCard.canDraftReply { replyDraftSection }
             VStack(alignment: .leading, spacing: 2) {

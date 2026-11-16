@@ -125,9 +125,28 @@ enum Snapshot {
         // Calendar Day and Week with made-up events and tasks. Only on a scratch database: it fills the calendar cache and the board.
         if ProcessInfo.processInfo.environment["FLOATBOARD_CALSHOTS"] != nil, LocalData.isScratchDatabase {
             seedCalendar(store)
+            let cal0 = AppTime.calendar
+            let cache = CalendarCache(store: store)
             let hours = 8...18
             save(CalendarView(span: .day, snapshotHours: hours).padding(12), "calendar-day.png", CGSize(width: 1100, height: 640))
             save(CalendarView(span: .week, snapshotHours: hours).padding(12), "calendar-week.png", CGSize(width: 1100, height: 640))
+            // Links between made-up tasks and meetings: the editor, the event panel and a card with its meeting count.
+            let events = cache.events(from: cal0.startOfDay(for: Date()), to: Date().addingTimeInterval(7 * 86400))
+            if let planning = events.first(where: { $0.title == "Planning" }), let review = events.first(where: { $0.title == "Design sync" }),
+               let deck = store.cards.first(where: { $0.title == "Send the deck to the team" }),
+               let venue = store.cards.first(where: { $0.title == "Book the venue" }) {
+                let d = ShortID(kind: .task, number: deck.id), v = ShortID(kind: .task, number: venue.id)
+                store.link(d, planning.id, actor: .user); store.link(d, review.id, actor: .user); store.link(v, planning.id, actor: .user)
+                if let done = store.card(venue.id) { store.move(done, to: .done) }
+                let edits = CalendarEdits()
+                let cal = CalCalendar(account: planning.account, calendarID: planning.calendarID, name: "Work", color: "#4285f4", owned: true, shown: true)
+                save(EventPanel(event: planning, calendar: cal, waiting: false).environmentObject(edits).environment(\.calendarSnapshot, true),
+                     "link-event-panel.png", CGSize(width: 340, height: 330))
+                if let fresh = store.card(deck.id) {
+                    save(EditCardView(draft: fresh) {}, "link-editor.png", CGSize(width: 420, height: 520))
+                    save(CardView(card: fresh).padding(12), "link-card.png", CGSize(width: 340, height: 130))
+                }
+            }
         }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so each Settings section is drawn directly.

@@ -98,6 +98,11 @@ struct CardView: View {
                     }
                 }
                 IDChip(id: ShortID(kind: .task, number: card.id))
+                let meetings = store.links(of: ShortID(kind: .task, number: card.id)).filter { $0.kind == .event }.count
+                if meetings > 0 {
+                    Label("\(meetings)", systemImage: "calendar").labelStyle(.titleAndIcon).fixedSize()
+                        .help(meetings == 1 ? "Linked to 1 meeting" : "Linked to \(meetings) meetings")
+                }
                 Text("Added \(Fmt.short(card.created))").fixedSize()
                 if let due = card.due {
                     Text("Due \(Fmt.due(due, hasTime: card.dueHasTime))")

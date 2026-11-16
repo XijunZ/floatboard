@@ -294,6 +294,11 @@ public enum Fmt {
     /// "12 Nov" for date-only, "12 Nov 14:30" when a time is set.
     public static func due(_ d: Date, hasTime: Bool) -> String { hasTime ? withTime(d) : short(d) }
     public static func clock(_ d: Date) -> String { formatter("HH:mm").string(from: d) }
+    /// A meeting's time in a short line: "Thu 11:00" within a few days of `now`, "12 Nov 11:00" otherwise.
+    public static func meeting(_ d: Date, now: Date = Date()) -> String {
+        let near = abs(d.timeIntervalSince(now)) < 5 * 86400
+        return formatter(near ? "EEE HH:mm" : "d MMM HH:mm").string(from: d)
+    }
     public static func heading(_ d: Date) -> String { formatter("yyyy-MM-dd EEEE").string(from: d) }
     public static func csvDate(_ d: Date?) -> String { d.map { formatter("yyyy-MM-dd HH:mm").string(from: $0) } ?? "" }
     public static func duration(from a: Date, to b: Date) -> String {
