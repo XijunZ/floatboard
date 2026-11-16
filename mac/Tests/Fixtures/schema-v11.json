@@ -37,6 +37,12 @@
  ],
  [
   "index",
+  "links_to",
+  "links",
+  "CREATE INDEX links_to ON links(to_type, to_id)"
+ ],
+ [
+  "index",
   "sqlite_autoindex_areas_1",
   "areas",
   null
@@ -57,6 +63,12 @@
   "index",
   "sqlite_autoindex_corrections_1",
   "corrections",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_links_1",
+  "links",
   null
  ],
  [
@@ -124,6 +136,12 @@
   "instructions",
   "instructions",
   "CREATE TABLE instructions(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, connector TEXT NOT NULL, part TEXT NOT NULL, text TEXT NOT NULL,\n    source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL\n)"
+ ],
+ [
+  "table",
+  "links",
+  "links",
+  "CREATE TABLE links(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,\n    to_type TEXT NOT NULL, to_id TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL,\n    UNIQUE(from_type, from_id, to_type, to_id)\n)"
  ],
  [
   "table",
