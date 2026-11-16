@@ -20,6 +20,10 @@ public final class CalendarSync {
 
     /// How often the list of calendars is read again.
     public static let listInterval: TimeInterval = 6 * 3600
+    /// How often the whole window is read again. Google's "changes since last time" never returns an event that has not
+    /// changed, so one that was beyond the window at the last full read (or hidden by a reset) would otherwise never come in.
+    /// The full read's own bookmark replaces the saved one, so the other passes stay incremental.
+    public static let fullReadInterval: TimeInterval = 24 * 3600
 
     /// `apiFor` gives the Google client for an account; `accounts` lists the accounts that are connected.
     public init(store: Store, apiFor: @escaping (String) -> GoogleCalendarAPI, accounts: @escaping () -> [String],
@@ -80,14 +84,16 @@ public final class CalendarSync {
         let from = now().addingTimeInterval(-TaskEventRules.windowBack), to = now().addingTimeInterval(TaskEventRules.windowAhead)
         do {
             var result: (changes: [GoogleEventChange], nextToken: String)
+            var full = c.syncToken == nil || (c.fullReadAt.map { now().timeIntervalSince($0) >= Self.fullReadInterval } ?? true)
             do {
-                result = try await api.listEvents(calendarID: c.calendarID, syncToken: c.syncToken, timeMin: from, timeMax: to)
+                result = try await api.listEvents(calendarID: c.calendarID, syncToken: full ? nil : c.syncToken, timeMin: from, timeMax: to)
             } catch GoogleCalendarError.syncExpired {
+                full = true
                 // The bookmark is too old: forget it (events are hidden until the full read brings them back) and read it all again.
                 guard cache.resetSync(account: c.account, calendarID: c.calendarID) else { return false }
                 result = try await api.listEvents(calendarID: c.calendarID, syncToken: nil, timeMin: from, timeMax: to)
             }
-            if cache.apply(account: c.account, calendarID: c.calendarID, changes: result.changes, nextToken: result.nextToken, now: now()) {
+            if cache.apply(account: c.account, calendarID: c.calendarID, changes: result.changes, nextToken: result.nextToken, fullRead: full, now: now()) {
                 if c.needsReconnect { cache.setNeedsReconnect(account: c.account, calendarID: c.calendarID, false) }
                 lastProblem[key] = nil
                 return true

@@ -31,12 +31,12 @@ public final class CalendarCache {
     public func calendars() -> [CalCalendar] {
         read("Could not read calendars") {
             try db.query("""
-                SELECT account, calendar_id, name, color, owned, shown, needs_reconnect, sync_token, synced_at
+                SELECT account, calendar_id, name, color, owned, shown, needs_reconnect, sync_token, synced_at, full_read_at
                 FROM cal_calendars ORDER BY account, name, calendar_id
                 """) { s in
                 CalCalendar(account: DB.text(s, 0), calendarID: DB.text(s, 1), name: DB.text(s, 2), color: DB.text(s, 3),
                             owned: DB.int(s, 4) != 0, shown: DB.int(s, 5) != 0, needsReconnect: DB.int(s, 6) != 0,
-                            syncToken: DB.isNull(s, 7) ? nil : DB.text(s, 7), syncedAt: DB.date(s, 8))
+                            syncToken: DB.isNull(s, 7) ? nil : DB.text(s, 7), syncedAt: DB.date(s, 8), fullReadAt: DB.date(s, 9))
             }
         } ?? []
     }
@@ -61,7 +61,7 @@ public final class CalendarCache {
     /// the same E-n), cancelled ones are marked gone and kept so links to them still resolve. `nextToken`, when given,
     /// becomes the calendar's sync token and the sync time is stamped; it all happens in one step or not at all.
     @discardableResult
-    public func apply(account: String, calendarID: String, changes: [GoogleEventChange], nextToken: String?, now: Date = Date()) -> Bool {
+    public func apply(account: String, calendarID: String, changes: [GoogleEventChange], nextToken: String?, fullRead: Bool = false, now: Date = Date()) -> Bool {
         write("Could not save calendar changes") {
             for change in changes {
                 if change.cancelled || change.fields == nil {
@@ -84,8 +84,8 @@ public final class CalendarCache {
                 }
             }
             if let nextToken {
-                try db.run("UPDATE cal_calendars SET sync_token=?, synced_at=? WHERE account=? AND calendar_id=?",
-                           [nextToken, now, account, calendarID])
+                try db.run("UPDATE cal_calendars SET sync_token=?, synced_at=?, full_read_at=CASE WHEN ? THEN ? ELSE full_read_at END WHERE account=? AND calendar_id=?",
+                           [nextToken, now, fullRead ? 1 : 0, now, account, calendarID])
             }
         }
     }

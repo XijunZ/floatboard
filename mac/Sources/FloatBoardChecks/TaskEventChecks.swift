@@ -376,4 +376,49 @@ import FloatBoardConnectors
         check(cals.count == 2 && cals.first { $0.calendarID == "team" }?.shown == false && cals.first { $0.calendarID == cal }?.shown == true,
               "sync_lists_calendars_with_sensible_defaults")
     } catch { check(false, "sync setup: \(error)") }
+
+    do {
+        // A daily full read finds what the incremental bookmark never would: events that were beyond the window earlier.
+        let (store, cache, _) = try setup("daily")
+        final class Clock: @unchecked Sendable { var now: Date; var fail = false; init(_ d: Date) { now = d } }
+        let clock = Clock(t)
+        let fake = Fake()
+        let iso = ISO8601DateFormatter()
+        let farStart = t.addingTimeInterval(100 * 86400)
+        let farItem = #"{"id":"far1","status":"confirmed","summary":"Far away","start":{"dateTime":"\#(iso.string(from: farStart))"},"end":{"dateTime":"\#(iso.string(from: farStart.addingTimeInterval(1800)))"},"updated":"\#(iso.string(from: ago(10)))"}"#
+        fake.handler = { r in
+            if clock.fail { return (#"{"error":"backendError"}"#, 500) }
+            if query(r, "syncToken") != nil { return (#"{"items":[],"nextSyncToken":"INC"}"#, 200) }
+            let max = iso.date(from: query(r, "timeMax") ?? "") ?? .distantPast
+            return ("{\"items\":[" + (farStart < max ? farItem : "") + "],\"nextSyncToken\":\"FULL\"}", 200)
+        }
+        let sync = CalendarSync(store: store, apiFor: { _ in api(fake) }, accounts: { [acct] }, now: { clock.now })
+        await sync.syncOnce()
+        check(cache.event(account: acct, calendarID: cal, eventID: "far1") == nil && cache.calendars().first?.fullReadAt != nil, "daily_first_read_misses_far_event")
+        clock.now = t.addingTimeInterval(3600)
+        await sync.syncOnce()
+        check(query(fake.requests.last!, "syncToken") == "FULL" && cache.event(account: acct, calendarID: cal, eventID: "far1") == nil, "daily_ticks_in_between_are_incremental")
+        clock.now = t.addingTimeInterval(20 * 86400)
+        await sync.syncOnce()
+        let shortID = cache.event(account: acct, calendarID: cal, eventID: "far1")?.shortID
+        check(shortID != nil && query(fake.requests.last!, "syncToken") == nil && cache.calendars().first?.syncToken == "FULL"
+              && cache.events(from: farStart, to: farStart.addingTimeInterval(3600)).count == 1, "daily_full_read_brings_in_event_first_seen_100_days_ahead")
+        // A reset hides it; the daily read (a reset also clears the bookmark, so the next pass is a full one) brings it back, same E-n.
+        cache.resetSync(account: acct, calendarID: cal)
+        check(cache.events(from: farStart, to: farStart.addingTimeInterval(3600)).isEmpty, "daily_setup_reset_hides_event")
+        clock.now = t.addingTimeInterval(20 * 86400 + 7200)
+        await sync.syncOnce()
+        check(cache.event(account: acct, calendarID: cal, eventID: "far1")?.shortID == shortID
+              && cache.events(from: farStart, to: farStart.addingTimeInterval(3600)).count == 1, "daily_read_revives_reset_hidden_far_event")
+        // A failed daily read changes nothing, and is retried at the next pass.
+        let before = cache.calendars().first, eventBefore = cache.event(shortID: shortID ?? 0)
+        clock.now = t.addingTimeInterval(22 * 86400)
+        clock.fail = true
+        await sync.syncOnce()
+        check(cache.calendars().first == before && cache.event(shortID: shortID ?? 0) == eventBefore, "failed_daily_read_leaves_cache_unchanged")
+        clock.fail = false
+        await sync.syncOnce()
+        check(query(fake.requests.last!, "syncToken") == nil && (cache.calendars().first?.fullReadAt ?? .distantPast) > (before?.fullReadAt ?? .distantFuture),
+              "failed_daily_read_is_retried_next_pass")
+    } catch { check(false, "daily setup: \(error)") }
 }

@@ -16,12 +16,14 @@ public struct CalCalendar: Equatable {
     /// Google's bookmark for "everything since last time"; nil means the next sync reads the whole window.
     public var syncToken: String?
     public var syncedAt: Date?
+    /// When the whole window was last read (a daily full read finds events that were beyond the window earlier).
+    public var fullReadAt: Date?
 
     public init(account: String, calendarID: String, name: String, color: String, owned: Bool, shown: Bool,
-                needsReconnect: Bool = false, syncToken: String? = nil, syncedAt: Date? = nil) {
+                needsReconnect: Bool = false, syncToken: String? = nil, syncedAt: Date? = nil, fullReadAt: Date? = nil) {
         self.account = account; self.calendarID = calendarID; self.name = name; self.color = color
         self.owned = owned; self.shown = shown; self.needsReconnect = needsReconnect
-        self.syncToken = syncToken; self.syncedAt = syncedAt
+        self.syncToken = syncToken; self.syncedAt = syncedAt; self.fullReadAt = fullReadAt
     }
 }
 
