@@ -29,6 +29,8 @@ public struct CalOutboxRow: Equatable {
     public var attempts: Int
     public var nextTry: Date
     public var lastError: String
+    /// Set when Google refused the change for good: it is not sent again (`lastError` says why).
+    public var failedAt: Date?
 }
 
 /// Changes to Google Calendar are written here first, in the same database as the board, so they survive being offline,
@@ -69,18 +71,19 @@ public final class CalendarOutbox {
         }
     }
 
-    /// Unsent changes whose wait is over, oldest first.
+    /// Unsent changes whose wait is over, oldest first. Changes Google refused for good are never due again.
     public func due(now: Date) -> [CalOutboxRow] {
-        rows("WHERE sent IS NULL AND next_try<=? ORDER BY created, rowid", [now])
+        rows("WHERE sent IS NULL AND failed_at IS NULL AND next_try<=? ORDER BY created, rowid", [now])
     }
 
-    /// All unsent changes, oldest first (for showing what is waiting).
+    /// All unsent changes, oldest first (for showing what is waiting), including ones Google refused for good (`failedAt`).
     public func rows(unsent: Bool) -> [CalOutboxRow] {
         rows(unsent ? "WHERE sent IS NULL ORDER BY created, rowid" : "ORDER BY created, rowid", [])
     }
 
     /// New events (not made from a task) that are queued but not yet in the cache, as events with a negative `shortID` (no E-n
     /// yet), so the calendar can show them, marked as waiting, until Google confirms. Only those overlapping [from, to).
+    /// One Google refused for good stays (see `failedNewEvents`) until the user discards it.
     public func pendingNewEvents(from: Date, to: Date) -> [CalEvent] {
         var out: [CalEvent] = []
         for row in rows(unsent: true) {
@@ -95,11 +98,33 @@ public final class CalendarOutbox {
         return out
     }
 
-    /// True while any unsent change targets this event (the UI shows "waiting to send").
+    /// New events Google refused for good, by the event id their placeholder carries: the outbox row and Google's answer.
+    public func failedNewEvents() -> [String: (uuid: String, error: String)] {
+        var out: [String: (uuid: String, error: String)] = [:]
+        for row in rows("WHERE sent IS NULL AND failed_at IS NOT NULL AND kind='create' AND card_id IS NULL", []) {
+            out[Self.googleEventID(forUUID: row.uuid)] = (row.uuid, row.lastError)
+        }
+        return out
+    }
+
+    /// The user discarded a change Google refused: it is removed. Only an unsent change can be discarded.
+    @discardableResult
+    public func discard(uuid: String) -> Bool {
+        do {
+            try db.run("DELETE FROM cal_outbox WHERE uuid=? AND sent IS NULL", [uuid])
+            store.activity("calendar", .info, "Discarded a calendar change Google refused", trace: uuid)
+            return true
+        } catch {
+            store.activity("calendar", .error, "Could not discard a calendar change", detail: "\(error)", trace: uuid)
+            return false
+        }
+    }
+
+    /// True while any change still to be sent targets this event (the UI shows "waiting to send"). A refused one is not waiting.
     public func pending(eventShortID: Int64) -> Bool {
         guard let e = cache.event(shortID: eventShortID) else { return false }
         do {
-            let n = try db.query("SELECT count(*) FROM cal_outbox WHERE sent IS NULL AND account=? AND calendar_id=? AND event_id=?",
+            let n = try db.query("SELECT count(*) FROM cal_outbox WHERE sent IS NULL AND failed_at IS NULL AND account=? AND calendar_id=? AND event_id=?",
                                  [e.account, e.calendarID, e.eventID]) { DB.int($0, 0) }.first ?? 0
             return n > 0
         } catch {
@@ -156,6 +181,15 @@ public final class CalendarOutbox {
         }
     }
 
+    /// Google refused the change for good (or it can't be read): keep it, with why, and never send it again.
+    public func markDead(uuid: String, error: String, now: Date = Date()) {
+        do {
+            try db.run("UPDATE cal_outbox SET attempts=attempts+1, last_error=?, failed_at=? WHERE uuid=?", [error, now, uuid])
+        } catch {
+            store.activity("calendar", .error, "Could not record a refused calendar change", detail: "\(error)", trace: uuid)
+        }
+    }
+
     /// Seconds to wait after the nth failure: 60, 120, 240 ... capped at 3600.
     static func backoff(afterAttempts n: Int) -> TimeInterval {
         min(3600, 60 * pow(2, Double(max(0, min(n, 12) - 1))))
@@ -166,7 +200,7 @@ public final class CalendarOutbox {
     private func rows(_ tail: String, _ args: [Any?]) -> [CalOutboxRow] {
         do {
             return try db.query("""
-                SELECT uuid, account, calendar_id, payload_json, created, attempts, next_try, last_error FROM cal_outbox \(tail)
+                SELECT uuid, account, calendar_id, payload_json, created, attempts, next_try, last_error, failed_at FROM cal_outbox \(tail)
                 """, args) { s in
                 var write: CalWrite?
                 var err = DB.text(s, 7)
@@ -175,7 +209,7 @@ public final class CalendarOutbox {
                 }
                 return CalOutboxRow(uuid: DB.text(s, 0), account: DB.text(s, 1), calendarID: DB.text(s, 2), write: write,
                                     created: DB.date(s, 4) ?? Date(), attempts: Int(DB.int(s, 5)), nextTry: DB.date(s, 6) ?? Date(),
-                                    lastError: err)
+                                    lastError: err, failedAt: DB.date(s, 8))
             }
         } catch {
             store.activity("calendar", .error, "Could not read the calendar outbox", detail: "\(error)")

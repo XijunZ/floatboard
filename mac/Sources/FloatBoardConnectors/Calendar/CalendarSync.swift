@@ -100,7 +100,7 @@ public final class CalendarSync {
         let api = apiFor(c.account)
         let from = now().addingTimeInterval(-TaskEventRules.windowBack), to = now().addingTimeInterval(TaskEventRules.windowAhead)
         do {
-            var result: (changes: [GoogleEventChange], nextToken: String)
+            var result: (changes: [GoogleEventChange], nextToken: String, skipped: [String])
             var full = c.syncToken == nil
             let dailyDue = c.fullReadAt.map { now().timeIntervalSince($0) >= Self.fullReadInterval } ?? true
             do {
@@ -108,6 +108,7 @@ public final class CalendarSync {
                     // The daily full read replaces the bookmark, so first take in what changed anywhere (also outside the window)
                     // since the last pass; the full read then only has to find events that were beyond the window before.
                     let inc = try await api.listEvents(calendarID: c.calendarID, syncToken: token, timeMin: from, timeMax: to)
+                    reportSkipped(c, inc.skipped)
                     guard cache.apply(account: c.account, calendarID: c.calendarID, changes: inc.changes, nextToken: inc.nextToken, now: now()) else { return false }
                     full = true
                 }
@@ -118,6 +119,7 @@ public final class CalendarSync {
                 guard cache.resetSync(account: c.account, calendarID: c.calendarID) else { return false }
                 result = try await api.listEvents(calendarID: c.calendarID, syncToken: nil, timeMin: from, timeMax: to)
             }
+            reportSkipped(c, result.skipped)
             if cache.apply(account: c.account, calendarID: c.calendarID, changes: result.changes, nextToken: result.nextToken, fullRead: full, now: now()) {
                 if c.needsReconnect { cache.setNeedsReconnect(account: c.account, calendarID: c.calendarID, false) }
                 lastProblem[key] = nil
@@ -142,6 +144,13 @@ public final class CalendarSync {
         for c in cache.calendars() where c.account == account && (calendarID == nil || c.calendarID == calendarID) && !c.needsReconnect {
             cache.setNeedsReconnect(account: account, calendarID: c.calendarID, true)
         }
+    }
+
+    /// Events Google sent that could not be read were left out (the rest of the calendar still came in): say which, once.
+    private func reportSkipped(_ c: CalCalendar, _ skipped: [String]) {
+        guard !skipped.isEmpty else { return }
+        problem("skipped:" + c.account + "|" + c.calendarID,
+                "Left out \(skipped.count) event(s) of calendar \"\(c.name)\" (\(c.account)) that could not be read", skipped.joined(separator: "\n"))
     }
 
     private func problem(_ key: String, _ message: String, _ detail: String) {

@@ -1,9 +1,11 @@
 import FloatBoardCore
 import Foundation
 
-/// Sends the changes waiting in the calendar outbox to Google, one at a time, oldest first. A failure keeps the change
-/// (it is tried again later with a growing wait) and is written to Activity with Google's reply.
-/// Nothing starts this on its own yet: whoever wires it up calls `drain()`.
+/// Sends the changes waiting in the calendar outbox to Google, one at a time, oldest first. A passing failure (Google busy,
+/// the network) keeps the change, tried again later with a growing wait, and is written to Activity once per change and reason.
+/// An answer that can never turn into success (the event is gone, the calendar is read-only for you, a bad request) ends the
+/// change for good: it is kept with Google's reply, never sent again, and written to Activity as an error. Nothing is sent
+/// while the Mac is offline. The app's calendar scheduler calls `drain()`.
 @MainActor
 public final class CalendarSender {
     private let store: Store
@@ -11,22 +13,29 @@ public final class CalendarSender {
     private let cache: CalendarCache
     private let apiFor: (String) -> GoogleCalendarAPI
     private let isConnected: (String) -> Bool
+    private let isOnline: @MainActor () -> Bool
     private var draining = false
+    /// The passing failure last written to Activity per change, so a repeating one is written once.
+    private var warned: [String: String] = [:]
     /// Accounts whose sign-in is gone: their changes are left alone (quietly) until the account is connected again.
     private var parked: Set<String> = []
 
-    /// `apiFor` gives the Google client for an account; `isConnected` says whether the account still has a saved sign-in.
-    public init(store: Store, apiFor: @escaping (String) -> GoogleCalendarAPI, isConnected: @escaping (String) -> Bool = { _ in true }) {
+    /// `apiFor` gives the Google client for an account; `isConnected` says whether the account still has a saved sign-in;
+    /// `isOnline` whether the Mac has a network (the app's network monitor, as the health watchdog uses).
+    public init(store: Store, apiFor: @escaping (String) -> GoogleCalendarAPI, isConnected: @escaping (String) -> Bool = { _ in true },
+                isOnline: @escaping @MainActor () -> Bool = { Health.isOnline }) {
         self.store = store
         self.outbox = CalendarOutbox(store: store)
         self.cache = CalendarCache(store: store)
         self.apiFor = apiFor
         self.isConnected = isConnected
+        self.isOnline = isOnline
     }
 
-    /// Sends everything that is due now. A second call while one is running does nothing.
+    /// Sends everything that is due now. A second call while one is running does nothing; offline it does nothing (the
+    /// changes wait without counting failures).
     public func drain() async {
-        guard !draining else { return }
+        guard !draining, isOnline() else { return }
         draining = true
         defer { draining = false }
         for account in parked where isConnected(account) {
@@ -45,9 +54,9 @@ public final class CalendarSender {
 
     private func send(_ row: CalOutboxRow) async {
         guard let write = row.write else {
-            // Cannot be read, so it can never succeed: keep it and wait the longest.
-            outbox.markFailed(uuid: row.uuid, error: row.lastError)
-            store.activity("calendar", .error, "A queued calendar change can't be read", detail: row.lastError, trace: row.uuid)
+            // Cannot be read, so it can never succeed: keep it (for the record) and never send it.
+            outbox.markDead(uuid: row.uuid, error: row.lastError)
+            store.activity("calendar", .error, "A queued calendar change can't be read; it will not be sent", detail: row.lastError, trace: row.uuid)
             return
         }
         let api = apiFor(row.account)
@@ -76,17 +85,50 @@ public final class CalendarSender {
             if !saved {
                 // Google has it but the board could not note that; wait and try again (safe: creates use a fixed id).
                 outbox.markFailed(uuid: row.uuid, error: "Sent to Google, but the board could not save that")
+            } else {
+                warned[row.uuid] = nil
             }
         } catch GoogleCalendarError.notConnected(let account) {
             parked.insert(account)
             setReconnect(account, true)
             store.activity("calendar", .warning, "\(account) is not connected any more; its calendar changes wait until it is connected again",
                            trace: row.uuid)
+        } catch where Self.isPermanent(error) {
+            outbox.markDead(uuid: row.uuid, error: "\(error)")
+            warned[row.uuid] = nil
+            store.activity("calendar", .error, "Google refused to \(Self.describe(write)) (\(row.account)); it will not be tried again",
+                           detail: "\(error)", trace: row.uuid)
         } catch {
             if case GoogleCalendarError.needsReconnect = error { cache.setNeedsReconnect(account: row.account, calendarID: row.calendarID, true) }
             outbox.markFailed(uuid: row.uuid, error: "\(error)")
-            store.activity("calendar", .warning, "Could not send a calendar change to Google (\(row.account)); will retry",
-                           detail: "\(error)", trace: row.uuid)
+            let text = "\(error)"
+            if warned[row.uuid] != text {
+                warned[row.uuid] = text
+                store.activity("calendar", .warning, "Could not send a calendar change to Google (\(row.account)); will retry",
+                               detail: text, trace: row.uuid)
+            }
+        }
+    }
+
+    /// Google's answers that no retry can change: a bad request (400), no right to change this calendar or event (403, other
+    /// than a rate limit; a missing sign-in permission is `.needsReconnect`, not this), and an event that is not there (404/410
+    /// on a change; a delete of a missing event already counts as done).
+    static func isPermanent(_ error: Error) -> Bool {
+        guard case GoogleCalendarError.http(let status, let body) = error else { return false }
+        switch status {
+        case 400, 404, 410: return true
+        case 403: return !["rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "dailyLimitExceeded"].contains { body.contains($0) }
+        default: return false
+        }
+    }
+
+    /// The change in words for Activity: "add \"Lunch\" to the calendar".
+    private static func describe(_ w: CalWrite) -> String {
+        switch w {
+        case .create(let f, let cardID, _):
+            return "add \"\(f.title)\" to the calendar" + (cardID == nil ? " (discard it on the calendar)" : " (the task stays; Add to calendar can try again)")
+        case .patch: return "change an event"
+        case .delete: return "delete an event"
         }
     }
 }

@@ -217,7 +217,7 @@ extension Store {
     /// Where this task's event is (or will be): the newest create still waiting to be sent, else the saved link.
     func eventTarget(_ cardID: Int64) throws -> EventLink? {
         if let pending = try db.query("""
-            SELECT uuid, account, calendar_id FROM cal_outbox WHERE sent IS NULL AND kind='create' AND card_id=?
+            SELECT uuid, account, calendar_id FROM cal_outbox WHERE sent IS NULL AND failed_at IS NULL AND kind='create' AND card_id=?
             ORDER BY created DESC, rowid DESC LIMIT 1
             """, [cardID], { s in EventLink(account: DB.text(s, 1), calendar: DB.text(s, 2), event: CalendarOutbox.googleEventID(forUUID: DB.text(s, 0))) }).first {
             return pending
@@ -250,12 +250,21 @@ extension Store {
         }
     }
 
+    /// A change for this task or its event still to be sent. One Google refused for good does not count: it will never be
+    /// sent, so it must not hold the task back.
     func hasUnsentCalendarWrite(cardID: Int64, link: EventLink) throws -> Bool {
         let n = try db.query("""
-            SELECT count(*) FROM cal_outbox WHERE sent IS NULL
+            SELECT count(*) FROM cal_outbox WHERE sent IS NULL AND failed_at IS NULL
             AND (card_id=? OR (account=? AND calendar_id=? AND event_id=?))
             """, [cardID, link.account, link.calendar, link.event]) { DB.int($0, 0) }.first ?? 0
         return n > 0
+    }
+
+    /// When the newest change for this event that Google refused for good was queued, if any.
+    private func lastRefusedWrite(_ link: EventLink) throws -> Date? {
+        try db.query("""
+            SELECT max(created) FROM cal_outbox WHERE sent IS NULL AND failed_at IS NOT NULL AND account=? AND calendar_id=? AND event_id=?
+            """, [link.account, link.calendar, link.event]) { DB.date($0, 0) }.first ?? nil
     }
 
     /// The account and calendar a new event goes to: `account`, else the default one in settings, else the first connected;
@@ -364,6 +373,11 @@ extension Store {
             }
         }
 
+        // A board change Google already refused for good is not sent again on every pass; a newer board change is tried once more.
+        if patchTitle != nil || patchStart != nil || patchDay != nil, let refused = try lastRefusedWrite(l.link) {
+            let titleAt = try lastBoardChange(card.id, "title:%"), dueAt = try lastBoardChange(card.id, "due:%")
+            if [titleAt, dueAt].compactMap({ $0 }).allSatisfy({ $0 <= refused }) { patchTitle = nil; patchStart = nil; patchEnd = nil; patchDay = nil }
+        }
         if patchTitle != nil || patchStart != nil || patchDay != nil {
             CalendarOutbox(store: self).enqueue(.patch(eventID: l.link.event, title: patchTitle, start: patchStart, end: patchEnd, allDayStart: patchDay),
                                                 account: l.link.account, calendarID: l.link.calendar, now: now)

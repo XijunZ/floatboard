@@ -65,13 +65,14 @@ import FloatBoardConnectors
         check(f3.requests.count == 2 && c3.calendars().first?.needsReconnect == true && o3.rows(unsent: true).first?.attempts == 1,
               "sender_401_twice_marks_calendar_needs_reconnect")
 
-        // Unreadable row backs off.
+        // Unreadable row: it can never be sent, so it ends for good (kept, never due again).
         let f4 = Fake()
         let (s4, o4, _, sd4) = try setup("bad", f4)
         s4.performForTest("INSERT INTO cal_outbox(uuid,kind,account,calendar_id,payload_json,created,next_try) VALUES('bad','create','\(acct)','\(cal)','not json',1,1)")
         await sd4.drain()
         let r4 = o4.rows(unsent: true).first
-        check(f4.requests.isEmpty && r4?.attempts == 1 && (r4?.nextTry.timeIntervalSinceNow ?? 0) > 30, "sender_unreadable_row_backs_off")
+        check(f4.requests.isEmpty && r4?.attempts == 1 && r4?.failedAt != nil && o4.due(now: Date().addingTimeInterval(86400)).isEmpty,
+              "sender_unreadable_row_ends_for_good")
 
         // A second drain while one runs is skipped.
         let f5 = Fake(); f5.handler = { _ in (eventJSON.replacingOccurrences(of: "EID", with: "g5"), 200) }

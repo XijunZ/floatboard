@@ -147,10 +147,11 @@ public final class DB {
             );
             CREATE INDEX cal_events_start ON cal_events(start);
             -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
+            -- failed_at: Google refused the change for good (it is not retried; last_error says why).
             CREATE TABLE cal_outbox(
                 uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,
                 card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-                next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL
+                next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL
             );
 
             """
@@ -280,10 +281,11 @@ public final class DB {
     );
     CREATE INDEX cal_events_start ON cal_events(start);
         -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
+        -- failed_at: Google refused the change for good (it is not retried; last_error says why).
         CREATE TABLE cal_outbox(
             uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,
             card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-            next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL
+            next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL
         );
 
     """

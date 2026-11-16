@@ -34,6 +34,7 @@ struct TimeGrid: View {
         let waitingNew = outbox.pendingNewEvents(from: from, to: to)
         let events = cache.events(from: from, to: to).filter { !edits.deleted.contains($0.shortID) }.map(edits.shown) + waitingNew
         let pending = Set(waitingNew.map(\.shortID)).union(events.filter { outbox.pending(eventShortID: $0.shortID) }.map(\.shortID))
+        let refused = outbox.failedNewEvents()
         let tasks = store.cards.filter { !$0.withdrawn }
         let placed = days.map { CalendarLayout.columns(for: events, tasks: tasks, day: $0) }
 
@@ -60,11 +61,11 @@ struct TimeGrid: View {
             }
             Divider()
             if snapshotHours != nil {
-                grid(placed: placed, calendars: calendars, pending: pending)
+                grid(placed: placed, calendars: calendars, pending: pending, refused: refused)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
-                        grid(placed: placed, calendars: calendars, pending: pending)
+                        grid(placed: placed, calendars: calendars, pending: pending, refused: refused)
                     }
                     .onAppear { proxy.scrollTo(7, anchor: .top) }
                 }
@@ -72,7 +73,8 @@ struct TimeGrid: View {
         }
     }
 
-    private func grid(placed: [[PlacedItem]], calendars: [String: CalCalendar], pending: Set<Int64>) -> some View {
+    private func grid(placed: [[PlacedItem]], calendars: [String: CalCalendar], pending: Set<Int64>,
+                      refused: [String: (uuid: String, error: String)]) -> some View {
         ZStack(alignment: .topLeading) {
             VStack(spacing: 0) {
                 ForEach(hours, id: \.self) { h in
@@ -88,7 +90,7 @@ struct TimeGrid: View {
             HStack(spacing: 0) {
                 Color.clear.frame(width: gutter)
                 ForEach(Array(days.enumerated()), id: \.offset) { i, d in
-                    DayColumn(day: d, items: placed[i].filter { !$0.inStrip }, hours: hours, calendars: calendars, pending: pending)
+                    DayColumn(day: d, items: placed[i].filter { !$0.inStrip }, hours: hours, calendars: calendars, pending: pending, refused: refused)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -127,6 +129,7 @@ private struct DayColumn: View {
     let hours: [Int]
     let calendars: [String: CalCalendar]
     let pending: Set<Int64>
+    let refused: [String: (uuid: String, error: String)]
 
     @EnvironmentObject var edits: CalendarEdits
     @EnvironmentObject var store: Store
@@ -154,7 +157,7 @@ private struct DayColumn: View {
                     let slot = geo.size.width / CGFloat(item.columns)
                     let top = y(item.start)
                     let height = max(y(item.end) - top, hourHeight / 4)
-                    Block(item: item, height: height, calendars: calendars, pending: pending, columnWidth: geo.size.width)
+                    Block(item: item, height: height, calendars: calendars, pending: pending, refused: refused, columnWidth: geo.size.width)
                         .frame(width: slot - 2, height: height, alignment: .topLeading)
                         .offset(x: slot * CGFloat(item.column) + 1, y: top)
                 }
@@ -206,12 +209,14 @@ private struct Block: View {
     let height: CGFloat
     let calendars: [String: CalCalendar]
     let pending: Set<Int64>
+    let refused: [String: (uuid: String, error: String)]
     let columnWidth: CGFloat
 
     var body: some View {
         switch item.content {
         case .event(let e): EventBlock(event: e, item: item, calendar: calendars[TaskEventRules.key(e.account, e.calendarID)],
-                                       waiting: pending.contains(e.shortID), height: height, columnWidth: columnWidth)
+                                       waiting: pending.contains(e.shortID), refused: e.shortID < 0 ? refused[e.eventID] : nil,
+                                       height: height, columnWidth: columnWidth)
         case .task(let t): TaskBlock(task: t, item: item, height: height, columnWidth: columnWidth)
         }
     }
@@ -230,11 +235,15 @@ private struct EventBlock: View {
     let item: PlacedItem
     let calendar: CalCalendar?
     let waiting: Bool
+    /// A new event Google refused for good: its outbox row and Google's answer (the block offers Discard).
+    let refused: (uuid: String, error: String)?
     let height: CGFloat
     let columnWidth: CGFloat
 
     @EnvironmentObject var edits: CalendarEdits
+    @EnvironmentObject var store: Store
     @State private var open = false
+    @State private var showRefusal = false
     @State private var drag: CGSize = .zero
     @State private var grow: CGFloat = 0
 
@@ -252,7 +261,10 @@ private struct EventBlock: View {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 3) {
                         Text(event.title.isEmpty ? "(no title)" : event.title).font(.system(size: 11, weight: .semibold)).lineLimit(h < 40 || narrow ? 1 : 2)
-                        if waiting {
+                        if refused != nil {
+                            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9)).foregroundStyle(.red)
+                                .help("Google refused this event; click for details")
+                        } else if waiting {
                             Image(systemName: "arrow.up.circle").font(.system(size: 9)).foregroundStyle(.secondary)
                                 .help("Waiting to send to Google")
                         }
@@ -269,7 +281,7 @@ private struct EventBlock: View {
             .background(RoundedRectangle(cornerRadius: 5).fill(colour.opacity(0.16)))
             .clipShape(RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
-            .onTapGesture { if !placeholder { open = true } }
+            .onTapGesture { if refused != nil { showRefusal = true } else if !placeholder { open = true } }
             .gesture(DragGesture(minimumDistance: 4)
                 .onChanged { if editable { drag = $0.translation } }
                 .onEnded { v in
@@ -296,6 +308,20 @@ private struct EventBlock: View {
         .offset(drag)
         .opacity(drag == .zero ? 1 : 0.8)
         .popover(isPresented: $open, arrowEdge: .trailing) { EventPanel(event: event, calendar: calendar, waiting: waiting) }
+        .popover(isPresented: $showRefusal, arrowEdge: .trailing) {
+            if let refused {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Google refused to add this event").font(.system(size: 12, weight: .semibold))
+                    Text(refused.error).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(6).textSelection(.enabled)
+                    HStack {
+                        Spacer()
+                        Button("Discard", role: .destructive) { CalendarOutbox(store: store).discard(uuid: refused.uuid); showRefusal = false }
+                    }
+                    .controlSize(.small)
+                }
+                .padding(12).frame(width: 300)
+            }
+        }
     }
 }
 

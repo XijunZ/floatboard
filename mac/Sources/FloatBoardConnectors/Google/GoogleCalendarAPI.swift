@@ -5,9 +5,9 @@ import FloatBoardCore
 public typealias HTTPFetch = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
 public enum GoogleCalendarError: Error, Equatable {
-    /// Google refused our access (not signed in, or the calendar permission is missing): the user has to sign in again.
+    /// Google refused our access (not signed in, or the calendar permission is missing from the sign-in): the user has to sign in again.
     case needsReconnect(body: String)
-    /// The saved sync bookmark is too old (HTTP 410): forget it and read the whole window again.
+    /// The saved sync bookmark is too old (HTTP 410 on an events list): forget it and read the whole window again.
     case syncExpired
     /// Any other failure, with Google's answer so the cause shows in Activity.
     case http(status: Int, body: String)
@@ -71,9 +71,11 @@ public struct GoogleCalendarAPI: Sendable {
     /// Reads changes for one calendar. With a `syncToken` Google returns only what changed since (and Google forbids a time
     /// window then, so none is sent); without one it returns the events inside `timeMin`...`timeMax`. Recurring events come
     /// as separate instances (`singleEvents=true`). Throws `.syncExpired` when Google says the token is too old.
+    /// An event that can't be read is left out and described in `skipped` (for Activity), so it never blocks the others.
     public func listEvents(calendarID: String, syncToken: String?, timeMin: Date, timeMax: Date)
-        async throws -> (changes: [GoogleEventChange], nextToken: String) {
+        async throws -> (changes: [GoogleEventChange], nextToken: String, skipped: [String]) {
         var changes: [GoogleEventChange] = []
+        var skipped: [String] = []
         var pageToken: String?
         while true {
             var q = [URLQueryItem(name: "singleEvents", value: "true"), URLQueryItem(name: "showDeleted", value: "true"),
@@ -84,13 +86,17 @@ public struct GoogleCalendarAPI: Sendable {
                 q.append(URLQueryItem(name: "timeMax", value: Self.rfc3339(timeMax)))
             }
             if let pageToken { q.append(URLQueryItem(name: "pageToken", value: pageToken)) }
-            let obj = try await json(try await send("GET", "/calendars/\(Self.pathID(calendarID))/events", query: q))
+            let obj = try await json(try await send("GET", "/calendars/\(Self.pathID(calendarID))/events", query: q, mapGone: true))
             for item in obj["items"] as? [[String: Any]] ?? [] {
-                if let c = try Self.change(from: item) { changes.append(c) }
+                do {
+                    if let c = try Self.change(from: item) { changes.append(c) }
+                } catch {
+                    skipped.append("\(error)")
+                }
             }
             if let next = obj["nextPageToken"] as? String { pageToken = next; continue }
             guard let sync = obj["nextSyncToken"] as? String else { throw GoogleCalendarError.badResponse("events list had no nextSyncToken") }
-            return (changes, sync)
+            return (changes, sync, skipped)
         }
     }
 
@@ -252,16 +258,21 @@ public struct GoogleCalendarAPI: Sendable {
         return (data, resp.statusCode)
     }
 
-    private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil) async throws -> Data {
+    /// `mapGone` is true only for an events list, where 410 means the sync bookmark is too old; elsewhere 410 is the event's own state.
+    private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil, mapGone: Bool = false) async throws -> Data {
         let (data, status) = try await raw(method, path, query: query, body: body)
-        return try Self.accept(data, status, mapGone: true)
+        return try Self.accept(data, status, mapGone: mapGone)
     }
 
+    /// A 403 asks the user to sign in again only when the sign-in lacks a permission (Google's reasons `insufficientPermissions`
+    /// or `ACCESS_TOKEN_SCOPE_INSUFFICIENT`); any other 403 (a read-only calendar, a rate limit) is an ordinary error.
     static func accept(_ data: Data, _ status: Int, mapGone: Bool) throws -> Data {
         if (200..<300).contains(status) { return data }
         let body = String(decoding: data, as: UTF8.self)
         if status == 401 { throw GoogleCalendarError.needsReconnect(body: body) }
-        if status == 403, body.contains("insufficientPermissions") || body.contains("PERMISSION_DENIED") { throw GoogleCalendarError.needsReconnect(body: body) }
+        if status == 403, body.contains("insufficientPermissions") || body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+            throw GoogleCalendarError.needsReconnect(body: body)
+        }
         if status == 410, mapGone { throw GoogleCalendarError.syncExpired }
         throw GoogleCalendarError.http(status: status, body: body)
     }
