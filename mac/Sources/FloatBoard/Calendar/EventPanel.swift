@@ -105,9 +105,3 @@ struct EventPanel: View {
         .onDisappear(perform: save)
     }
 }
-
-/// Where the event's "Linked tasks" go (built in Task 9). Nothing is drawn yet.
-struct LinkedTasksSlot: View {
-    let event: CalEvent
-    var body: some View { EmptyView() }
-}

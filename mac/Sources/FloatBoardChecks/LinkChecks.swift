@@ -46,4 +46,52 @@ import FloatBoardCore
 
     check(Search.matches(a, "T-\(a.id)") && Search.matches(a, "t-\(a.id)") && !Search.matches(a, "T-\(a.id + 100)")
           && !Search.matches(a, "T-\(a.id)9"), "search_finds_task_by_id")
+
+    linkPickerChecks(store: store, root: root)
+}
+
+/// The link picker's search (typed id, titles, ranking) and the rule that linking changes nothing else (D14).
+@MainActor private func linkPickerChecks(store: Store, root: URL) {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let hour: TimeInterval = 3600
+    func event(_ n: Int64, _ title: String, hoursFromNow h: Double, gone: Bool = false) -> CalEvent {
+        var e = CalEvent(shortID: n, account: "me@example.com", calendarID: "primary", eventID: "ev\(n)",
+                         start: now.addingTimeInterval(h * hour), end: now.addingTimeInterval((h + 1) * hour), allDay: false,
+                         title: title, location: "", videoLink: "", description: "", htmlLink: "", recurringID: nil,
+                         googleUpdated: now, fbCard: nil)
+        e.gone = gone
+        return e
+    }
+    func task(_ id: Int64, _ title: String, done: Bool = false) -> Card {
+        Card(id: id, title: title, notes: "", area: "Personal", importance: .medium, due: nil, status: done ? .done : .todo,
+             created: now, started: nil, done: done ? now : nil)
+    }
+    let tasks = [task(142, "Prepare the deck"), task(1420, "Deck follow-up"), task(7, "Old deck", done: true), task(9, "Book venue")]
+    let events = [event(37, "Deck review", hoursFromNow: 26), event(370, "Deck kickoff", hoursFromNow: -48),
+                  event(38, "Deck sync", hoursFromNow: 2), event(39, "Deck retro", hoursFromNow: -3), event(40, "Gone deck", hoursFromNow: 1, gone: true)]
+
+    func ids(_ kind: ItemKind, _ q: String, exclude: Set<ShortID> = []) -> [String] {
+        LinkPickerSearch.candidates(kind: kind, cards: tasks, events: events, query: q, now: now, exclude: exclude).map(\.id.text)
+    }
+    check(ids(.task, "t-142") == ["T-142"] && ids(.event, "E-37") == ["E-37"] && ids(.event, " e-370 ") == ["E-370"]
+          && ids(.task, "T-5").isEmpty && ids(.task, "E-37").isEmpty && ids(.event, "t-142").isEmpty,
+          "link_picker_resolves_typed_id")
+
+    check(ids(.event, "deck") == ["E-38", "E-37", "E-39", "E-370"] && ids(.event, "") == ["E-38", "E-37", "E-39", "E-370"]
+          && ids(.task, "deck") == ["T-1420", "T-142", "T-7"] && ids(.task, "venue") == ["T-9"]
+          && ids(.event, "deck", exclude: [ShortID(kind: .event, number: 38)]) == ["E-37", "E-39", "E-370"],
+          "link_picker_search_ranks_upcoming_first")
+
+    // Linking only writes the links table: the task's due and the calendar outbox stay as they were.
+    store.add(title: "Keep my time", area: "Personal", importance: .medium, due: now, dueHasTime: true)
+    guard let t = store.cards.first(where: { $0.title == "Keep my time" }) else { check(false, "link picker setup: card missing"); return }
+    func outbox() -> Int64 { (try? store.db.query("SELECT COUNT(*) FROM cal_outbox") { DB.int($0, 0) })?.first ?? -1 } // try?-ok: -1 fails the check
+    let before = outbox()
+    store.link(ShortID(kind: .task, number: t.id), ShortID(kind: .event, number: 37), actor: .user)
+    store.unlink(ShortID(kind: .task, number: t.id), ShortID(kind: .event, number: 37))
+    store.link(ShortID(kind: .task, number: t.id), ShortID(kind: .event, number: 38), actor: .user)
+    let after = store.card(t.id)
+    check(after?.due == t.due && after?.dueHasTime == true && outbox() == before && before >= 0
+          && store.links(of: ShortID(kind: .task, number: t.id)) == [ShortID(kind: .event, number: 38)],
+          "linking_never_changes_due_or_enqueues_write")
 }
