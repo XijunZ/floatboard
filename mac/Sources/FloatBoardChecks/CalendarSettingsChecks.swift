@@ -64,7 +64,7 @@ import FloatBoardCore
         cache.apply(account: a, calendarID: a, changes: [ev("from-a")], nextToken: nil)
         cache.apply(account: b, calendarID: b, changes: [ev("from-b")], nextToken: nil)
         let win = (t0.addingTimeInterval(-60), t0.addingTimeInterval(7200))
-        var connected: Set<String> = [a, b]
+        var connected: [String] = [a, b]
         CalendarCache.connectedAccounts = { connected }
         defer { CalendarCache.connectedAccounts = nil }
         check(Set(cache.events(from: win.0, to: win.1).map(\.title)) == ["from-a", "from-b"], "settings: both accounts' events show while connected")

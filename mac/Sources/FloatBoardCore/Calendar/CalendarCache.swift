@@ -12,16 +12,17 @@ public final class CalendarCache {
     public init(db: DB, store: Store? = nil) { self.db = db; self.store = store }
     public convenience init(store: Store) { self.init(db: store.db, store: store) }
 
-    /// The accounts that are connected right now. What the calendar and the bar show leaves out the others (a removed account's
-    /// events stay saved, with each calendar's shown choice, and come back when the account is added again). Nil: no filtering
-    /// (the sync and the checks). The app sets it from its list of Google accounts.
-    public static var connectedAccounts: (() -> Set<String>)?
+    /// The accounts that are connected right now, in the app's order (as Settings lists them; "the first connected" is the
+    /// first here). What the calendar and the bar show leaves out the others (a removed account's events stay saved, with each
+    /// calendar's shown choice, and come back when the account is added again). Nil: no filtering (the sync and the checks).
+    /// The app sets it from its list of Google accounts.
+    public static var connectedAccounts: (() -> [String])?
 
     /// SQL for "only connected accounts" on the event table `e`, with its arguments.
     private static func connectedClause() -> (String, [Any?]) {
-        guard let set = connectedAccounts?() else { return ("", []) }
-        if set.isEmpty { return (" AND 0", []) }
-        let list = set.sorted()
+        guard let connected = connectedAccounts?() else { return ("", []) }
+        if connected.isEmpty { return (" AND 0", []) }
+        let list = Set(connected).sorted()
         return (" AND e.account IN (" + list.map { _ in "?" }.joined(separator: ",") + ")", list)
     }
 
@@ -56,8 +57,14 @@ public final class CalendarCache {
 
     /// The calendars of connected accounts only: what can be shown or chosen for a new event.
     public func connectedCalendars() -> [CalCalendar] {
-        guard let set = Self.connectedAccounts?() else { return calendars() }
+        guard let connected = Self.connectedAccounts?() else { return calendars() }
+        let set = Set(connected)
         return calendars().filter { set.contains($0.account) }
+    }
+
+    /// The connected accounts in order: the app's list, or (without one: the sync and the checks) every account with a saved calendar.
+    public func connectedAccountList() -> [String] {
+        Self.connectedAccounts?() ?? Array(Set(calendars().map(\.account))).sorted()
     }
 
     @discardableResult

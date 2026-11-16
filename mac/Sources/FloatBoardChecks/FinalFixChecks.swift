@@ -176,6 +176,27 @@ import FloatBoardConnectors
     } catch { check(false, "undo checks: \(error)") }
 
     await outboxFailureChecks(setup: setup, at: { at($0, $1, plusDays: $2) })
+
+    // 6. New events never go to a removed account: one rule for tasks and the New event sheet.
+    do {
+        let (store, cache, outbox) = try setup("default")
+        let gone = "gone@example.com", other = "other@example.com"
+        for a in [gone, other] {
+            cache.upsertCalendars(account: a, [CalCalendar(account: a, calendarID: a, name: a, color: "#123456", owned: true, shown: true)])
+        }
+        CalendarCache.connectedAccounts = { [other, acct] }   // gone@ was removed in Settings; its calendars stay saved
+        defer { CalendarCache.connectedAccounts = nil }
+        store.setDefaultCalendarAccount(gone)
+        store.add(title: "Pick up parcel", area: store.areas.first?.name ?? "Work", importance: .medium, due: nil)
+        let id = store.cards.last?.id ?? 0
+        store.placeOnCalendar(cardID: id, start: at(14), account: nil)
+        let taskAccount = outbox.rows(unsent: true).first?.account
+        let options = cache.connectedCalendars().filter { $0.owned && $0.shown }
+        let sheet = store.newEventCalendar(among: options)
+        check(taskAccount == other && sheet?.account == other && sheet?.calendarID == other, "new_events_skip_a_removed_default_account")
+        store.setDefaultCalendarAccount(acct)
+        check(store.newEventCalendar(among: options)?.account == acct && store.newEventCalendar()?.calendarID == acct, "new_events_use_the_connected_default")
+    } catch { check(false, "default calendar checks: \(error)") }
 }
 
 /// 5. Google's answers that can never succeed end a change for good (one Activity error, no more retries); only a missing
