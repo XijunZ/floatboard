@@ -96,7 +96,8 @@ struct ReviewBanner: View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark.seal").foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Time to review " + periods.map(\.title).joined(separator: " and ")).font(.system(size: 13, weight: .semibold))
+                Text("Time to review " + periods.map { $0.title + (Date() >= $0.interval.end.addingTimeInterval(Double(ResolutionNudges.daysAfter) * 86400) ? " (overdue)" : "") }
+                    .joined(separator: " and ")).font(.system(size: 13, weight: .semibold))
                 Text("For each goal: kept, changed or dropped, and a short note. Then set the next period's goals.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }

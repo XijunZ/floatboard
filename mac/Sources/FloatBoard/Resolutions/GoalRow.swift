@@ -28,6 +28,12 @@ struct GoalRow: View {
                 Text(goal.title).font(.system(size: 13, weight: .medium)).lineLimit(expanded ? nil : 1)
                     .foregroundStyle(goal.status == .active ? .primary : .secondary)
                 if goal.status != .active { StatusBadge(goal: goal) }
+                if goal.reviewOverdue(now: Date()) {
+                    Text("Review overdue").font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.orange.opacity(0.22)))
+                        .help("\(goal.period.title) has ended. Review it from the banner at the top; it carries on into the current period.")
+                }
                 Spacer(minLength: 8)
                 if let parent {
                     Text("under \(parent.shortID.text)").font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()

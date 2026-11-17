@@ -60,12 +60,15 @@ most once per period: the period key is saved in `meta` (`resolutions_nudged_qua
 (the budget's settings; the nudge waits for their end) and not while the module is off. Q4 = year end: one notification
 covers both ("Quarter and year review"). Shown by the app's existing minute ticker (`AssistantTicker` calls
 `ResolutionNudges` through a hook registered by the area: `ResolutionsTicker`), as a Mac notification; the Resolutions tab
-shows a "Review Q4 2026" banner while a review is open. Builder's call: Mac only (reviews are done on the Mac, §10).
+shows a "Review Q4 2026" banner while a review is open. **A missed window never closes a review** (Codex RS-B): any ended
+period with an active goal stays in the banner as "(overdue)" and its goals show "Review overdue"; it is not nudged again.
+A late review carries kept/changed goals into the next period, or the current period when the next one is already over
+(`rolloverPeriod`); the reviewed version stays as it was. Builder's call: Mac only (reviews are done on the Mac, §10).
 
 ## 4. Foundation extension (separate commit "Foundation: …")
 
 `MentionKinds.register(_ target: ItemKind, _ f: (Store, ShortID, ShortID) -> ItemLinkKind?)` in `Board/Links.swift`:
-`linkMentionsRow` asks the registered rule for the target's kind and falls back to `related`. Resolutions registers
+`linkMentionsRow` asks the registered rule for the target's kind and falls back to `related`. A typed id only adds a link: a pair already linked (any kind) is never changed by typing (Codex RS-A). Resolutions registers
 `.resolution`: a T/J/D typing an active yearly or quarterly `R-n` → `serves`; anything else → `related`. No signature
 changes; with nothing registered the behaviour is exactly as before.
 

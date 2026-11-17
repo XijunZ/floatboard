@@ -20,6 +20,7 @@ import SQLite3
     resolutionNudgeChecks(root)
     resolutionSearchPhoneChecks(root)
     resolutionTypedIDKeepsLinksChecks(root)
+    resolutionOverdueChecks(root)
 }
 
 /// 12:00 on a day in the app's zone.
@@ -357,3 +358,20 @@ private func makeV12Schema(_ url: URL) -> Bool {
     check(store.itemLinks(of: j.shortID).first { $0.other == t2 }?.kind == .source, "typed_id_never_replaces_another_link_kind")
 }
 
+/// RS-B: a period whose review window was missed can still be reviewed; the continuation goes to the current period.
+@MainActor private func resolutionOverdueChecks(_ root: URL) {
+    guard let store = goalsStore(root, "overdue.sqlite") else { return }
+    let r = ResolutionStore(store: store)
+    guard let old = make(r, .quarter, "2026-Q2", "Missed review"), let oldY = make(r, .year, "2025", "Missed year") else { return }
+    let reviews = ResolutionNudges.openReviews(store: store, now: nov17).map(\.key)
+    check(reviews.contains("2026-Q2") && reviews.contains("2025") && r.goal(old.id)?.reviewOverdue(now: nov17) == true
+          && r.goal(oldY.id)?.reviewOverdue(now: nov17) == true, "missed_review_stays_open_as_overdue")
+    check(ResolutionNudges.due(store: store, now: nov17).isEmpty, "overdue_review_is_not_nudged_again_outside_its_window")
+    guard case .success(let next?) = r.review(old.id, outcome: .kept, note: "", newTitle: nil, now: nov17) else {
+        check(false, "overdue_review_rolls_over_into_the_current_period"); return
+    }
+    check(next.period.key == "2026-Q4" && r.goal(old.id)?.status == .kept && r.goal(old.id)?.period.key == "2026-Q2"
+          && r.rolloverPeriod(of: GoalPeriod.parse(level: .quarter, key: "2026-Q4")!, now: day(2026, 12, 20)).key == "2027-Q1",
+          "overdue_review_rolls_over_into_the_current_period")
+    check(!ResolutionNudges.openReviews(store: store, now: nov17).map(\.key).contains("2026-Q2"), "reviewed_overdue_period_closes")
+}
