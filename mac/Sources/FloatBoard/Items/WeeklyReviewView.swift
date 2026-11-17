@@ -27,12 +27,16 @@ struct WeeklyReviewView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(section.title).font(.system(size: 13, weight: .semibold))
                                 ForEach(items) { i in
-                                    HStack(spacing: 6) {
-                                        if let id = i.item { Text(id.text).monospacedDigit().foregroundStyle(.secondary) }
-                                        Text(i.title).lineLimit(1)
-                                        if !i.detail.isEmpty { Text(i.detail).foregroundStyle(.secondary).lineLimit(1) }
+                                    if let row = WeeklyReviewRows.views[section.id] {
+                                        row(i)
+                                    } else {
+                                        HStack(spacing: 6) {
+                                            if let id = i.item { Text(id.text).monospacedDigit().foregroundStyle(.secondary) }
+                                            Text(i.title).lineLimit(1)
+                                            if !i.detail.isEmpty { Text(i.detail).foregroundStyle(.secondary).lineLimit(1) }
+                                        }
+                                        .font(.system(size: 12))
                                     }
-                                    .font(.system(size: 12))
                                 }
                             }
                         }
@@ -43,4 +47,10 @@ struct WeeklyReviewView: View {
         .padding(16)
         .frame(width: 520, height: 420, alignment: .topLeading)
     }
+}
+
+/// How an area draws its rows on the weekly review page (buttons such as "Not a decision" or "Review"), by section id.
+/// A section without one gets the plain row (id, title, detail).
+@MainActor enum WeeklyReviewRows {
+    static var views: [String: (ReviewItem) -> AnyView] = [:]
 }

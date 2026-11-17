@@ -4,6 +4,7 @@
     { "key": "group_notes", "label": "What each group means", "kind": "groupNotes", "help": "Claude uses these to put new tasks in the right group." },
     { "key": "rulebook_email", "label": "Email rulebook", "kind": "longtext", "help": "How FloatBoard judges email. Starts as the built-in rulebook; edit it freely, restore any earlier version, or reset it to the built-in one." },
     { "key": "rulebook_chat", "label": "Chat rulebook", "kind": "longtext", "help": "How FloatBoard judges WhatsApp and WeChat messages. Starts as the built-in rulebook; edit it freely, restore any earlier version, or reset it to the built-in one." },
+    { "key": "rulebook_decisions", "label": "Decisions rulebook", "kind": "longtext", "help": "How FloatBoard finds decisions in your jots each week. Starts as the built-in rulebook; \"Not a decision\" adds examples to it; edit it freely, restore any earlier version, or reset it to the built-in one." },
     { "key": "my_rules", "label": "Your rules", "kind": "longtext", "help": "Plain words, one rule per line, for everything FloatBoard reads. To aim a rule at one place, start it with Email:, WhatsApp: or Meetings:. Your rules win over the built-in rulebook." },
     { "key": "learned", "label": "What FloatBoard has learned about you", "kind": "longtext", "help": "Built from your corrections. You can edit it." },
     { "key": "chat_rules", "label": "Your WhatsApp rules (older)", "kind": "longtext", "help": "Kept from before: these now belong in Your rules, each line starting with WhatsApp:." },

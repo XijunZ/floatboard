@@ -6,7 +6,7 @@ import Foundation
 /// you wrote them; only lines you never touched take the new wording. Each merge is a version you can restore.
 public enum RulebookSync {
     /// Engine rulebook key → settings key.
-    public static let keys = ["email": "rulebook_email", "chat": "rulebook_chat"]
+    public static let keys = ["email": "rulebook_email", "chat": "rulebook_chat", "decisions": "rulebook_decisions"]
 
     static func baseKey(_ connector: String, _ key: String) -> String { "rulebook.base.\(connector).\(key)" }
 

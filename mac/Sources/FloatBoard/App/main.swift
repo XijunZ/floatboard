@@ -154,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 pushBoard: { [weak self] in self?.connectors.trigger("jot nudge shown") })
         jotsTicker?.start()
         CircleRunner.shared.start(store: store, ui: ui, show: { [weak self] r in self?.reminders?.schedule(r) })   // Circle's readers and reminders
+        DecisionsApp.start(store: store, ui: ui)   // Decisions: registrations, review reminders, the weekly screening
         // A new time zone (chosen in Settings, or the Mac's own when following it) re-reads the board, so every screen
         // and the reminders redraw in it.
         for name in [AppTime.didChange, .NSSystemTimeZoneDidChange] {

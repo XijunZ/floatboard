@@ -284,6 +284,8 @@ enum Snapshot {
         if ProcessInfo.processInfo.environment["FLOATBOARD_JOTSHOTS"] != nil, LocalData.isScratchDatabase {
             JotsSnapshots.run(dir: dir, store: store, ui: ui, google: google)   // Jots pictures, light and dark
         }
+        // Decisions (its own file): FLOATBOARD_DECISIONSHOTS=1, scratch database only.
+        if ProcessInfo.processInfo.environment["FLOATBOARD_DECISIONSHOTS"] != nil { DecisionsShots.run(dir: dir, store: store, ui: ui, google: google) }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so each Settings section is drawn directly.
         for s in SettingsSection.allCases {
