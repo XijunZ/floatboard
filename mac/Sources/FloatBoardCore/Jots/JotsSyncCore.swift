@@ -27,11 +27,21 @@ public struct EngineJot: Equatable {
     public var rev: Int
     public var ref: String?
     public var meeting: MeetingMeta?
+    /// Earlier texts the engine kept until this Mac has them in the jot's history (never thrown away).
+    public var versions: [EarlierText]
     public init(key: String, macID: Int64?, text: String, kind: String, source: String, tags: [String] = [], added: Date, updated: Date,
-                deleted: Bool = false, rev: Int, ref: String? = nil, meeting: MeetingMeta? = nil) {
+                deleted: Bool = false, rev: Int, ref: String? = nil, meeting: MeetingMeta? = nil, versions: [EarlierText] = []) {
+        self.versions = versions
         self.key = key; self.macID = macID; self.text = text; self.kind = kind; self.source = source; self.tags = tags; self.added = added
         self.updated = updated; self.deleted = deleted; self.rev = rev; self.ref = ref; self.meeting = meeting
     }
+}
+
+/// A text the engine kept for a jot's history: one a phone change replaced, or a phone edit older than this Mac's version.
+public struct EarlierText: Equatable {
+    public let text: String
+    public let at: Date
+    public init(text: String, at: Date) { self.text = text; self.at = at }
 }
 
 /// What the Mac tells the engine it saved: the row's key and the version (`rev`) it saw, and the jot's number.
@@ -85,6 +95,7 @@ public struct JotAck: Equatable {
             }
             if let id = r.macID ?? js.jot(origin: r.key)?.id {
                 guard let j = js.jot(id) else { acks.append(JotAck(key: r.key, rev: r.rev, macID: id)); continue }
+                js.keepInHistory(id, r.versions + (r.updated > j.updated ? [] : [EarlierText(text: r.text, at: r.updated)]))
                 if r.updated > j.updated {
                     if !r.deleted && j.deleted { js.undoDelete(id, now: r.updated) }
                     if r.text != j.text && !r.deleted { js.update(id, text: r.text, now: r.updated) }
@@ -96,6 +107,11 @@ public struct JotAck: Equatable {
                 acks.append(JotAck(key: r.key, rev: r.rev, macID: id))
                 continue
             }
+            if r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // A delete or restore of a jot this Mac never had (or an empty capture): nothing to keep; taken, not left waiting.
+                acks.append(JotAck(key: r.key, rev: r.rev, macID: nil))
+                continue
+            }
             let saved: Jot?
             if r.kind == JotKind.meetingNotes.rawValue {
                 saved = js.takeMeetingNotes(r.text, meta: r.meeting ?? MeetingMeta(recapKey: r.key, received: r.added), origin: r.key, now: r.added)
@@ -105,7 +121,8 @@ public struct JotAck: Equatable {
                 if let s = saved, r.updated > r.added { store.perform { try store.db.run("UPDATE jots SET updated=? WHERE id=?", [r.updated, s.id]) } }
                 if let s = saved, r.deleted { js.delete(s.id, now: r.updated) }
             }
-            guard let saved else { continue }   // not saved (empty, or the write failed and is in Activity): it stays waiting
+            guard let saved else { continue }   // the write failed (it is in Activity): it stays waiting
+            js.keepInHistory(saved.id, r.versions)
             acks.append(JotAck(key: r.key, rev: r.rev, macID: saved.id))
         }
         return acks

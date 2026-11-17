@@ -85,14 +85,18 @@ describe("jots: phone captures and edits reach the Mac", () => {
     const u = await setup("Newest");
     const t0 = Date.now() - 60_000;
     await putJots(u.key, { jots: [jot(1, { text: "Mac text", updated: iso(t0) })] });
-    // An edit made before the Mac's version is superseded.
+    // An edit made before the Mac's version does not replace it, but is never thrown away: it goes to the Mac for the history.
     const old = await phoneSend(u.cookie, [{ id: "edit-0001", op: "edit", key: "J-1", text: "Stale", made_at: iso(t0 - 1000) }]);
-    expect((await old.json<any>()).dropped).toEqual([{ id: "edit-0001", reason: "superseded" }]);
-    expect((await waiting(u.key)).jots).toHaveLength(0);
+    const oldBody = await old.json<any>();
+    expect(oldBody.accepted).toEqual(["edit-0001"]);
+    expect(oldBody.superseded).toEqual(["edit-0001"]);
+    let w = await waiting(u.key);
+    expect(w.jots).toEqual([expect.objectContaining({ key: "J-1", text: "Mac text", versions: [expect.objectContaining({ text: "Stale" })] })]);
+    await ack(u.key, [{ key: "J-1", rev: w.jots[0].rev, mac_id: 1 }]);
     // A newer one waits for the Mac; a Mac push with an older version keeps the phone's text.
     await phoneSend(u.cookie, [{ id: "edit-0002", op: "edit", key: "J-1", text: "Phone text", made_at: iso(t0 + 20_000) }]);
     await putJots(u.key, { jots: [jot(1, { text: "Mac text again", updated: iso(t0 + 10_000) })] });
-    let w = await waiting(u.key);
+    w = await waiting(u.key);
     expect(w.jots).toEqual([expect.objectContaining({ key: "J-1", mac_id: 1, text: "Phone text" })]);
     expect((await phoneJots(u.cookie)).jots[0].text).toBe("Phone text");
     // A stale ack (the phone changed it again meanwhile) leaves it waiting.
@@ -106,6 +110,52 @@ describe("jots: phone captures and edits reach the Mac", () => {
     // A newer Mac version replaces the copy.
     await putJots(u.key, { jots: [jot(1, { text: "Mac final", updated: iso(t0 + 40_000) })] });
     expect((await phoneJots(u.cookie)).jots[0].text).toBe("Mac final");
+  });
+
+  it("phone_edits_keep_the_earlier_texts_until_the_mac_saved_them", async () => {
+    const u = await setup("Versions");
+    const t0 = Date.now() - 60_000;
+    await putJots(u.key, { jots: [jot(1, { text: "Mac text", updated: iso(t0) })] });
+    await phoneSend(u.cookie, [{ id: "edit-0101", op: "edit", key: "J-1", text: "P1", made_at: iso(t0 + 1000) },
+      { id: "edit-0102", op: "edit", key: "J-1", text: "P2", made_at: iso(t0 + 2000) }]);
+    const w = await waiting(u.key);
+    expect(w.jots[0].text).toBe("P2");
+    expect(w.jots[0].versions.map((v: any) => v.text)).toEqual(["Mac text", "P1"]);
+    const kept = () => env.DB.prepare("SELECT count(*) n FROM jot_copy_versions WHERE user_id=?").bind(u.id).first<number>("n");
+    expect(await kept()).toBe(2);
+    await ack(u.key, [{ key: "J-1", rev: w.jots[0].rev, mac_id: 1 }]);
+    expect(await kept()).toBe(0);
+  });
+
+  it("a_newer_mac_version_keeps_a_waiting_phone_edit_for_the_history", async () => {
+    const u = await setup("Mac newer");
+    const t0 = Date.now() - 60_000;
+    await putJots(u.key, { jots: [jot(1, { text: "Mac text", updated: iso(t0) })] });
+    await phoneSend(u.cookie, [{ id: "edit-0201", op: "edit", key: "J-1", text: "Phone words", made_at: iso(t0 + 10_000) }]);
+    await putJots(u.key, { jots: [jot(1, { text: "Mac newer", updated: iso(t0 + 20_000) })] });
+    expect((await phoneJots(u.cookie)).jots[0].text).toBe("Mac newer");
+    const w = await waiting(u.key);
+    expect(w.jots).toEqual([expect.objectContaining({ key: "J-1", text: "Mac newer" })]);
+    expect(w.jots[0].versions.map((v: any) => v.text)).toContain("Phone words");
+  });
+
+  it("changes_to_a_jot_the_copy_no_longer_holds_wait_for_the_mac", async () => {
+    const u = await setup("Expired");
+    await putJots(u.key, { jots: [jot(1, { text: "Old jot" }), jot(2, { text: "Other" })] });
+    await env.DB.prepare("UPDATE jot_copies SET mac_saved_at=? WHERE user_id=?").bind(iso(Date.now() - 31 * DAY), u.id).run();
+    await purgeJots(env);
+    const r = await (await phoneSend(u.cookie, [{ id: "edit-0301", op: "edit", key: "J-1", text: "Edited after expiry", made_at: iso(Date.now()) },
+      { id: "del-00302", op: "delete", key: "J-2", made_at: iso(Date.now()) },
+      { id: "edit-0303", op: "edit", key: "phone:gone-0001", text: "Edit of a capture the engine never had", made_at: iso(Date.now()) },
+      { id: "mk-000304", op: "make_task", key: "J-1", text: "Call Ann", made_at: iso(Date.now()) }])).json<any>();
+    expect(r.dropped).toEqual([]);
+    expect(r.accepted).toHaveLength(4);
+    const w = await waiting(u.key);
+    const by = Object.fromEntries(w.jots.map((j) => [j.key, j]));
+    expect(by["J-1"]).toMatchObject({ mac_id: 1, text: "Edited after expiry", deleted: false });
+    expect(by["J-2"]).toMatchObject({ mac_id: 2, deleted: true });
+    expect(by["phone:gone-0001"]).toMatchObject({ mac_id: null, text: "Edit of a capture the engine never had" });
+    expect(by["action:mk-000304"]).toMatchObject({ ref: "J-1", text: "Call Ann" });
   });
 
   it("phone_delete_and_make_task_wait_for_the_mac", async () => {
