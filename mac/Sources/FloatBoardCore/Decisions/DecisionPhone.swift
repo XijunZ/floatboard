@@ -95,4 +95,13 @@ public struct PhoneDecisionAction: Codable, Equatable {
         }
         return (applied, skipped)
     }
+
+    /// The hash of the copy an engine last accepted (so an unchanged copy is not sent again).
+    public static func sentHash(store: Store, connector: String) -> String? {
+        (try? store.db.query("SELECT value FROM meta WHERE key=?", ["decisions.phone_hash.\(connector)"]) { DB.text($0, 0) })?.first // try?-ok: unknown = send again
+    }
+
+    public static func setSentHash(_ hash: String, store: Store, connector: String) {
+        store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", ["decisions.phone_hash.\(connector)", hash]) }
+    }
 }
