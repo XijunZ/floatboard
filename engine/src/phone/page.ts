@@ -52,6 +52,9 @@ header.top h1{font-size:24px}
 .updated.off{color:var(--text)}
 .note{font-size:13px;color:var(--muted);margin:0 0 8px 4px}
 nav.tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:6px 0 10px}
+nav.views{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:4px 0 2px}
+.view{min-height:36px;border:0;border-radius:12px;background:transparent;color:var(--muted);font:inherit;font-weight:600}
+.view[aria-selected=true]{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
 .tab{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:58px;padding:6px 2px;border-radius:14px;
 color:var(--muted);font-size:13px;font-weight:600}
 .tab .row{display:flex;align-items:center;gap:5px}
@@ -162,13 +165,14 @@ const BODY = `${ICONS}
 <header class="top"><div class="title"><h1>FloatBoard</h1><div id="sync-status" class="updated" role="status" aria-live="polite"></div></div>
 <button id="refresh" class="icon-btn" aria-label="Sync now">${icon("refresh")}</button>
 <button id="open-settings" class="icon-btn" aria-label="Settings">${icon("gear")}</button></header>
+<nav class="views" role="tablist" aria-label="Screens"><button class="view" type="button" role="tab" data-view="board" aria-selected="true">Board</button><button class="view" type="button" role="tab" data-view="plan" aria-selected="false">Plan</button></nav>
 <nav class="tabs" role="tablist">${tab("todo", "To do")}${tab("doing", "Doing")}${tab("watch", "Watch")}${tab("done", "Done today")}</nav>
 </div>
 <p id="sync-note" class="note" role="status" hidden></p>
 <div id="pending-note" class="banner" hidden></div>
-<div id="today" class="today" hidden></div>
 <div id="list" class="list" role="tabpanel"></div>
 <p id="empty" class="empty" hidden></p>
+<section id="plan" class="plan" role="tabpanel" hidden><div id="today" class="today"></div><p id="plan-empty" class="empty" hidden>Nothing planned for today, the rest of this week or next week.</p></section>
 <button id="add" class="fab" aria-label="Add a task">${icon("plus")}</button>
 </main>
 

@@ -134,6 +134,18 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
     expect(PAGE_HTML).toContain('<button id="undo-btn" class="undo-btn" type="button">Undo</button>');
   });
 
+  it("the_app_opens_on_the_board_and_plan_is_the_second_screen", () => {
+    const board = PAGE_HTML.indexOf('data-view="board"'), plan = PAGE_HTML.indexOf('data-view="plan"');
+    expect(board).toBeGreaterThan(-1);
+    expect(plan).toBeGreaterThan(board);
+    // The planning summary lives in its own Plan panel, hidden until chosen; never above the board's list.
+    expect(PAGE_HTML).toMatch(/<section id="plan" class="plan" role="tabpanel" hidden>[\s\S]*<div id="today" class="today"/);
+    expect(PAGE_HTML.indexOf('id="today"')).toBeGreaterThan(PAGE_HTML.indexOf('id="list"'));
+    // Every launch starts on the Board: the choice is not stored.
+    expect(APP_JS).toContain('var view = "board";');
+    expect(APP_JS).not.toMatch(/store\([^)]*view/);
+  });
+
   it("task_sheet_has_a_button_per_link_opening_in_a_new_tab", () => {
     expect(APP_JS).toMatch(/cardLinks\(c\)\.forEach\(function \(l\) \{[\s\S]*a\.target = "_blank";\s*a\.rel = "noopener noreferrer";[\s\S]*createTextNode\(linkLabel\(l\)\)/);
     for (const i of ["video", "mail", "calendar", "link"]) expect(PAGE_HTML).toContain(`<symbol id="i-${i}"`);

@@ -32,6 +32,8 @@
   var failures = 0;
   var retryTimer = 0;
   var tab = "todo";
+  // The screen shown: the Board (always at launch: this is never stored), then Plan (the planning summary).
+  var view = "board";
   var current = "loading";
   var busy = false;
   var sheetOpen = false;
@@ -440,6 +442,7 @@
       });
     } catch (err) { console.error("Planning summary failed", err); box.replaceChildren(); any = false; }
     box.hidden = !any;
+    $("plan-empty").hidden = any;
   }
 
   function render() {
@@ -466,6 +469,16 @@
       watch: "Nothing you're waiting on.",
       done: "Nothing done yet today.",
     }[tab];
+    // Board or Plan: the status tabs, list and + belong to the Board.
+    var onPlan = view === "plan";
+    $("plan").hidden = !onPlan;
+    document.querySelector("nav.tabs").hidden = onPlan;
+    list.hidden = onPlan;
+    if (onPlan) $("empty").hidden = true;
+    $("add").hidden = onPlan;
+    ["board", "plan"].forEach(function (v) {
+      document.querySelector('[data-view="' + v + '"]').setAttribute("aria-selected", String(v === view));
+    });
   }
 
   var noteTimer = 0;
@@ -1082,6 +1095,9 @@
 
   STATUSES.forEach(function (s) {
     document.querySelector('[data-tab="' + s + '"]').addEventListener("click", function () { tab = s; render(); window.scrollTo(0, 0); });
+  });
+  ["board", "plan"].forEach(function (v) {
+    document.querySelector('[data-view="' + v + '"]').addEventListener("click", function () { view = v; render(); window.scrollTo(0, 0); });
   });
   $("pair-go").addEventListener("click", pair);
   $("pair-skip").addEventListener("click", function () { sessionSet(PAIR_KEY, null); start(); });
