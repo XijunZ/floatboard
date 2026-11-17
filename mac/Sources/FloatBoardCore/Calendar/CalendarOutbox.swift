@@ -54,16 +54,16 @@ public final class CalendarOutbox {
         if on { store.calendarInFlight.insert(uuid) } else { store.calendarInFlight.remove(uuid) }
     }
 
-    /// Saves the change and returns its id. Returns "" (and logs to Activity) if it could not be saved.
+    /// Saves the change and returns its id. `delay` holds it back that long before it may be sent. Returns "" (and logs to Activity) if it could not be saved.
     @discardableResult
-    public func enqueue(_ w: CalWrite, account: String, calendarID: String, now: Date = Date()) -> String {
+    public func enqueue(_ w: CalWrite, account: String, calendarID: String, now: Date = Date(), delay: TimeInterval = 0) -> String {
         let uuid = UUID().uuidString
         do {
             let json = try Self.encode(w)
             try db.run("""
                 INSERT INTO cal_outbox(uuid, kind, account, calendar_id, event_id, card_id, payload_json, created, attempts, next_try, last_error)
                 VALUES(?,?,?,?,?,?,?,?,0,?,'')
-                """, [uuid, w.kind, account, calendarID, w.eventID, w.cardID, json, now, now])
+                """, [uuid, w.kind, account, calendarID, w.eventID, w.cardID, json, now, now.addingTimeInterval(delay)])
             return uuid
         } catch {
             store.activity("calendar", .error, "Could not queue a calendar change", detail: "\(error)")
