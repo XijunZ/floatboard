@@ -15,7 +15,7 @@ struct GuideView: View {
                     swatch(fill: UrgencyStyle.fill(.today, neutral: .clear), ring: false, tint: UrgencyStyle.tint(.today), "Due today", "light orange")
                     swatch(fill: UrgencyStyle.fill(.tomorrow, neutral: .clear), ring: false, tint: UrgencyStyle.tint(.tomorrow), "Due tomorrow", "light yellow")
                     swatch(fill: Color.primary.opacity(0.08), ring: false, "Later or no due date", "plain")
-                    line("11-08", "On the bar: due month-day (configurable on the Bar tab)")
+                    line("11-08", "On the bar: due month-day (configurable in Settings › Bar)")
                 }
                 section("Importance") {
                     line("!!!", "High")
@@ -31,7 +31,7 @@ struct GuideView: View {
                         Text("Coloured pill = group. Click to move to the next group; right-click to choose.")
                             .font(.system(size: 12))
                     }
-                    note("Rename, recolour and reorder groups on the Groups tab.")
+                    note("Rename, recolour and reorder groups in Settings › Groups.")
                 }
                 section("Icons") {
                     note("Google Calendar (Settings › Outputs) is optional and only adds tasks to your calendar and Meet links.")
@@ -39,7 +39,7 @@ struct GuideView: View {
                     icon("calendar.badge.checkmark", "In Google Calendar (shown under the task): click to open the event")
                     icon("video.fill", "Join the Google Meet call")
                     icon("eye", "Move to Watch: waiting on someone else. Watch tasks stay on the board, off the bar; the bar's count adds “· N watch” when there are any")
-                    icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending. Columns start on Due date (Done on Date finished); ties go by importance, then oldest. Group keeps each group's tasks together, in Groups tab order")
+                    icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending. Columns start on Due date (Done on Date finished); ties go by importance, then oldest. Group keeps each group's tasks together, in the order set in Settings › Groups")
                     icon("plus", "Add row: the first chip picks the step (To do, Doing, Watch or Done) the new task goes into")
                     icon("arrow.uturn.backward", "Deleted by mistake? Press Undo on the bar that appears, or Edit → Undo Delete (⌥⌘Z) for the last deleted task")
                     icon("cursorarrow.click.2", "Double-click the bar to open the full board (a single click on a task does too)")

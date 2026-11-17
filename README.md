@@ -39,7 +39,7 @@ your Mac's Keychain; nothing goes through anyone else's server.
 - **Ctrl-Opt-N** quick add from anywhere. **Ctrl-Opt-B** show or hide. The menu bar icon has the rest (reset position, export).
 - Drag the grip to move the bar. `+` quick-adds, the expand icon opens the board, `-` minimises, `x` closes.
 - **Board**: drag cards between columns, or hover for arrows, tick, edit and delete. Right-click for more.
-- **Groups** tab: add, rename, recolour, reorder and delete groups.
+- **Settings › Groups**: add, rename, recolour, reorder and delete groups. **Settings › Bar**: what the bar shows and in which order. The window's tabs are Board, Calendar and Settings; the FloatBoard menu's "Bar…" and "Groups…" open those Settings sections.
 - **Help** menu: **Guide**, **Activity...** (everything the app did and every problem it hit) and **Restore from backup...**.
 - Menu bar, **Export to CSV** writes cards and history to `~/Downloads`.
 

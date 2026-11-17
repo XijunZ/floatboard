@@ -12,10 +12,9 @@ struct GroupsView: View {
             Text("Rename, recolour, reorder or delete groups. Changes apply to every task in the group. The order here is the order ↑↓ cycles through when adding a task.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(store.areas) { GroupRow(area: $0, message: $message) }
-                }
+            // No scroll view of its own: Settings scrolls the whole section.
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(store.areas) { GroupRow(area: $0, message: $message) }
             }
             HStack(spacing: 8) {
                 TextField("New group name", text: $newName)
