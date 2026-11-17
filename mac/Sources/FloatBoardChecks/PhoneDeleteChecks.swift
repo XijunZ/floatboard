@@ -11,7 +11,6 @@ import FloatBoardConnectors
     let store: Store
     do { store = Store(db: try DB(url: root.appendingPathComponent("del.sqlite"))) } catch { check(false, "phone delete setup: \(error)"); return }
     func count(_ sql: String) -> Int64 { ((try? store.db.query(sql) { DB.int($0, 0) }) ?? []).first ?? -1 } // try?-ok: -1 fails the check
-    let now = Date()
     store.performForTest("INSERT OR IGNORE INTO connectors(id,name,settings_json) VALUES('email','email','{}')")
 
     // A task the email sorting made: teach choices; the phone's reason is recorded like the Mac's.
@@ -19,6 +18,10 @@ import FloatBoardConnectors
     guard let sorted = store.card(externalID: "email:pd1") else { check(false, "phone delete seed"); return }
     store.performForTest("UPDATE cards SET connector='email', source_mid='pd1mid', source_sent='2026-11-01T10:00:00Z' WHERE id=\(sorted.id)")
     store.reload()
+    // The phone's delete is made after the task exists: taken now, after seeding. Taken before (as it was), a seed that took
+    // more than 1 ms (a busy machine) made the task's "created" row newer than the delete, which then rightly lost as older
+    // than a change on the Mac, and three checks failed now and then.
+    let now = Date()
     let teachCard = PhoneBoard.payload(store: store, now: now).first { $0.id == sorted.id }
     check(store.card(sorted.id)?.teachOnDelete == true && teachCard?.teachOnDelete == true, "board_copy_says_which_tasks_teach_on_delete")
     let del = PhoneAction(id: "d1", clientID: "pd-del-1", cardID: sorted.id, action: "delete", madeAt: now, teach: "not_action")
