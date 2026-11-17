@@ -763,6 +763,7 @@ CircleDue.register()
 circleChecks()
 circleSplitEditChecks()
 circleMoreChecks()
+circlePhoneWriteFailChecks()
 await circleSyncChecks()
 await circleKeyChecks()
 

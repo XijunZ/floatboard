@@ -259,10 +259,13 @@ import Foundation
     public func talked(_ personID: Int64, at: Date = Date()) { manual(personID, .met, at) }
 
     private func manual(_ personID: Int64, _ dir: Direction, _ at: Date) {
-        store.perform {
-            try insertExchange(channel: .manual, direction: dir, at: at, handleKind: "person", handle: String(personID), name: "",
-                               key: "manual:\(personID):\(Due.dayString(at)):\(dir.rawValue)", ref: "", now: at)
-        }
+        store.perform { try manualRow(personID, dir, at) }
+    }
+
+    /// The write behind "I contacted them" / "We talked", for callers inside a transaction.
+    func manualRow(_ personID: Int64, _ dir: Direction, _ at: Date) throws {
+        try insertExchange(channel: .manual, direction: dir, at: at, handleKind: "person", handle: String(personID), name: "",
+                           key: "manual:\(personID):\(Due.dayString(at)):\(dir.rawValue)", ref: "", now: at)
     }
 
     /// Snooze or ✗: pushed back one interval from now.
