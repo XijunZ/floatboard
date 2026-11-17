@@ -485,7 +485,7 @@ extension Store {
                                   engineAhead: TimeInterval = 0) -> PhoneApplyResult {
         let component = "connector:\(connector)"
         var result = PhoneApplyResult()
-        var moved = 0, added = 0, repeated = 0, superseded = 0, linked = 0, deleted = 0, restored = 0
+        var moved = 0, added = 0, repeated = 0, superseded = 0, linked = 0, deleted = 0, restored = 0, tagged = 0
         var unknown: [String] = []
         do {
             try db.run("DELETE FROM meta WHERE key LIKE ? AND CAST(value AS REAL) < ?",
@@ -575,7 +575,7 @@ extension Store {
                         if let made = madeHere, let last, made < last.addingTimeInterval(-Self.sameTime) { outcome = "superseded"; return }
                         try setTagsRow(ShortID(kind: .task, number: cardID), primary: first, others: Array(names.dropFirst()),
                                        now: madeHere.map { min($0, now) } ?? now)
-                        outcome = "moved"
+                        outcome = "tagged"
                     } else if let status = Status(rawValue: a.action), let cardID = a.cardID {
                         let row = try db.query("SELECT deleted, withdrawn, status FROM cards WHERE id=?", [cardID]) {
                             (DB.int($0, 0), DB.int($0, 1), DB.text($0, 2)) }.first
@@ -603,6 +603,7 @@ extension Store {
                 case "moved": moved += 1; result.applied.append(a.id)
                 case "added": added += 1; result.applied.append(a.id)
                 case "linked": linked += 1; result.applied.append(a.id)
+                case "tagged": tagged += 1; result.applied.append(a.id)
                 case "refused": result.skipped.append(PhoneSkip(id: a.id, reason: "not allowed"))
                 case "repeat": repeated += 1; result.applied.append(a.id)
                 case "superseded": superseded += 1; result.skipped.append(PhoneSkip(id: a.id, reason: "superseded"))
@@ -623,12 +624,13 @@ extension Store {
         if superseded > 0 {
             activity(component, .info, "Kept a newer change from this Mac", detail: "\(superseded) phone move(s) not applied")
         }
-        if moved + added + linked + deleted + restored > 0 {
+        if moved + added + linked + deleted + restored + tagged > 0 {
             var parts: [String] = []
             if deleted > 0 { parts.append("\(deleted) deleted") }
             if restored > 0 { parts.append("\(restored) brought back") }
             if moved > 0 { parts.append("\(moved) moved") }
             if added > 0 { parts.append("\(added) added") }
+            if tagged > 0 { parts.append("\(tagged) retagged") }
             if linked > 0 { parts.append("\(linked) email link\(linked == 1 ? "" : "s") changed") }
             activity(component, .info, "From the phone: " + parts.joined(separator: ", "))
         }

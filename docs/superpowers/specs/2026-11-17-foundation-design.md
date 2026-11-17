@@ -16,8 +16,10 @@ instead of working around it.
 | Schema fixture | `mac/Tests/Fixtures/schema-v12.json` | `schema-v13.json` | … | … | … |
 
 Each area adds one `if version < N` block to `DB.upgrade(from:)`, appends its DDL to `DB.schema`, writes
-`schema-vN.json` from a board upgraded from vN-1 (the check `upgraded_board_matches_new_board` builds one from the
-previous fixture), and points `schemaChecks` at the new fixture. Merge order is the numbers' order.
+`schema-vN.json` from a board upgraded from vN-1, and adds its tables to `docs/data-model.md` (both checks read
+`schema-v\(DB.schemaVersion).json`). The check `upgraded_board_matches_new_board` (FoundationChecks.swift) builds a v11 board
+from `schema-v11.json` and upgrades it; an area extends `makeV11Schema`'s chain or builds its own vN-1 board the same way.
+To write the fixture: run the checks with `FLOATBOARD_WRITE_SCHEMA_FIXTURE=<absolute path>`. Merge order is the numbers' order.
 
 ## 1. Files
 
@@ -44,7 +46,8 @@ previous fixture), and points `schemaChecks` at the new fixture. Merge order is 
 | Tag editor (task editor) | `mac/Sources/FloatBoard/Items/TagEditor.swift` |
 | Engine migration | `engine/migrations/0039_assistant_foundation.sql` |
 | Phone shell | `engine/src/phone/page.ts`, `engine/src/phone/files/app.client.js` |
-| Checks | `mac/Sources/FloatBoardChecks/FoundationChecks.swift` (+ `FoundationUIChecks` in snapshots), `engine/test/phone/foundation.test.ts` |
+| Checks | `mac/Sources/FloatBoardChecks/FoundationChecks.swift` (ids, schema, links), `FoundationCoreChecks.swift` (the rest); snapshots with `FLOATBOARD_FOUNDATIONSHOTS=1 … FloatBoard --snapshot <dir>` (scratch database only); `engine/test/phone/foundation.test.ts` |
+| App pieces | `Items/LinkChips.swift` (`LinkChips(item:except:)`, `UndoUnlinkBar`), `Items/AreaPlaceholder.swift`, `Items/AssistantTicker.swift` (budget delivery, Sunday nudge) |
 
 ## 2. Schema v12 (Mac)
 
@@ -189,6 +192,7 @@ extension Store {
     @discardableResult public func setTags(_ id: ShortID, primary: String?, others: [String], tier: PersonTier? = nil,
                                            now: Date = Date()) -> String?
     public func items(taggedAny tags: Set<String>, kind: ItemKind? = nil) -> [ShortID]   // each item once
+    public func tagsChangedAt(_ cardID: Int64) -> Date?          // last group or tag change here (phone newest-wins)
 }
 ```
 A task's primary tag is `cards.area` (no row in `item_tags`); its other tags are `item_tags` rows with `is_primary=0`.
@@ -263,6 +267,7 @@ public struct BudgetReminder: Equatable { public let id, kind, item, text: Strin
     public func request(kind: ReminderKind, itemID: ShortID, text: String, now: Date = Date()) -> ReminderGrant
     public func pending() -> [BudgetReminder]                   // granted, not delivered
     public func markDelivered(_ id: String, by: String, at: Date = Date())   // "mac" | "phone"
+    public func forPhone(now: Date = Date()) -> [BudgetReminder]   // pending, plus those left to the phone in the last day
     public static func macShows(_ r: BudgetReminder, now: Date) -> Bool       // fireAt ≤ now < fireAt + phoneGrace
     public static func phoneTakesOver(_ r: BudgetReminder, now: Date) -> Bool // now ≥ fireAt + phoneGrace
 }
@@ -283,6 +288,7 @@ public struct ReviewSection { public let id: String; public let title: String; p
     public static func week(containing: Date) -> DateInterval      // Monday 00:00 – next Monday, app zone
     public static func nudgeDue(now: Date, lastNudged: Date?) -> Bool   // Sunday from 18:00 app zone, once per week
     public static func onNudge(_ f: @escaping () -> Void)        // hooks run when the Sunday nudge fires
+    public static func fireNudge()                               // called by the app's ticker
 }
 ```
 Planned sections: Decisions `decisions.recorded` (order 10), `decisions.maybe` (20), `decisions.reviews` (30); Circle
@@ -313,8 +319,10 @@ struct SelectionContext { let text: String; let source: ShortID? }
 @MainActor enum SelectionActions {
     struct Action { let id: String; let title: String; let module: Module?; let run: @MainActor (SelectionContext) -> Void }
     static func register(_ a: Action)                     // Decisions registers id "make_decision", module .decisions
-    static func available(_ store: Store) -> [Action]     // built-ins "make_task", "copy_id" first; module-off actions hidden
+    /// "Make task", then registered actions whose module is on, then "Copy id link (X-n)" when there is a source.
+    static func available(_ store: Store, ui: UIState, source: ShortID?) -> [Action]
 }
+@MainActor enum GlobalSearchOpen { static var handlers: [ItemKind: (ShortID) -> Void] }  // how an area opens its item from search
 struct SelectableText: NSViewRepresentable            // read-only text whose right-click menu carries the actions
 struct SelectableTextEditor: NSViewRepresentable      // the same for an editable text (binding)
 ```
@@ -346,10 +354,17 @@ CREATE TABLE meetings (                                  -- Fathom meeting metad
   `reminders` (≤ 20 `{id, title, text, fire_at}`).
 - Phone action `set_tags` `{card_id, tags}`: newest wins against the card's `tags_at`; the Mac applies it unless its own
   tag change is newer. `GET /app/api/board` returns `modules`.
-- `GET /v2/meetings?since=<ISO>` (Mac): Fathom metadata received since then (Jots consumes it).
+- `GET /v2/meetings?since=<ISO>` (Mac): Fathom metadata received since then (Jots consumes it): `{ meetings: [{ recap_key,
+  fathom_url, meeting_url, title, scheduled_start, invitees: [email], received_at }] }`. Recorded by the webhook and the
+  hourly catch-up (`recordMeeting(env, userId, meetingMeta(payload, message))`). Field names follow Fathom's documented
+  payload (`calendar_invitees`, `scheduled_start_time`, `meeting_url`): recapture one live delivery before relying on them.
+- Mac side: `BoardCard.tags` / `tagsAt`, `BoardExtras(modules:reminders:)` via `PhoneBoard.extras(store:now:)`, passed to
+  `PhoneBoard.body/hash` and `ConnectorClient.putBoard(..., extras:)`; `PhoneAction.tags` for `set_tags`.
 - Phone bottom bar **Board · Plan · Jots · Circle · More**; More lists Decisions, Resolutions, Settings. Jots/Circle/
-  Decisions/Resolutions entries are hidden while their module is off. Placeholders live in `app.client.js`
-  (`renderJots`, `renderCircle`, `renderMore`); each area replaces its function and section in `page.ts`.
+  Decisions/Resolutions entries are hidden while their module is off (`visibleViews(modules)`, `moreEntries(modules)` in
+  `sync.client.js`). Placeholders are the sections `#jots`, `#circle` and the More rows `#more-decisions`,
+  `#more-resolutions` in `page.ts` (their clicks show a short note in `app.client.js`); each area replaces its section and
+  wires its own render. Tags: `tagChoices(cards)`, `tagsAction(card, group, others, id, nowIso)`, the task sheet's "Tags".
 
 ## 5. AI jobs: where the areas plug in (no AI in the foundation)
 
