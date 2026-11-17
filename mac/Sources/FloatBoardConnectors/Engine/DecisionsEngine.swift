@@ -85,6 +85,9 @@ extension ConnectorClient {
 /// The Decisions jobs that need the engine: the weekly screening (D1), the follow-up suggestions, form filling and the phone.
 @MainActor public enum DecisionsEngine {
     private static var screening = false
+    /// After a failed run, the next try waits an hour (the timer runs every 10 minutes).
+    static var lastFailure: Date?
+    public static let retryAfter: TimeInterval = 3600
     /// The last phone problem logged per connector, so a poll every 2 minutes doesn't repeat it.
     private static var phoneReported: [String: String] = [:]
 
@@ -107,6 +110,7 @@ extension ConnectorClient {
     public static func screenIfDue(store: Store, connector: String, client: ConnectorClient, now: Date = Date(), force: Bool = false) async -> ScreenOutcome? {
         guard store.isOn(.decisions), !screening else { return nil }
         guard force || DecisionScreening.isDue(now: now, lastRun: DecisionScreening.lastRun(store: store)) else { return nil }
+        if !force, let f = lastFailure, now.timeIntervalSince(f) < retryAfter, now >= f { return nil }
         screening = true
         defer { screening = false }
         DecisionRulebook.applyPending(store: store, connector: connector, now: now)
@@ -122,11 +126,12 @@ extension ConnectorClient {
             } catch {
                 store.activity("decisions", .warning, "The weekly decision screening could not finish; it will try again",
                                detail: (error as? ConnectorError)?.description ?? "\(error)")
-                if total.screened == 0 { return nil }
+                if total.screened == 0 { lastFailure = now; return nil }
                 total.unreadable += batch.count
                 break
             }
         }
+        lastFailure = nil
         DecisionScreening.finishRun(store: store, started: now, readFrom: readFrom, complete: total.unreadable == 0, now: now)
         if total.unreadable > 0 {
             store.activity("decisions", .warning, "Couldn't read Claude's answer for \(total.unreadable) jot\(total.unreadable == 1 ? "" : "s"); they are read again next week")
@@ -185,7 +190,8 @@ extension ConnectorClient {
                 for (aid, why) in r.skipped { store.activity("decisions", .info, "A change from the phone was not applied: \(why)", detail: aid) }
                 try await client.ackDecisionActions(r.applied + r.skipped.map(\.0))
             }
-            DecisionRulebook.applyPending(store: store, connector: id, now: now)
+            // Examples go into the rulebook of the engine that screens (this Mac's in Mac only mode).
+            if DecisionsEngine.client(store: store)?.id == id { DecisionRulebook.applyPending(store: store, connector: id, now: now) }
             let copy = DecisionPhone.copy(store: store, now: now)
             let data = try JSONEncoder().encode(copy)
             let hash = SHA256.hash(data: data + Data(client.engineAddress.utf8)).map { String(format: "%02x", $0) }.joined()

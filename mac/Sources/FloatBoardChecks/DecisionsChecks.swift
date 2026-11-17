@@ -362,6 +362,10 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
     let failed = await DecisionsEngine.screenIfDue(store: s, connector: "eng", client: broken.client(), now: decisionsNow.addingTimeInterval(8 * 86400))
     check(failed == nil && DecisionScreening.isDue(now: decisionsNow.addingTimeInterval(8 * 86400), lastRun: DecisionScreening.lastRun(store: s))
           && s.recentActivity(limit: 5).contains { $0.component == "decisions" && $0.level == .warning }, "screening_failure_logged_and_stays_due")
+    let before = screenBodies
+    let soon = await DecisionsEngine.screenIfDue(store: s, connector: "eng", client: client, now: decisionsNow.addingTimeInterval(8 * 86400 + 600))
+    let later = await DecisionsEngine.screenIfDue(store: s, connector: "eng", client: client, now: decisionsNow.addingTimeInterval(8 * 86400 + 3700))
+    check(soon == nil && later != nil && screenBodies == before + 1, "failed_screening_retried_after_an_hour")
     // Form filling.
     let fill = try? await client.fillDecision(selection: "We agreed to hire Sam", context: a.text) // try?-ok: nil fails the check
     check(fill?.decision == "Hire Sam" && fill?.type == .strategic && fill?.confidence == nil && fill?.why == "not recorded", "fill_form_answer_read")
