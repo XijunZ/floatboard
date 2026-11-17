@@ -183,11 +183,11 @@ struct CalendarView: View {
             Text(title).font(.system(size: 15, weight: .semibold))
             Spacer()
             if snapshotHours != nil {
-                Text("‹  Today  ›     Day | Week").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("‹  \(todayLabel)  ›     Day | Week").font(.system(size: 11)).foregroundStyle(.secondary)
             } else {
             HStack(spacing: 2) {
                 Button { step(-1) } label: { Image(systemName: "chevron.left") }.help("Earlier")
-                Button("Today") { anchor = Date() }
+                Button(todayLabel) { anchor = Date() }
                 Button { step(1) } label: { Image(systemName: "chevron.right") }.help("Later")
             }
             .controlSize(.small)
@@ -198,6 +198,9 @@ struct CalendarView: View {
             }
         }
     }
+
+    /// The button that jumps back to now: "Today" in Day view, "This week" in Week view.
+    private var todayLabel: String { span == .day ? "Today" : "This week" }
 
     /// A click on the bar's meeting asks for its day.
     private func showFocusedDay() {
