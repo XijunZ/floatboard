@@ -236,6 +236,11 @@ extension CircleStore {
         return r
     }
 
+    /// A suggestion added through the form (the person was made there).
+    public func markCandidateAdded(_ id: Int64) {
+        store.perform { try store.db.run("UPDATE circle_candidates SET state='added' WHERE id=?", [id]) }
+    }
+
     public func dismissCandidate(_ id: Int64) {
         store.perform { try store.db.run("UPDATE circle_candidates SET state='dismissed' WHERE id=?", [id]) }
     }

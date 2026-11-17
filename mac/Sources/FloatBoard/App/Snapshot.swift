@@ -8,6 +8,7 @@ enum Snapshot {
     static func run(dir: String, store: Store, google: Google) {
         let ui = UIState()
         CalendarCache.connectedAccounts = nil // pictures use made-up accounts that are not signed in
+        if ProcessInfo.processInfo.environment["FLOATBOARD_CIRCLESHOTS"] != nil { CircleShots.run(dir: dir, store: store, ui: ui, google: google); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_BARTEST"] != nil {
             let open = store.cards.filter { $0.status != .done }
             let groups = store.areas.map(\.name)
