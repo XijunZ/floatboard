@@ -284,7 +284,9 @@
         meetings.push({ id: x.e.id, title: x.e.title, label: null, when: when, tasks: tasks, video: video, color: x.e.color });
       });
       var due = open.filter(function (t) { return t.key >= b.from && t.key <= b.to; }).map(function (t) { return t.c; });
-      return { key: b.key, title: b.title, from: b.from, to: b.to, meetings: meetings, tasks: due };
+      // Open tasks due before today lead the Today block, oldest first.
+      var overdue = b.key === "today" ? open.filter(function (t) { return t.key < today; }).map(function (t) { return t.c; }) : [];
+      return { key: b.key, title: b.title, from: b.from, to: b.to, meetings: meetings, tasks: due, overdue: overdue };
     });
   }
 

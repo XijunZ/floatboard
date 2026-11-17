@@ -22,7 +22,8 @@
  *   for a picked search result, and the two lines a result shows.
  * - `dayKey(ms, zone)`, `planBlocks(events, cards, nowMs, zone)`: the planning summary above the board: Today, Rest of
  *   this week (tomorrow to Sunday) and Next week (Monday to Sunday), in the Mac's zone; each with its meetings (a
- *   repeating one once, with its label) and the open tasks due then. Bad entries are skipped.
+ *   repeating one once, with its label) and the open tasks due then; Today also has `overdue`, the open tasks due before
+ *   today, oldest first (shown at its top in red). Bad entries are skipped.
  *
  * The functions themselves are in files/sync.client.js (bundled as text).
  */
