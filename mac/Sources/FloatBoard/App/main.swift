@@ -144,6 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ResolutionsArea.setUp(store: store, ui: ui)
         // Budget reminders (Circle, Decisions) and the Sunday weekly-review nudge.
         assistantTicker = AssistantTicker(store: store, ui: ui, show: { [weak self] r in self?.reminders?.schedule(r) },
+                                          showNow: { [weak self] r in
+                                              guard let shown = self?.reminders else { throw ReminderShowError.unavailable }
+                                              try await shown.showNow(r)
+                                          },
+                                          claim: { _ in .noEngine },
                                           pushBoard: { [weak self] in self?.connectors.trigger("reminder shown") })
         assistantTicker?.start()
         // Jots: search, the capture window (⌃⌥J), the daily nudge and daily files.

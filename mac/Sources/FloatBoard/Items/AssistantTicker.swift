@@ -8,11 +8,16 @@ import Foundation
     private let ui: UIState
     private let show: (DueReminder) -> Void
     private let pushBoard: () -> Void
+    private let delivery: ReminderDelivery
     private var timer: Timer?
     static let nudgedKey = "weekly_review_nudged"
 
-    init(store: Store, ui: UIState, show: @escaping (DueReminder) -> Void, pushBoard: @escaping () -> Void) {
+    /// `showNow` hands a budget reminder to macOS and throws when it was refused; `claim` asks the engine whether this Mac
+    /// may show it (one id, shown once across Mac and phone).
+    init(store: Store, ui: UIState, show: @escaping (DueReminder) -> Void, showNow: @escaping (DueReminder) async throws -> Void,
+         claim: @escaping (String) async -> ReminderClaim, pushBoard: @escaping () -> Void) {
         self.store = store; self.ui = ui; self.show = show; self.pushBoard = pushBoard
+        delivery = ReminderDelivery(store: store, claim: claim, schedule: showNow)
     }
 
     func start() {
@@ -21,20 +26,8 @@ import Foundation
     }
 
     func tick(now: Date = Date()) {
-        let budget = ReminderBudget(store: store)
-        var changed = false
-        for r in budget.pending() {
-            if ReminderBudget.macShows(r, now: now) {
-                let title = ShortID.parse(r.item).flatMap { store.item($0)?.title } ?? "FloatBoard"
-                show(DueReminder(id: r.id, cardID: 0, title: title, body: r.text, fireAt: now.addingTimeInterval(1)))
-                budget.markDelivered(r.id, by: "mac", at: now)
-                changed = true
-            } else if ReminderBudget.phoneTakesOver(r, now: now) {
-                budget.markDelivered(r.id, by: "phone", at: now)
-                changed = true
-            }
-        }
-        if changed { pushBoard() }   // the phone's copy drops what this Mac has shown
+        // Budget reminders: delivered only once macOS took them (ReminderDelivery); the phone's copy then drops them.
+        Task { @MainActor [delivery, pushBoard] in if await delivery.tick(now: now) { pushBoard() } }
         ResolutionsNudger.tick(store: store, now: now, show: show)   // quarter and year reviews: outside the budget
         let last = UserDefaults.standard.object(forKey: Self.nudgedKey) as? Date
         if WeeklyReview.nudgeDue(now: now, lastNudged: last) {

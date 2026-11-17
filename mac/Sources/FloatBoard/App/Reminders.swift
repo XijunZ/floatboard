@@ -48,6 +48,17 @@ import UserNotifications
         }
     }
 
+    /// Hands one notification to macOS now and returns once it was accepted; throws when it was refused (so a budget
+    /// reminder is only counted as shown when it really was).
+    func showNow(_ r: DueReminder) async throws {
+        let content = UNMutableNotificationContent()
+        content.title = r.title
+        content.body = r.body
+        content.sound = .default
+        try await center.add(UNNotificationRequest(identifier: r.id, content: content,
+                                                   trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)))
+    }
+
     func cancel(_ ids: [String]) {
         center.removePendingNotificationRequests(withIdentifiers: ids)
         center.removeDeliveredNotifications(withIdentifiers: ids)   // a done task's reminder leaves Notification Centre too
@@ -63,4 +74,10 @@ import UserNotifications
                                             withCompletionHandler done: @escaping () -> Void) {
         Task { @MainActor in self.onOpen(); done() }
     }
+}
+
+/// Why a budget reminder could not be shown on this Mac.
+enum ReminderShowError: Error, CustomStringConvertible {
+    case unavailable
+    var description: String { "Notifications need the installed FloatBoard app (this build has no app bundle)" }
 }
