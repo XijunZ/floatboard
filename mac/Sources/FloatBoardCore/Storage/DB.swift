@@ -153,7 +153,8 @@ public final class DB {
             CREATE TABLE cal_outbox(
                 uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,
                 card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-                next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL
+                next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL,
+                conflicts INTEGER NOT NULL DEFAULT 0
             );
 
             """
@@ -287,7 +288,8 @@ public final class DB {
         CREATE TABLE cal_outbox(
             uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,
             card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-            next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL
+            next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL,
+            conflicts INTEGER NOT NULL DEFAULT 0
         );
 
     """

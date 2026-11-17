@@ -257,10 +257,26 @@ public final class CalendarOutbox {
         do {
             let attempts = try db.query("SELECT attempts FROM cal_outbox WHERE uuid=?", [uuid]) { DB.int($0, 0) }.first ?? 0
             let wait = Self.backoff(afterAttempts: Int(attempts) + 1)
-            try db.run("UPDATE cal_outbox SET attempts=attempts+1, last_error=?, next_try=? WHERE uuid=?",
+            try db.run("UPDATE cal_outbox SET attempts=attempts+1, last_error=?, next_try=?, conflicts=0 WHERE uuid=?",
                        [error, now.addingTimeInterval(wait), uuid])
         } catch {
             store.activity("calendar", .error, "Could not record a failed calendar send", detail: "\(error)")
+        }
+    }
+
+    /// The event changed in Google between reading it and sending the change (412). Returns how many times in a row that has
+    /// happened. The first is tried again at the next run; from the second on the change waits like a failure (1 minute, 2,
+    /// 4 ... at most an hour), so an event that keeps changing does not take a request pair every run. Not counted as a failure.
+    @discardableResult
+    public func markConflict(uuid: String, now: Date = Date()) -> Int {
+        do {
+            let n = Int(try db.query("SELECT conflicts FROM cal_outbox WHERE uuid=?", [uuid]) { DB.int($0, 0) }.first ?? 0) + 1
+            let wait = n >= 2 ? Self.backoff(afterAttempts: n - 1) : 0
+            try db.run("UPDATE cal_outbox SET conflicts=?, next_try=? WHERE uuid=?", [n, now.addingTimeInterval(wait), uuid])
+            return n
+        } catch {
+            store.activity("calendar", .error, "Could not record a calendar change that met a newer change in Google", detail: "\(error)", trace: uuid)
+            return 0
         }
     }
 
