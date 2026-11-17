@@ -96,7 +96,8 @@ public final class CalendarSender {
                     break
                 }
                 saved = outbox.markSent(uuid: row.uuid, result: try await api.patch(calendarID: row.calendarID, eventID: eventID, title: title,
-                                                                                    start: start, end: end, allDayStart: allDayStart, ifMatch: read.etag))
+                                                                                    start: start, end: end, allDayStart: allDayStart, ifMatch: read.etag),
+                                        wrote: toSend)
             case .delete(let eventID):
                 try await api.delete(calendarID: row.calendarID, eventID: eventID)
                 saved = outbox.markSent(uuid: row.uuid, result: nil)

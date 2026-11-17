@@ -427,6 +427,35 @@ final class GatedGoogle: @unchecked Sendable {
         check(server.title == "Draft (theirs)" && outbox.rows(unsent: true).isEmpty, "n1_external_change_after_own_write_still_wins")
     } catch { check(false, "n1: \(error)") }
 
+    // N1b. A time change and then a rename queued offline; Google renames the event meanwhile. Sending the time change must not
+    //      make Google's rename look like FloatBoard's own: Google's newer title stays, the board's time goes. And with a
+    //      Google change to another field (the place), both board edits and Google's change survive.
+    do {
+        let (store, cache, outbox) = try setup("n1b-mixed")
+        let id = newTask(store, "Plan", at(9, 0, 0), true)
+        linkTask(store, id, "m1")
+        cacheEvent(cache, "m1", "Plan", at(9, 0, 0), at(9, 30, 0), updated: old, fb: id)
+        let server = StatefulEvent(id: "m1", title: "Plan", start: at(9, 0, 0), end: at(9, 30, 0), updated: old)
+        if var c = store.card(id) { c.due = at(11, 0, 0); store.update(c, now: Date().addingTimeInterval(-3)) }
+        if var c = store.card(id) { c.title = "Plan (mine)"; store.update(c, now: Date().addingTimeInterval(-2)) }
+        server.externalEdit(title: "Plan (theirs)")
+        await CalendarSender(store: store, apiFor: { _ in server.api() }, isOnline: { true }).drain()
+        TaskEventRules.reconcile(store: store, cache: cache, now: Date())
+        check(server.title == "Plan (theirs)" && server.start == at(11, 0, 0) && outbox.rows(unsent: true).isEmpty
+              && store.card(id)?.title == "Plan (theirs)" && store.card(id)?.due == at(11, 0, 0), "n1b_queued_rename_after_time_change_keeps_googles_newer_title")
+
+        let id2 = newTask(store, "Retro", at(14, 0, 0), true)
+        linkTask(store, id2, "m2")
+        cacheEvent(cache, "m2", "Retro", at(14, 0, 0), at(14, 30, 0), updated: old, fb: id2)
+        let server2 = StatefulEvent(id: "m2", title: "Retro", start: at(14, 0, 0), end: at(14, 30, 0), updated: old)
+        if var c = store.card(id2) { c.due = at(15, 0, 0); store.update(c, now: Date().addingTimeInterval(-3)) }
+        if var c = store.card(id2) { c.title = "Retro (Q4)"; store.update(c, now: Date().addingTimeInterval(-2)) }
+        server2.externalEdit(location: "Room 2")
+        await CalendarSender(store: store, apiFor: { _ in server2.api() }, isOnline: { true }).drain()
+        check(server2.title == "Retro (Q4)" && server2.start == at(15, 0, 0) && server2.location == "Room 2" && outbox.rows(unsent: true).isEmpty,
+              "n1b_both_board_edits_and_googles_other_change_survive")
+    } catch { check(false, "n1b: \(error)") }
+
     // N2. Google changed only the end; the board moved the start: the board's start goes, with Google's new length.
     do {
         let base = CalPatchBase(title: "Call", start: at(10, 0, 0), end: at(11, 0, 0), allDay: false)
@@ -502,12 +531,14 @@ final class GatedGoogle: @unchecked Sendable {
 final class StatefulEvent: @unchecked Sendable {
     let id: String
     var title: String, start: Date, end: Date, updated: Date
+    var location = ""
     private var version = 1
     init(id: String, title: String, start: Date, end: Date, updated: Date) {
         self.id = id; self.title = title; self.start = start; self.end = end; self.updated = updated
     }
     private func tick() { updated = max(Date(), updated.addingTimeInterval(1)); version += 1 }
     func externalEdit(title: String) { self.title = title; tick() }
+    func externalEdit(location: String) { self.location = location; tick() }
     func api() -> GoogleCalendarAPI {
         GoogleCalendarAPI(token: { _ in "tok" }, http: { [self] req in
             var status = 200
