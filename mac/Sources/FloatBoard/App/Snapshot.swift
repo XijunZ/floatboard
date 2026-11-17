@@ -139,6 +139,27 @@ enum Snapshot {
                          CGSize(width: 640, height: 560), inWindow: true, dark: dark)
             }
         }
+        // Long titles, overlaps and a busy all-day row in Week view (light and dark), and the hover details. Scratch DB only.
+        if ProcessInfo.processInfo.environment["FLOATBOARD_CAL3SHOTS"] != nil, LocalData.isScratchDatabase {
+            let accounts = seedTwoAccounts(store)
+            let (event, task) = seedLongTitles(store, accounts)
+            for dark in [false, true] {
+                let suffix = dark ? "-dark" : ""
+                saveLive(CalendarView(span: .week).padding(.horizontal, 12).padding(.bottom, 12).padding(.top, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading),
+                         "cal3-week\(suffix).png", CGSize(width: 1100, height: 680), inWindow: true, dark: dark)
+                if let event {
+                    saveLive(CalendarItemDetail(content: .event(event), calendar: CalendarCache(store: store).calendars().first { $0.calendarID == event.calendarID })
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .windowBackgroundColor))).padding(10),
+                             "cal3-detail-event\(suffix).png", CGSize(width: 290, height: 140), inWindow: true, dark: dark)
+                }
+                if let task {
+                    saveLive(CalendarItemDetail(content: .task(task), calendar: nil)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .windowBackgroundColor))).padding(10),
+                             "cal3-detail-task\(suffix).png", CGSize(width: 290, height: 130), inWindow: true, dark: dark)
+                }
+            }
+        }
         // The window's tab bar and Settings with its sections. Only on a scratch database.
         if ProcessInfo.processInfo.environment["FLOATBOARD_UISHOTS"] != nil, LocalData.isScratchDatabase {
             saveLive(TabPicker(tab: .constant(.board)).padding(10), "ui-tabs.png", CGSize(width: 520, height: 44))
@@ -289,6 +310,44 @@ enum Snapshot {
     }
 
     /// Made-up calendars, events and tasks for the Calendar pictures (this week, around today).
+    /// Long titles as the owner's week has them, overlapping meetings, and five all-day items on one day. Returns one long
+    /// event and one long task for the detail pictures.
+    private static func seedLongTitles(_ store: Store, _ accounts: [String]) -> (CalEvent?, Card?) {
+        let cal = AppTime.calendar
+        let cache = CalendarCache(store: store)
+        let monday = CalendarLayout.weekStart(containing: Date())
+        func day(_ d: Int) -> Date { cal.date(byAdding: .day, value: d, to: monday)! }
+        func at(_ d: Int, _ h: Int, _ m: Int = 0) -> Date { cal.date(bySettingHour: h, minute: m, second: 0, of: day(d))! }
+        func ev(_ id: String, _ t: String, _ d: Int, _ h: Int, _ m: Int, _ mins: Int) -> GoogleEventChange {
+            GoogleEventChange(eventID: id, cancelled: false, fields: CalEventFields(start: at(d, h, m), end: at(d, h, m).addingTimeInterval(Double(mins) * 60),
+                                                                                  title: t, googleUpdated: Date()))
+        }
+        let f = DateFormatter(); f.timeZone = AppTime.zone; f.dateFormat = "yyyy-MM-dd"
+        func allDay(_ id: String, _ t: String, _ d: Int) -> GoogleEventChange {
+            GoogleEventChange(eventID: id, cancelled: false, fields: CalEventFields(start: day(d), end: day(d + 1), allDay: true,
+                startDay: f.string(from: day(d)), endDay: f.string(from: day(d + 1)), title: t, googleUpdated: Date()))
+        }
+        let a = accounts[0], b = accounts[1]
+        cache.apply(account: a, calendarID: CalendarCache.primaryAlias, changes: [
+            ev("l1", "English with Ms Patel: reading and comprehension practice", 0, 11, 0, 60),
+            ev("l2", "Interview: senior data engineer, second round with the platform team", 2, 13, 0, 60),
+            ev("l3", "Legal review of the supplier contract", 2, 13, 0, 45),
+            ev("l4", "Investor update call", 2, 13, 30, 60),
+            allDay("d1", "W11 — International week at school", 1)], nextToken: nil)
+        cache.apply(account: b, calendarID: "family", changes: [
+            ev("l5", "School drop-off and parents' evening sign-up", 1, 15, 0, 30),
+            allDay("d2", "Grandma visiting", 1), allDay("d3", "Bin collection", 1), allDay("d4", "Book fair", 1)], nextToken: nil)
+        let area = store.areas.first?.name ?? "Work"
+        store.add(title: "Reply to the landlord about the boiler service and the window repair", area: area, importance: .high,
+                  due: at(3, 16, 0), dueHasTime: true)
+        let task = store.cards.last
+        store.add(title: "Apply for the summer holiday club places", area: area, importance: .medium, due: day(1))
+        store.add(title: "A very long task title that would be cut to one letter in a narrow column", area: area, importance: .low,
+                  due: at(2, 13, 15), dueHasTime: true)
+        let event = cache.event(account: a, calendarID: CalendarCache.primaryAlias, eventID: "l2")
+        return (event, task)
+    }
+
     /// Two made-up accounts for the account-colour pictures; returns them in connection order.
     private static func seedTwoAccounts(_ store: Store) -> [String] {
         let cal = AppTime.calendar
