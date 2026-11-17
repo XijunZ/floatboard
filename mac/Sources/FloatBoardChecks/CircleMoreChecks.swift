@@ -284,3 +284,60 @@ private func fakeWhatsAppForCircle(_ folder: URL, now: Date) -> Bool {
     _ = c.applyPhoneActions([CirclePhoneAction(id: "ca-4", person: p.shortID.text, action: "snooze", madeAt: iso.string(from: now + 8 * 86400))], now: now + 8 * 86400)
     check(c.details(p.id).snoozedUntil == AppTime.calendar.date(byAdding: .day, value: 14, to: now + 8 * 86400), "phone_snooze_applied")
 }
+
+/// The engine side on a fake engine: metadata and What's new taken in by cursor, the watch list and the phone copy sent
+/// once until they change, the phone's actions applied and acknowledged, nothing while Circle is off.
+@MainActor func circleSyncChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-circle-sync-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = circleStore(root, "sync.sqlite") else { return }
+    let c = CircleStore(store: s)
+    guard let p = c.add(name: "Lou Example", tier: .network, tags: ItemTags(primary: TagRules.investor, others: []), details: CircleDetails(),
+                        handles: [Handle(kind: .email, value: "lou@example.com")]).person else { return }
+    final class Log: @unchecked Sendable { var calls: [String] = []; var bodies: [String: String] = [:] }
+    let log = Log()
+    let pid = p.shortID.text
+    let client = ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k") { req in
+        let path = req.url!.path, q = req.url!.query ?? ""
+        log.calls.append("\(req.httpMethod!) \(path)\(q.isEmpty ? "" : "?" + q)")
+        if let b = req.httpBody { log.bodies[path] = String(decoding: b, as: UTF8.self) }
+        func ok(_ o: Any) -> (Data, HTTPURLResponse) {
+            (try! JSONSerialization.data(withJSONObject: o), HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        switch path {
+        case "/v2/circle/exchanges":
+            if q.contains("after=0") {
+                return ok(["exchanges": [["seq": 7, "key": "gmail:x:1:0", "channel": "gmail", "direction": "in", "at": "2026-11-16T10:00:00.000Z",
+                                          "account": "me@example.com", "handle": "lou@example.com", "name": "Lou Example"]],
+                           "readers": [["reader": "gmail:me@example.com", "as_of": "2026-11-17T10:00:00.000Z", "complete_from": "2025-11-17T00:00:00.000Z", "note": ""]],
+                           "next": 7, "more": false])
+            }
+            return ok(["exchanges": [], "readers": [], "next": 7, "more": false])
+        case "/v2/circle/updates":
+            return ok(["updates": q.contains("after=0") ? [["seq": 3, "key": "news:\(pid):x", "person": pid, "kind": "news_person", "title": "Lou Example speaks",
+                                                            "detail": "Wire", "url": "https://example.com/n", "at": "2026-11-15T10:00:00.000Z", "match": "possible"]] : [],
+                       "next": 3, "more": false])
+        case "/v2/circle/actions":
+            return ok(["actions": log.calls.filter { $0.hasPrefix("GET /v2/circle/actions") }.count == 1
+                       ? [["id": "cact-0001", "person": pid, "action": "contacted", "made_at": "2026-11-17T09:00:00.000Z"]] : []])
+        default: return ok(["ok": true])
+        }
+    }
+    let now = circleDay(17)
+    let problems = await CircleSync.run(store: s, client: client, connector: "c1", now: now)
+    check(problems.isEmpty, "circle_sync_runs_clean")
+    check(c.exchanges(of: p.id).contains { $0.channel == .gmail && $0.direction == .incoming } && c.channel("gmail:me@example.com")?.asOf != nil,
+          "circle_sync_takes_in_gmail_metadata_with_data_as_of")
+    check(c.updates(p.id).first?.title == "Lou Example speaks", "circle_sync_takes_in_whats_new")
+    check(log.calls.contains("POST /v2/circle/actions/ack") && c.exchanges(of: p.id).contains { $0.channel == .manual }, "circle_sync_applies_phone_actions")
+    check(log.bodies["/v2/circle/watch"]?.contains("Lou Example") == true && log.bodies["/v2/circle"]?.contains("\"due\"") == true, "circle_sync_sends_watch_and_copy")
+    let before = log.calls.count
+    _ = await CircleSync.run(store: s, client: client, connector: "c1", now: now)
+    let second = log.calls[before...]
+    check(!second.contains { $0.hasPrefix("PUT") } && second.contains("GET /v2/circle/exchanges?after=7"), "circle_sync_sends_only_changes_and_resumes")
+    s.setModule(.circle, on: false)
+    let before2 = log.calls.count
+    _ = await CircleSync.run(store: s, client: client, connector: "c1", now: now)
+    check(log.calls.count == before2, "circle_sync_idle_while_circle_off")
+}
