@@ -169,17 +169,27 @@ extension Store {
         guard titleChanged || (timeChanged && new.due != nil), let t = try eventTarget(new.id) else { return }
         var start: Date?, end: Date?, allDayStart: String?
         if timeChanged, let due = new.due {
+            let cached = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event)
             if new.dueHasTime {
-                let cached = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event)
                 let length = cached.map { $0.allDay ? TaskEventRules.eventLength : $0.end.timeIntervalSince($0.start) } ?? TaskEventRules.eventLength
                 start = due; end = due.addingTimeInterval(length)
             } else {
                 allDayStart = Due.dayString(due)
+                end = allDayEnd(startingOn: Due.dayString(due), keeping: cached)
             }
         }
         let row = CalendarOutbox(store: self).enqueue(.patch(eventID: t.event, title: titleChanged ? new.title : nil, start: start, end: end, allDayStart: allDayStart),
                                                       account: t.account, calendarID: t.calendar, now: now)
         if !row.isEmpty { calendarQueued() }
+    }
+
+    /// The (exclusive) end for an all-day event moved to start on `day`: as many days later as the event lasts now, because an
+    /// event's length belongs to Google (D10). Nil, meaning one day, when the event lasts one day, was timed, or is not known.
+    func allDayEnd(startingOn day: String, keeping ev: CalEvent?) -> Date? {
+        guard let ev, ev.allDay, let s = Due.startOfDay(day) else { return nil }
+        let days = AppTime.calendar.dateComponents([.day], from: AppTime.calendar.startOfDay(for: ev.start), to: AppTime.calendar.startOfDay(for: ev.end)).day ?? 1
+        guard days > 1 else { return nil }
+        return AppTime.calendar.date(byAdding: .day, value: days, to: s)
     }
 
     /// Task deleted: delete the event FloatBoard made for it. An event that came from Google (not marked as ours in the
@@ -430,6 +440,7 @@ extension Store {
                     patchStart = due; patchEnd = due.addingTimeInterval(length)
                 } else {
                     patchDay = Due.dayString(due)
+                    patchEnd = allDayEnd(startingOn: Due.dayString(due), keeping: ev)
                 }
             }
         }
