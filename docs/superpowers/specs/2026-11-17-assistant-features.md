@@ -346,12 +346,12 @@ The phone is for **capture, a glance and quick actions** on the go; setting thin
 editing stay on the Mac. One installable web app on the Pixel (Chrome "Install app"), as today:
 passkey sign-in, works offline (last copy shown, changes queued, "N waiting to sync"), push alerts.
 
-**Five screens, bottom bar** (Decisions, Resolutions and Settings sit under More):
+**Five screens, bottom bar in this order: Board · Plan · Jots · Circle · More.** The app always opens on **Board** (as on the Mac). Decisions, Resolutions and Settings sit under More:
 
 | Screen | What it shows | Actions |
 |---|---|---|
-| **Plan** (opens first) | Overdue tasks (red) and Today, Rest of this week, Next week: meetings (repeating ones once, with "weekly Tue"), tasks due; Circle's due people; on Sundays, the weekly review | tap a meeting → Join / linked tasks; tick a task done; "I contacted them" |
 | **Board** | To do / Doing / Watch / Done today, as now | move, done, add, edit due and tags, **delete with Undo and the same "teach" choices as the Mac** (a task made by email sorting asks why, so the rules learn), a short vibration on delete and done |
+| **Plan** | Overdue tasks (red) and Today, Rest of this week, Next week: meetings (repeating ones once, with "weekly Tue"), tasks due; Circle's due people; on Sundays, the weekly review | tap a meeting → Join / linked tasks; tick a task done; "I contacted them" |
 | **Jots** | writing box on top (keyboard microphone for voice), the last 30 days below, search and tag filter | save; Claude cleanup with before/after; select text → **Make task / Make decision** button |
 | **Circle** | due this week, search, person cards (last talked, what's new, open tasks, timeline) | "I contacted them", snooze, **Draft** → opens WhatsApp or Gmail with it |
 | **More** | Decisions (read-only list and due reviews), Resolutions (this quarter's goals), Settings (alerts, quiet hours, sign out) | answer a decision review; mark "Not a decision" |
@@ -381,3 +381,4 @@ exist now); Jots, Circle and More arrive with their areas; share-into and icon s
 5. Overdue tasks at the top of Today on the phone: **yes**.
 6. Phone: **delete with feedback** (Undo, teach choices, vibration).
 7. Phone app designed in §10.
+8. Phone bottom bar order: **Board, Plan, Jots, Circle** (then More); opens on Board.
