@@ -287,3 +287,22 @@ func makeBoardFromFixture(_ url: URL, fixture: String, version: Int, extra: Stri
 let circleV14Drops = ["circle_people", "person_handles", "circle_exchanges", "circle_channels", "circle_merges", "circle_candidates",
                       "circle_dismissed", "linkedin_imports", "linkedin_rows", "circle_updates", "officer_candidates"]
     .map { "DROP TABLE \($0);" }.joined(separator: " ")
+
+/// Codex C1: a split puts back only what is unchanged since the merge; a field the owner edited afterwards stays.
+@MainActor func circleSplitEditChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-circle-split-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = circleStore(root, "split-edit.sqlite") else { return }
+    let c = CircleStore(store: s)
+    var md = CircleDetails(); md.company = "Fund"; md.role = "Partner"; md.notes = "From the merged card"
+    guard let a = c.add(name: "Uma Example", tier: .close, tags: ItemTags(primary: nil, others: []), details: CircleDetails(), handles: []).person,
+          let b = c.add(name: "Uma E.", tier: .close, tags: ItemTags(primary: nil, others: []), details: md, handles: []).person,
+          c.merge(kept: a.id, merged: b.id) == nil, let m = c.merges(of: a.id).first else { check(false, "split edit setup"); return }
+    var kd = c.details(a.id); kd.company = "Fund Two"; kd.notes = ""   // the owner edits company and clears notes after the merge
+    c.save(a.id, kd)
+    c.split(m.id)
+    let after = c.details(a.id)
+    check(after.company == "Fund Two" && after.role.isEmpty && after.notes.isEmpty && c.details(b.id).company == "Fund",
+          "split_keeps_fields_edited_after_the_merge")
+}
