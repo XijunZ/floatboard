@@ -156,16 +156,16 @@ public final class CalendarCache {
                     let (start, end) = Self.span(f)
                     try db.run("""
                         INSERT INTO cal_events(account, calendar_id, event_id, start, end, all_day, start_day, end_day, title, location,
-                                               video_link, description, html_link, recurring_id, google_updated, fb_card, gone)
-                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+                                               video_link, description, html_link, recurring_id, google_updated, fb_card, original_start, gone)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
                         ON CONFLICT(account, calendar_id, event_id) DO UPDATE SET
                             start=excluded.start, end=excluded.end, all_day=excluded.all_day, start_day=excluded.start_day,
                             end_day=excluded.end_day, title=excluded.title, location=excluded.location,
                             video_link=excluded.video_link, description=excluded.description, html_link=excluded.html_link,
                             recurring_id=excluded.recurring_id, google_updated=excluded.google_updated,
-                            fb_card=excluded.fb_card, gone=0, cancelled=0
+                            fb_card=excluded.fb_card, original_start=excluded.original_start, gone=0, cancelled=0
                         """, [account, calendarID, change.eventID, start, end, f.allDay ? 1 : 0, f.startDay, f.endDay, f.title,
-                              f.location, f.videoLink, f.description, f.htmlLink, f.recurringID, f.googleUpdated, f.fbCard])
+                              f.location, f.videoLink, f.description, f.htmlLink, f.recurringID, f.googleUpdated, f.fbCard, f.originalStart])
                     // An event FloatBoard has written or sent to: note what Google has now (a changed field with its stamp).
                     if let json = try db.query("SELECT own_write FROM cal_events WHERE account=? AND calendar_id=? AND event_id=? AND own_write IS NOT NULL",
                                                [account, calendarID, change.eventID], { DB.text($0, 0) }).first {
@@ -238,7 +238,7 @@ public final class CalendarCache {
 
     private static let columns = """
         e.short_id, e.account, e.calendar_id, e.event_id, e.start, e.end, e.all_day, e.start_day, e.end_day, e.title, e.location,
-        e.video_link, e.description, e.html_link, e.recurring_id, e.google_updated, e.fb_card, e.gone, e.cancelled
+        e.video_link, e.description, e.html_link, e.recurring_id, e.google_updated, e.fb_card, e.gone, e.cancelled, e.original_start
         """
 
     private func events(_ tail: String, _ args: [Any?]) -> [CalEvent] {
@@ -252,13 +252,22 @@ public final class CalendarCache {
                 if allDay, let range = Self.dayRange(DB.isNull(s, 7) ? nil : DB.text(s, 7), DB.isNull(s, 8) ? nil : DB.text(s, 8)) {
                     (start, end) = range // the days are the truth; the dates follow the time zone in use now
                 }
-                return CalEvent(shortID: DB.int(s, 0), account: DB.text(s, 1), calendarID: DB.text(s, 2), eventID: DB.text(s, 3),
+                var e = CalEvent(shortID: DB.int(s, 0), account: DB.text(s, 1), calendarID: DB.text(s, 2), eventID: DB.text(s, 3),
                                 start: start, end: end, allDay: allDay, title: DB.text(s, 9), location: DB.text(s, 10),
                                 videoLink: DB.text(s, 11), description: DB.text(s, 12), htmlLink: DB.text(s, 13),
                                 recurringID: DB.isNull(s, 14) ? nil : DB.text(s, 14), googleUpdated: DB.date(s, 15) ?? Date(),
                                 fbCard: DB.isNull(s, 16) ? nil : DB.int(s, 16), gone: DB.int(s, 17) != 0, cancelled: DB.int(s, 18) != 0)
+                e.originalStart = Self.originalStart(DB.isNull(s, 19) ? nil : DB.text(s, 19))
+                return e
             }
         } ?? []
+    }
+
+    /// An instance's original start as kept: a day ("yyyy-MM-dd", midnight in the app's zone now, like all-day starts) or a time.
+    private static func originalStart(_ v: String?) -> Date? {
+        guard let v else { return nil }
+        if v.count == 10 { return day(v) }
+        return ISO8601DateFormatter().date(from: v)
     }
 
     /// Start and end to store: for an all-day event, midnight of its first day and of its (exclusive) end day in the app's zone.

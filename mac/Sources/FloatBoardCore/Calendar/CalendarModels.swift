@@ -47,6 +47,9 @@ public struct CalEventFields: Equatable {
     public var googleUpdated: Date
     /// The FloatBoard task this event was made from, if any (so it is not offered as a meeting).
     public var fbCard: Int64?
+    /// For an instance of a repeating meeting: where the series put it (Google's `originalStartTime`), "yyyy-MM-dd" for an
+    /// all-day one, else an ISO time in UTC. Differs from the start when the instance was moved in Google.
+    public var originalStart: String? = nil
 
     public init(start: Date, end: Date, allDay: Bool = false, startDay: String? = nil, endDay: String? = nil,
                 title: String, location: String = "", videoLink: String = "", description: String = "",
@@ -89,6 +92,9 @@ public struct CalEvent: Equatable {
     public var gone: Bool = false
     /// True only when Google itself reported the event cancelled (deleted). A reset hides events (`gone`) without cancelling them.
     public var cancelled: Bool = false
+    /// For an instance of a repeating meeting: where the series put it (midnight of its day in the app's zone for an
+    /// all-day one). Differs from `start` when the instance was moved in Google.
+    public var originalStart: Date? = nil
 
     public init(shortID: Int64, account: String, calendarID: String, eventID: String, start: Date, end: Date, allDay: Bool,
                 title: String, location: String, videoLink: String, description: String, htmlLink: String,

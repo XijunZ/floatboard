@@ -79,6 +79,18 @@ describe("board events", () => {
     expect(b.events.every((e: any) => !("series" in e) && !("repeat" in e))).toBe(true);
   });
 
+  // Round 7: an instance's original start (Google's originalStartTime) reaches the phone; a bad one is left out.
+  it("serves_original_start_and_drops_a_bad_one", async () => {
+    const u = await newUser("Moved user");
+    const { cookie } = await pairPhone(u.key);
+    const good = "2026-11-20T09:00:00.000Z";
+    expect((await put(u.key, { cards: [], events: [ev(1, { original_start: good }), ev(2, { original_start: "nope" }), ev(3)] })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.events[0].original_start).toBe(good);
+    expect("original_start" in b.events[1]).toBe(false);
+    expect("original_start" in b.events[2]).toBe(false);
+  });
+
   it("rejects_malformed_events", async () => {
     const u = await newUser("Strict user");
     const bad: Record<string, unknown>[] = [{ id: "E-0" }, { id: "37" }, { title: "x".repeat(201) }, { start: "nope" }, { all_day: "yes" },

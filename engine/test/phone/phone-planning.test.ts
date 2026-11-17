@@ -57,6 +57,28 @@ describe("phone planning summary", () => {
     expect(b2[2].meetings.map((m: any) => [m.when, m.label])).toEqual([["", "repeats"], ["Tue 15:00", null]]);
   });
 
+  // Round 7 (R7-2): an occurrence whose start is not its original start (moved in Google, any day or time) is its own row.
+  it("a_series_instance_moved_to_another_day_gets_its_own_row", () => {
+    const standup = (start: string, orig: string, video: string) => ev(start, start, { title: "Standup", series: "S-abc", repeat: "weekdays 09:00",
+      original_start: orig, video });
+    const blocks = L.planBlocks([standup("2026-11-19T09:00:00Z", "2026-11-19T09:00:00Z", "https://meet.example.com/thu"),
+      standup("2026-11-21T09:00:00Z", "2026-11-20T09:00:00Z", "https://meet.example.com/sat")], [], NOW, Z);
+    expect(blocks[1].meetings.map((m: any) => [m.when, m.label, m.video])).toEqual([
+      ["", "weekdays 09:00", "https://meet.example.com/thu"], ["Sat 09:00", null, "https://meet.example.com/sat"]]);
+  });
+
+  it("a_single_weekly_instance_moved_shows_its_actual_day", () => {
+    const blocks = L.planBlocks([ev("1:1", "2026-11-20T09:00:00Z", { series: "S-w", repeat: "weekly Thu 09:00", original_start: "2026-11-19T09:00:00Z" })], [], NOW, Z);
+    expect(blocks[1].meetings.map((m: any) => [m.when, m.title, m.label])).toEqual([["Fri 09:00", "1:1", null]]);
+  });
+
+  it("a_moved_all_day_instance_gets_its_own_row", () => {
+    const day = (start: string, orig: string) => ev(start, start, { title: "Off-site", series: "S-d", repeat: "weekly Mon", all_day: true,
+      end: new Date(Date.parse(start) + 86400e3).toISOString(), original_start: orig });
+    const blocks = L.planBlocks([day("2026-11-23T00:00:00Z", "2026-11-23T00:00:00Z"), day("2026-11-25T00:00:00Z", "2026-11-30T00:00:00Z")], [], NOW, Z);
+    expect(blocks[2].meetings.map((m: any) => [m.when, m.label])).toEqual([["", "weekly Mon"], ["Wed", null]]);
+  });
+
   it("today_rows_of_a_series_show_the_actual_time", () => {
     const blocks = L.planBlocks([
       ev("Board", "2026-11-18T10:30:00Z", { series: "S-m", repeat: "monthly" }),

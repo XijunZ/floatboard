@@ -54,4 +54,65 @@ import FloatBoardConnectors
         let (s, _) = try await run("r7-endonly2", googleAt: ago(10), queue: [(nil, at(11, 30, 0), ago(30))])
         check(report("r7 end-only 2", s, (at(10, 30, 0), at(11, 30, 0))), "r7_end_only_change_keeps_googles_start")
     } catch { check(false, "r7 end-only 2: \(error)") }
+
+    await round7OriginalStartChecks()
+}
+
+/// R7-2: each instance's original start (Google's originalStartTime) is kept and sent to the phone; the column is part of
+/// the amended version 11 and is added in place to a board already at 11 without it.
+@MainActor func round7OriginalStartChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-round7-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let savedZone = AppTime.zone
+    defer { AppTime.zone = savedZone }
+    AppTime.zone = TimeZone(identifier: "Europe/London")!
+    let acct = "me@example.com", cid = "main-id"
+    let iso = ISO8601DateFormatter()
+    do {
+        let store = Store(db: try DB(url: root.appendingPathComponent("orig.sqlite")))
+        let cache = CalendarCache(store: store)
+        cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: cid, name: "Me", color: "#112233", owned: true, shown: true, primary: true)])
+        let moved = #"{"id":"st_1","status":"confirmed","summary":"Standup","recurringEventId":"st","start":{"dateTime":"2026-11-21T09:00:00Z"},"end":{"dateTime":"2026-11-21T09:15:00Z"},"originalStartTime":{"dateTime":"2026-11-20T09:00:00Z","timeZone":"Europe/London"},"updated":"2026-11-16T10:00:00Z"}"#
+        let kept = #"{"id":"st_2","status":"confirmed","summary":"Standup","recurringEventId":"st","start":{"dateTime":"2026-11-19T09:00:00Z"},"end":{"dateTime":"2026-11-19T09:15:00Z"},"originalStartTime":{"dateTime":"2026-11-19T09:00:00Z"},"updated":"2026-11-16T10:00:00Z"}"#
+        let allDay = #"{"id":"od_1","status":"confirmed","summary":"Off-site","recurringEventId":"od","start":{"date":"2026-11-25"},"end":{"date":"2026-11-26"},"originalStartTime":{"date":"2026-11-23"},"updated":"2026-11-16T10:00:00Z"}"#
+        let fake = FakeGoogle()
+        fake.handler = { r in
+            if r.url?.path.contains("/events/") == true { return (#"{"recurrence":["RRULE:FREQ=WEEKLY"]}"#, 200) }
+            return (#"{"items":[\#(moved),\#(kept),\#(allDay)],"nextSyncToken":"T"}"#, 200)
+        }
+        await CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [acct] }).syncOnce()
+        let events = PhoneBoard.events(store: store, now: iso.date(from: "2026-11-18T08:00:00Z")!)
+        let frac = ISO8601DateFormatter(); frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        func orig(_ start: String) -> String? { events.first { $0.start.hasPrefix(start) }?.originalStart }
+        let body = String(decoding: try PhoneBoard.body([], events: events), as: UTF8.self)
+        let ok = orig("2026-11-21T09:00").flatMap { frac.date(from: $0) } == iso.date(from: "2026-11-20T09:00:00Z")
+            && orig("2026-11-19T09:00").flatMap { frac.date(from: $0) } == iso.date(from: "2026-11-19T09:00:00Z")
+            && orig("2026-11-25T00:00").flatMap { frac.date(from: $0) } == iso.date(from: "2026-11-23T00:00:00Z")
+            && body.contains("\"original_start\"")
+        if !ok { print("  r7 original: \(events.map { "\($0.start) <- \($0.originalStart ?? "nil")" })") }
+        check(ok, "r7_original_start_is_kept_and_sent_to_the_phone")
+    } catch { check(false, "r7 original: \(error)") }
+
+    do {
+        let url = root.appendingPathComponent("v11-orig.sqlite")
+        func cols(_ db: DB) throws -> [String] { try db.query("PRAGMA table_info(cal_events)") { DB.text($0, 1) } }
+        var before: [String] = []
+        do {
+            let db = try DB(url: url)
+            _ = try db.run("ALTER TABLE cal_events DROP COLUMN original_start")
+            before = try cols(db)
+        }
+        let fresh = root.appendingPathComponent("v11-fresh.sqlite")
+        _ = try DB(url: fresh)
+        func sql(_ db: DB) throws -> [String] {
+            try db.query("SELECT sql FROM sqlite_master WHERE name='cal_events'") { DB.text($0, 0).replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression) }
+        }
+        let db = try DB(url: url)
+        let same = try sql(db) == sql(DB(url: fresh))
+        let after = try cols(db)
+        let version = try db.query("PRAGMA user_version") { DB.int($0, 0) }.first
+        check(!before.contains("original_start") && after.contains("original_start") && same && version == 11,
+              "r7_existing_v11_board_gets_original_start_in_place")
+    } catch { check(false, "r7 v11 amend: \(error)") }
 }
