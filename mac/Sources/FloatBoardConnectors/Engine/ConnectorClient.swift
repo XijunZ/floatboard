@@ -306,6 +306,20 @@ public struct ConnectorClient {
         }
     }
 
+    /// Hands back a budget reminder this Mac claimed but could not show, so the engine sends it to the phone. True once the
+    /// engine answered (also "nothing to hand back") or the engine has no such route (older: it never had the claim);
+    /// false when there was no answer (try again).
+    public func releaseReminder(_ id: String) async -> Bool {
+        do {
+            _ = try await call("POST", "/v2/reminders/release", body: try JSONSerialization.data(withJSONObject: ["id": id]))
+            return true
+        } catch ConnectorError.http(404, _) {
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// A one-time pairing address (valid 10 minutes) for the QR code, and when it expires.
     public func pairPhone() async throws -> (url: URL, expires: Date) {
         let data = try await phoneCall("POST", "/v2/app/pair")

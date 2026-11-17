@@ -11,6 +11,7 @@ import FloatBoardConnectors
     defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
     await r1Checks(root)
     await r2Checks(root)
+    await r3Checks(root)
 }
 
 private struct Refused: Error {}
@@ -71,4 +72,36 @@ private struct Refused: Error {}
     claims[b] = .unreachable
     _ = await delivery.tick(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 5))
     check(!budget.pending().contains { $0.id == b } && scheduled.isEmpty, "unanswered_reminder_left_to_the_phone")
+}
+
+// MARK: Round 3: never shown nowhere
+
+@MainActor private func r3Checks(_ root: URL) async {
+    let ok = await ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k") { req in
+        (Data(#"{"released":true}"#.utf8), HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!) }.releaseReminder("rb-x")
+    let down = await ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k") { _ in throw URLError(.notConnectedToInternet) }.releaseReminder("rb-x")
+    check(ok && !down, "reminder_release_answers_read")
+
+    guard let store = foundationStore(root, "r3.sqlite") else { return }
+    let budget = ReminderBudget(store: store)
+    budget.save(ReminderSettings(dailyLimit: 5, quietStart: 0, quietEnd: 0))
+    let now = Date()
+    guard let a = grant(budget, 1, now), let b = grant(budget, 2, now) else { check(false, "r3 setup"); return }
+    var released: [String] = [], reachable = false
+    let delivery = ReminderDelivery(store: store, claim: { _ in .mine }, schedule: { _ in throw Refused() },
+                                    release: { id in if reachable { released.append(id) }; return reachable })
+    _ = await delivery.tick(now: now.addingTimeInterval(5))            // claimed here; macOS refuses
+    let late = now.addingTimeInterval(ReminderBudget.phoneGrace + 5)
+    _ = await delivery.tick(now: late)                                  // engine not reachable: still waiting
+    check(budget.pending().map(\.id).sorted() == [a, b].sorted() && released.isEmpty, "claimed_reminder_waits_until_it_can_be_handed_back")
+    reachable = true
+    _ = await delivery.tick(now: late.addingTimeInterval(60))
+    let lines = store.recentActivity(limit: 200).filter { $0.message.hasPrefix("A reminder could not be shown on this Mac") }
+    check(Set(released) == [a, b] && budget.pending().isEmpty && budget.forPhone(now: late).count == 2 && lines.count == 2,
+          "reminder_this_mac_could_not_show_is_handed_to_the_phone")
+    // A reminder this Mac never claimed is left to the phone without asking.
+    guard let c = grant(budget, 3, now) else { return }
+    released = []
+    _ = await delivery.tick(now: late.addingTimeInterval(120))
+    check(released.isEmpty && !budget.pending().contains { $0.id == c }, "unclaimed_reminder_left_to_the_phone_without_release")
 }

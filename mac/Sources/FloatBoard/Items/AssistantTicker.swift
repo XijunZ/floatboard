@@ -15,9 +15,9 @@ import Foundation
     /// `showNow` hands a budget reminder to macOS and throws when it was refused; `claim` asks the engine whether this Mac
     /// may show it (one id, shown once across Mac and phone).
     init(store: Store, ui: UIState, show: @escaping (DueReminder) -> Void, showNow: @escaping (DueReminder) async throws -> Void,
-         claim: @escaping (String) async -> ReminderClaim, pushBoard: @escaping () -> Void) {
+         claim: @escaping (String) async -> ReminderClaim, release: @escaping (String) async -> Bool, pushBoard: @escaping () -> Void) {
         self.store = store; self.ui = ui; self.show = show; self.pushBoard = pushBoard
-        delivery = ReminderDelivery(store: store, claim: claim, schedule: showNow)
+        delivery = ReminderDelivery(store: store, claim: claim, schedule: showNow, release: release)
     }
 
     func start() {

@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               try await shown.showNow(r)
                                           },
                                           claim: { [weak self] id in await self?.claimReminder(id) ?? .unreachable },
+                                          release: { [weak self] id in await self?.releaseReminder(id) ?? false },
                                           pushBoard: { [weak self] in self?.connectors.trigger("reminder shown") })
         assistantTicker?.start()
         // Jots: search, the capture window (⌃⌥J), the daily nudge and daily files.
@@ -213,6 +214,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if answers.contains(.phones) { return .phones }
         if answers.contains(.unreachable) { return .unreachable }
         return answers.contains(.mine) ? .mine : .noEngine
+    }
+
+    /// Hands a claimed reminder back to every online engine; true once each answered.
+    private func releaseReminder(_ id: String) async -> Bool {
+        var all = true
+        for info in store.connectors where !info.baseURL.isEmpty && info.id != LocalMode.connectorID {
+            guard let client = ConnectorAccounts.client(for: info, store: store) else { all = false; continue }
+            if await !client.releaseReminder(id) { all = false }
+        }
+        return all
     }
 
     /// Due reminders from this Mac's own board: rescheduled a moment after any board change, and when the setting

@@ -142,16 +142,31 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
 
 /// Shows the budget reminders that are due on this Mac (called once a minute). A reminder counts as delivered only once
 /// macOS has taken it (`schedule` returned); a refusal leaves it waiting, retried next minute, with one Activity error per
-/// reminder. Past the Mac's grace it is the phone's and is never shown here.
+/// reminder. Past the Mac's grace it is the phone's and is never shown here; one this Mac claimed at the engine but could
+/// not show is first handed back (`release`), so the engine sends it to the phone: a reminder is never shown nowhere.
 @MainActor public final class ReminderDelivery {
     let store: Store
     let claim: (String) async -> ReminderClaim
     let schedule: (DueReminder) async throws -> Void
+    let release: (String) async -> Bool
     private var inFlight = Set<String>()
     private var reported = Set<String>()
 
-    public init(store: Store, claim: @escaping (String) async -> ReminderClaim, schedule: @escaping (DueReminder) async throws -> Void) {
-        self.store = store; self.claim = claim; self.schedule = schedule
+    /// `release` hands a claim back to the engine (true once done, or when there was nothing to hand back; false: try again).
+    public init(store: Store, claim: @escaping (String) async -> ReminderClaim, schedule: @escaping (DueReminder) async throws -> Void,
+                release: @escaping (String) async -> Bool = { _ in true }) {
+        self.store = store; self.claim = claim; self.schedule = schedule; self.release = release
+    }
+
+    static func claimedKey(_ id: String) -> String { "reminder_claimed:\(id)" }
+    private func claimed(_ id: String) -> Bool {
+        ((try? store.db.query("SELECT 1 FROM meta WHERE key=?", [Self.claimedKey(id)]) { DB.int($0, 0) }) ?? []).first != nil // try?-ok: unreadable = not claimed (the engine's answer still decides)
+    }
+    private func setClaimed(_ id: String, _ on: Bool) {
+        store.perform {
+            if on { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?, '1')", [Self.claimedKey(id)]) }
+            else { try store.db.run("DELETE FROM meta WHERE key=?", [Self.claimedKey(id)]) }
+        }
     }
 
     /// Returns true when a reminder changed state (the board copy for the phone should be sent again).
@@ -161,12 +176,23 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
         var changed = false
         for r in budget.pending() where !inFlight.contains(r.id) {
             if ReminderBudget.phoneTakesOver(r, now: now) {
+                if claimed(r.id) {
+                    // Claimed here but never shown: hand it back so the engine sends it to the phone (retried until it can).
+                    inFlight.insert(r.id)
+                    let back = await release(r.id)
+                    inFlight.remove(r.id)
+                    guard back else { continue }
+                    setClaimed(r.id, false)
+                    store.activity("reminders", .warning, "A reminder could not be shown on this Mac; it goes to your phone instead", trace: r.id)
+                }
                 budget.markDelivered(r.id, by: "phone", at: now); changed = true; continue
             }
             guard ReminderBudget.macShows(r, now: now) else { continue }
             inFlight.insert(r.id)
             defer { inFlight.remove(r.id) }
-            switch await claim(r.id) {
+            let answer = await claim(r.id)
+            if answer == .mine && !claimed(r.id) { setClaimed(r.id, true) }
+            switch answer {
             case .phones:
                 budget.markDelivered(r.id, by: "phone", at: now); changed = true
             case .unreachable:
@@ -177,6 +203,7 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
                     try await schedule(DueReminder(id: r.id, cardID: 0, title: title, body: r.text, fireAt: now.addingTimeInterval(1)))
                     budget.markDelivered(r.id, by: "mac", at: now); changed = true
                     reported.remove(r.id)
+                    if claimed(r.id) { setClaimed(r.id, false) }
                 } catch {
                     if reported.insert(r.id).inserted {
                         store.activity("reminders", .error, "Could not show a reminder; will try again", detail: "\(error)", trace: r.id)
