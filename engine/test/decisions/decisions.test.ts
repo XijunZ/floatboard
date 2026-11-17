@@ -85,6 +85,14 @@ describe("decisions: weekly screening (⚑)", () => {
     expect(out.results).toEqual([{ ref: "J-1@abc1", ok: false, decisions: [] }]);
   });
 
+  it("accepts_chunk_refs_of_a_long_jot", async () => {
+    const u = await user("Chunks");
+    answers = [{ jots: [{ ref: "J-4@abc4-c2of3", decisions: [] }] }];
+    const r = await post(u.key, "/v2/decisions/screen", { jots: [{ ...jot(4, "part two"), ref: "J-4@abc4-c2of3" }] });
+    expect(r.status).toBe(200);
+    expect((await r.json<any>()).results).toEqual([{ ref: "J-4@abc4-c2of3", ok: true, decisions: [] }]);
+  });
+
   it("refuses_bad_requests_no_key_and_decisions_off", async () => {
     const u = await user("Refuse");
     expect((await post(u.key, "/v2/decisions/screen", { jots: [] })).status).toBe(400);

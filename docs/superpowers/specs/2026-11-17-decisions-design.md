@@ -78,7 +78,9 @@ owner fills them (Haiku may prefill only from the selected text; the owner edits
   hook + opening the weekly review). Never per jot, never on save. Builder's call: 17:00.
 - **What:** live jots of any kind whose *current version* has not been screened and that were added or updated since the
   last screening (first run: the last 7 days). A version is the text's SHA-256; each `(jot, version)` is screened once
-  (`decision_screened`), so repeating a run is harmless and an edit is screened as a new version.
+  (`decision_screened`), so repeating a run is harmless and an edit is screened as a new version. A jot over 20,000 characters is sent in
+  chunks of that size (500 characters overlap, refs `J-n@<version>-c2of3`); the version counts as screened only once every
+  chunk is, and an unreadable chunk alone is sent again next run.
 - **References, not new decisions (§9):** a jot with a `review-of` link, or that names `D-n` ids, is sent with those
   decisions' texts as "earlier decisions: references". After the answer, code drops any found decision whose quote or
   text matches an existing decision's (normalised) or an earlier decision from the same jot. A review jot is still read

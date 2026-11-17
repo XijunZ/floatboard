@@ -59,8 +59,10 @@ public struct ScreenOutcome: Equatable {
     public static let dueHour = 17
     public nonisolated static let maxJotsPerBatch = 10
     public nonisolated static let maxCharsPerBatch = 40_000
-    /// A longer jot is sent cut to this length (meeting notes can be long).
-    public static let maxCharsPerJot = 20_000
+    /// A longer jot is sent in chunks of at most this length (same version; each chunk overlaps the previous one by
+    /// `chunkOverlap` so a sentence cut at the edge is read whole); it counts as screened only when every chunk is done.
+    public nonisolated static let maxCharsPerJot = 20_000
+    public nonisolated static let chunkOverlap = 500
     static let lastRunKey = "decisions.screened_at"
     static let sinceKey = "decisions.screen_since"
 
@@ -100,13 +102,35 @@ public struct ScreenOutcome: Equatable {
             store.activity("decisions", .error, "Could not read the week's jots for screening", detail: "\(error)")
             return []
         }
-        return rows.compactMap { id, text, kind, added in
+        return rows.flatMap { id, text, kind, added -> [ScreenJot] in
             let v = version(text)
-            guard !isScreened(store, jot: id, version: v), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            guard !isScreened(store, jot: id, version: v), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
             let refs = references(store, jot: ShortID(kind: .jot, number: id), text: text)
-            return ScreenJot(ref: "J-\(id)@\(v)", kind: kind, added: iso(added), text: String(text.prefix(maxCharsPerJot)), references: refs)
+            let parts = chunks(text)
+            if parts.count == 1 { return [ScreenJot(ref: "J-\(id)@\(v)", kind: kind, added: iso(added), text: text, references: refs)] }
+            return parts.enumerated().compactMap { i, part in
+                let cv = chunkVersion(v, i + 1, parts.count)
+                return isScreened(store, jot: id, version: cv) ? nil
+                    : ScreenJot(ref: "J-\(id)@\(cv)", kind: kind, added: iso(added), text: part, references: refs)
+            }
         }
     }
+
+    /// The text in pieces of at most `maxCharsPerJot` characters, each starting `chunkOverlap` before the previous one ended.
+    public nonisolated static func chunks(_ text: String) -> [String] {
+        guard text.count > maxCharsPerJot else { return [text] }
+        var out: [String] = []
+        var start = text.startIndex
+        while true {
+            let end = text.index(start, offsetBy: maxCharsPerJot, limitedBy: text.endIndex) ?? text.endIndex
+            out.append(String(text[start..<end]))
+            if end == text.endIndex { break }
+            start = text.index(end, offsetBy: -chunkOverlap)
+        }
+        return out
+    }
+
+    nonisolated static func chunkVersion(_ v: String, _ i: Int, _ n: Int) -> String { "\(v)-c\(i)of\(n)" }
 
     /// Earlier decisions the jot refers to: those it reviews (review-of) and those it names by id.
     static func references(_ store: Store, jot: ShortID, text: String) -> [ScreenRef] {
@@ -141,6 +165,7 @@ public struct ScreenOutcome: Equatable {
         let js = JotStore(store: store)
         for r in results {
             guard let job = sent.first(where: { $0.ref == r.ref }), let (jotID, v) = parseRef(r.ref) else { continue }
+            let chunk = parseChunk(v)
             guard r.ok else { out.unreadable += 1; continue }
             guard let jot = js.jot(jotID), !jot.deleted else { continue }
             var known = ds.all(includeDeleted: true).filter { d in
@@ -164,6 +189,16 @@ public struct ScreenOutcome: Equatable {
             }
             store.perform {
                 try store.db.run("INSERT OR IGNORE INTO decision_screened(jot_id, version, screened, found) VALUES(?,?,?,?)", [jotID, v, now, found])
+                // A chunk: the whole version is screened only once every chunk of it is.
+                if let c = chunk {
+                    let names = (1...c.of).map { chunkVersion(c.base, $0, c.of) }
+                    let marks = names.map { _ in "?" }.joined(separator: ",")
+                    let done = try store.db.query("SELECT count(*), coalesce(sum(found),0) FROM decision_screened WHERE jot_id=? AND version IN (\(marks))",
+                                                  [jotID] + names) { (DB.int($0, 0), DB.int($0, 1)) }.first ?? (0, 0)
+                    if done.0 == Int64(c.of) {
+                        try store.db.run("INSERT OR IGNORE INTO decision_screened(jot_id, version, screened, found) VALUES(?,?,?,?)", [jotID, c.base, now, done.1])
+                    }
+                }
             }
             out.screened += 1
         }
@@ -189,6 +224,14 @@ public struct ScreenOutcome: Equatable {
         let parts = ref.split(separator: "@", maxSplits: 1).map(String.init)
         guard parts.count == 2, let id = ShortID.parse(parts[0]), id.kind == .jot else { return nil }
         return (id.number, parts[1])
+    }
+
+    /// "<version>-c2of3" → (version, 3); nil for a whole jot.
+    nonisolated static func parseChunk(_ v: String) -> (base: String, of: Int)? {
+        guard let r = v.range(of: #"-c\d+of\d+$"#, options: .regularExpression) else { return nil }
+        let tail = v[r].dropFirst(2)
+        guard let n = tail.split(separator: "f").last.flatMap({ Int($0) }), n > 0 else { return nil }
+        return (String(v[..<r.lowerBound]), n)
     }
 
     static func isScreened(_ store: Store, jot: Int64, version: String) -> Bool {

@@ -32,7 +32,7 @@ export const MAX_CHARS = 40_000;
 const MAX_BODY = 200_000;
 const TYPES = ["operational", "strategic", "investment"] as const;
 const CONFIDENCE = ["low", "medium", "high"] as const;
-const JOT_REF = /^J-\d{1,12}@[0-9a-z]{1,64}$/;
+const JOT_REF = /^J-\d{1,12}@[0-9a-z]{1,64}(-c\d{1,3}of\d{1,3})?$/;   // "-c2of3": one chunk of a long jot
 const DECISION_ID = /^D-\d{1,12}$/;
 const PERSON_ID = /^P-\d{1,12}$/;
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
