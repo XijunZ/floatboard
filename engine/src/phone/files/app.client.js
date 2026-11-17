@@ -559,6 +559,9 @@
       while (queue.actions.length) {
         var body = takeBatch(queue.actions, new Date().toISOString());
         if (!body.actions.length) break;
+        // Marked before it goes: if the answer is lost, Undo of a delete in it sends a restore instead of dropping it.
+        queue.actions = markAttempted(queue.actions, body);
+        saveQueue();
         // A batch the engine refuses as malformed (400) is sent again one action at a time; one still refused leaves the queue.
         var sent = await sendBatch(body, function (b) { return api("/app/api/action", { method: "POST", body: b }); },
           function () { return new Date().toISOString(); });

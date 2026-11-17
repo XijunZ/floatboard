@@ -70,6 +70,14 @@
     return { sent_at: sentAt, actions: out };
   }
 
+  // Before a batch goes, its actions are marked as sent at least once (kept on this phone, never sent): the engine may take
+  // them even if its answer is lost, so a delete marked so is never taken back locally (see undoDeleteStep).
+  function markAttempted(actions, batch) {
+    var ids = {};
+    ((batch && batch.actions) || []).forEach(function (a) { ids[a.id] = true; });
+    return (actions || []).map(function (a) { return ids[a.id] && !a.attempted ? Object.assign({}, a, { attempted: true }) : a; });
+  }
+
   function afterSend(actions, result) {
     var gone = {};
     var dropped = 0;
@@ -166,11 +174,12 @@
     return { deleted: true, card_id: card.id, del_id: del.id, made_at: del.made_at, at: nowMs };
   }
 
-  // Undo of a delete: still waiting on this phone (not sent, not being sent): it is taken out of the queue and nothing is
-  // sent. Already sent (or on its way): a `restore` of its own, made after the delete, brings the task back on the Mac.
+  // Undo of a delete: never sent (not marked as attempted, not being sent): it is taken out of the queue and nothing is
+  // sent. Sent at least once (even if its answer was lost and it is still queued) or on its way: it stays (sending it again
+  // is harmless) and a `restore` of its own, made after the delete, brings the task back on the Mac.
   function undoDeleteStep(u, actions, inFlight, id, nowIso) {
     var list = actions || [];
-    var waiting = list.some(function (a) { return a.id === u.del_id; });
+    var waiting = list.some(function (a) { return a.id === u.del_id && !a.attempted; });
     if (waiting && !inFlight) return { actions: list.filter(function (a) { return a.id !== u.del_id; }), restore: null };
     var after = Date.parse(u.made_at) + 1;
     var made = Date.parse(nowIso) >= after ? nowIso : new Date(after).toISOString();
