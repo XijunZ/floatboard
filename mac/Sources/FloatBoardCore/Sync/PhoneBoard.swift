@@ -355,6 +355,9 @@ public enum PhoneBoard {
 
 extension Store {
     static func boardHashKey(_ connector: String) -> String { "phone_board_hash:\(connector)" }
+    /// History row and meta key marking a delete that came from the phone (meta: when it was made, on this Mac's clock).
+    static let phoneDeleteKind = "deleted from the phone"
+    static func phoneDeleteKey(_ cardID: Int64) -> String { "phone_delete_made:\(cardID)" }
     static func appliedKey(_ connector: String, _ id: String) -> String { "phone_action:\(connector):\(id)" }
 
     /// How long a sent board counts as current: after this it is sent again even if unchanged (covers an engine that
@@ -485,11 +488,28 @@ extension Store {
                         }
                         let teach = card(cardID)?.teachOnDelete == true && ["not_action", "wrong_details", "duplicate"].contains(a.teach ?? "") ? a.teach : nil
                         gone = try deleteCardRow(cardID, verdict: teach, now: now, calendarDelay: Store.phoneCalendarDeleteDelay)
-                        outcome = gone == nil ? "unknown" : "deleted"
+                        guard gone != nil else { outcome = "unknown"; return }
+                        // Marks this delete as the phone's (a later restore may take back only that), with when it was made.
+                        try insertEvent(cardID, Self.phoneDeleteKind, actor: .user, at: now)
+                        try db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)",
+                                   [Self.phoneDeleteKey(cardID), String((madeHere.map { min($0, now) } ?? now).timeIntervalSince1970)])
+                        outcome = "deleted"
                     } else if a.action == "restore", let cardID = a.cardID {
                         // Undo on the phone after its delete was sent: the task comes back as with Undo Delete here.
                         guard try db.query("SELECT 1 FROM cards WHERE id=?", [cardID], { DB.int($0, 0) }).first != nil else { outcome = "unknown"; return }
+                        // Newest change wins: only the phone's own delete is taken back, and only by a restore made after it.
+                        // A task deleted on this Mac (also after a phone delete and restore) stays deleted.
+                        let latest = try db.query("""
+                            SELECT kind FROM events WHERE card_id=? AND (kind='deleted' OR kind=?) ORDER BY at DESC, id DESC LIMIT 1
+                            """, [cardID, Self.phoneDeleteKind]) { DB.text($0, 0) }.first
+                        let deleteMade = try db.query("SELECT value FROM meta WHERE key=?", [Self.phoneDeleteKey(cardID)]) { Double(DB.text($0, 0)) }.first ?? nil
+                        let deleted = try db.query("SELECT deleted FROM cards WHERE id=?", [cardID]) { DB.int($0, 0) }.first ?? 0
+                        if deleted != 0 {
+                            guard latest == Self.phoneDeleteKind, let made = deleteMade,
+                                  (madeHere ?? now).timeIntervalSince1970 >= made - Self.sameTime else { outcome = "superseded"; return }
+                        }
                         if try restoreCardRow(cardID, memo: deleteMemos[cardID], now: now) { back = cardID }
+                        try db.run("DELETE FROM meta WHERE key=?", [Self.phoneDeleteKey(cardID)])
                         outcome = "restored"
                     } else if let status = Status(rawValue: a.action), let cardID = a.cardID {
                         let row = try db.query("SELECT deleted, withdrawn, status FROM cards WHERE id=?", [cardID]) {

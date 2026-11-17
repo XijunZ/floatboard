@@ -82,4 +82,13 @@ import FloatBoardConnectors
                                 connector: "ph", now: t.addingTimeInterval(125))
     check(r.applied == ["r5"] && store.card(ev) != nil && calKinds().isEmpty, "phone_undo_within_the_window_keeps_the_event")
 
+    let late = onCalendar("PD offsite", event: "pdev2")
+    let t2 = now.addingTimeInterval(2000)
+    if let c = store.card(late) { store.deleteCard(c, verdict: nil, now: t2.addingTimeInterval(10)) }   // the owner deletes it on the Mac
+    let before = calKinds()
+    r = store.applyPhoneActions([PhoneAction(id: "d6", clientID: "pd-del-6", cardID: late, action: "delete", madeAt: t2),
+                                 PhoneAction(id: "r6", clientID: "pd-restore-6", cardID: late, action: "restore", madeAt: t2.addingTimeInterval(5))],
+                                connector: "ph", now: t2.addingTimeInterval(200))
+    check(r.skipped.first { $0.id == "r6" }?.reason == "superseded" && store.card(late) == nil && calKinds() == before && !before.contains("create"),
+          "late_phone_restore_never_undoes_a_mac_delete")
 }
