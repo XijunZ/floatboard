@@ -252,3 +252,40 @@ describe("foundation round 2 (R2): one notification id, shown once across Mac an
     expect((await claim(u.key, 7)).status).toBe(400);
   });
 });
+
+describe("foundation round 3: a reminder the Mac could not show is handed back to the phone", () => {
+  async function user(name: string) {
+    const u = await newUser(name);
+    await env.DB.prepare("UPDATE users SET ntfy_topic='budget-topic' WHERE id=?").bind(u.id).run();
+    return u;
+  }
+  const post = (key: string, path: string, id: unknown) => call(path, { method: "POST", key, body: JSON.stringify({ id }) });
+
+  it("a_released_claim_lets_the_engine_send_it_once", async () => {
+    const u = await user("Released");
+    const fire = Date.parse("2026-11-20T09:00:00Z");
+    const reminders = [{ id: "rb-circle_due-P-5-2026-11-20", title: "Sam Example", text: "Message P-5", fire_at: iso(fire) }];
+    await put(u.key, { cards: [card(1)], reminders });
+    expect(await (await post(u.key, "/v2/reminders/claim", reminders[0].id)).json()).toEqual({ owner: "mac" });
+    const r = await post(u.key, "/v2/reminders/release", reminders[0].id);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ released: true });
+    ntfy = [];
+    expect(await runDueAlerts(env as any, fire + 11 * 60_000)).toBe(1);
+    expect(await runDueAlerts(env as any, fire + 20 * 60_000)).toBe(0);
+    // Already the phone's: nothing to hand back; the Mac can't claim it again.
+    expect(await (await post(u.key, "/v2/reminders/release", reminders[0].id)).json()).toEqual({ released: false });
+    expect(await (await post(u.key, "/v2/reminders/claim", reminders[0].id)).json()).toEqual({ owner: "phone" });
+  });
+
+  it("release_only_hands_back_the_macs_own_claim_and_refuses_bad_ids", async () => {
+    const u = await user("Release other");
+    const fire = Date.parse("2026-11-20T09:00:00Z");
+    const reminders = [{ id: "rb-decision_review-D-3-2026-11-20", title: "Review", text: "Review D-3", fire_at: iso(fire) }];
+    await put(u.key, { cards: [card(1)], reminders });
+    expect(await runDueAlerts(env as any, fire + 11 * 60_000)).toBe(1);   // the phone got it
+    expect(await (await post(u.key, "/v2/reminders/release", reminders[0].id)).json()).toEqual({ released: false });
+    expect(await runDueAlerts(env as any, fire + 20 * 60_000)).toBe(0);   // still once
+    expect((await post(u.key, "/v2/reminders/release", "bad id")).status).toBe(400);
+  });
+});

@@ -27,3 +27,20 @@ route("POST", "/v2/reminders/claim", async (req, env, user) => {
   const mine = await env.DB.prepare("SELECT 1 AS x FROM due_alerts_sent WHERE user_id=? AND card_id=-1 AND due=?").bind(user.id, key).first();
   return json({ owner: mine ? "mac" : "phone" });
 });
+
+/**
+ * `POST /v2/reminders/release { id }` (user key): the Mac claimed this reminder but macOS never showed it, so it hands the
+ * claim back and the engine's next run sends it to the phone (if still in the Mac's copy, within a day). Only the Mac's own
+ * claim is handed back: `{ released: true }`; one the phone already got, or none, is left as it is: `{ released: false }`.
+ */
+route("POST", "/v2/reminders/release", async (req, env, user) => {
+  const rb = await readCappedJSON(req, 2_000);
+  if (!rb.ok) return rb.tooLarge ? json({ error: "too large" }, 413) : json({ error: "Invalid JSON" }, 400);
+  const id = rb.body?.id;
+  if (typeof id !== "string" || !REMINDER_ID.test(id)) return json({ error: "id must be a reminder id" }, 400);
+  const key = `budget:${id}`;
+  const mine = await env.DB.prepare("DELETE FROM due_alerts_sent WHERE user_id=? AND card_id=-1 AND due=?").bind(user.id, key).run();
+  if (!mine.meta.changes) return json({ released: false });
+  await env.DB.prepare("DELETE FROM due_alerts_sent WHERE user_id=? AND card_id=0 AND due=?").bind(user.id, key).run();
+  return json({ released: true });
+});

@@ -275,7 +275,8 @@ public struct BudgetReminder: Equatable { public let id, kind, item, text: Strin
 Delivery (review R1/R2): `ReminderDelivery(store:claim:schedule:)` runs every minute. Before showing, the Mac claims the id at
 each online engine (`POST /v2/reminders/claim` → `mac` / `phone`; the same claim row the engine's own send takes), so one id is
 shown once across Mac and phone even if the Mac's board update is lost; a reminder counts as delivered only after macOS
-accepted it (a refusal leaves it waiting, one Activity error). Earlier wording: the app checks `pending()` every minute; it shows a Mac notification (id = reminder id) when `macShows`, and
+accepted it (a refusal leaves it waiting, one Activity error). A reminder the Mac claimed but macOS kept refusing for the whole 10 minutes is
+handed back (`POST /v2/reminders/release`, one Activity line) so the engine sends it to the phone: never shown nowhere. Earlier wording: the app checks `pending()` every minute; it shows a Mac notification (id = reminder id) when `macShows`, and
 marks `phoneTakesOver` ones delivered by "phone". The board push carries `pending()` (`reminders`); the engine sends one
 by Web Push only after `fire_at + 10 min` and only while it is still in the Mac's latest copy (the Mac drops it from the
 copy once shown). Claimed once in `due_alerts_sent` (`card_id 0`, `due 'budget:<id>'`).
