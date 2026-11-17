@@ -148,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               guard let shown = self?.reminders else { throw ReminderShowError.unavailable }
                                               try await shown.showNow(r)
                                           },
-                                          claim: { _ in .noEngine },
+                                          claim: { [weak self] id in await self?.claimReminder(id) ?? .unreachable },
                                           pushBoard: { [weak self] in self?.connectors.trigger("reminder shown") })
         assistantTicker?.start()
         // Jots: search, the capture window (⌃⌥J), the daily nudge and daily files.
@@ -198,6 +198,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "minimized": ui.mode = .minimized
         default: panel.apply(ui.mode)
         }
+    }
+
+    /// Asks every online engine (the ones that can reach the phone) whether this Mac may show budget reminder `id`: any
+    /// "phone" wins (it was sent there), any engine without an answer means wait; with no online engine this Mac shows it.
+    private func claimReminder(_ id: String) async -> ReminderClaim {
+        let online = store.connectors.filter { !$0.baseURL.isEmpty && $0.id != LocalMode.connectorID }
+        guard !online.isEmpty else { return .noEngine }
+        var answers: [ReminderClaim] = []
+        for info in online {
+            guard let client = ConnectorAccounts.client(for: info, store: store) else { answers.append(.unreachable); continue }
+            answers.append(await client.claimReminder(id))
+        }
+        if answers.contains(.phones) { return .phones }
+        if answers.contains(.unreachable) { return .unreachable }
+        return answers.contains(.mine) ? .mine : .noEngine
     }
 
     /// Due reminders from this Mac's own board: rescheduled a moment after any board change, and when the setting
