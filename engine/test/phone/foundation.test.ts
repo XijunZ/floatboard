@@ -47,11 +47,10 @@ describe("foundation: tags and modules in the board copy", () => {
     expect(JSON.parse(s!.modules)).toEqual({ ...ALL_ON, circle: false });
   });
 
-  it("bad_tags_or_modules_are_refused", async () => {
+  it("bad_modules_are_refused_bad_tags_only_drop_that_cards_tags", async () => {
     const u = await setup("Bad tags");
-    expect((await put(u.key, { cards: [card(1, { tags: "Work" })] })).status).toBe(400);
-    expect((await put(u.key, { cards: [card(1, { tags: ["x".repeat(61)] })] })).status).toBe(400);
-    expect((await put(u.key, { cards: [card(1, { tags: [] })] })).status).toBe(400);
+    expect((await put(u.key, { cards: [card(1, { tags: [] })] })).status).toBe(200);
+    expect((await board(u.cookie)).cards[0].tags).toBeUndefined();
     expect((await put(u.key, { cards: [card(1)], modules: { jots: "yes" } })).status).toBe(400);
   });
 
@@ -183,5 +182,31 @@ describe("foundation: phone keeps the modules", () => {
     const { APP_JS } = await import("../../src/phone/client");
     expect(APP_JS).toMatch(/if \(b\.modules && typeof b\.modules === "object"\) board\.modules = b\.modules;/);
     expect(APP_JS).toMatch(/var views = visibleViews\(board\.modules\);/);
+  });
+});
+
+describe("foundation round 1 (F1): one tag rule; a bad tag never blocks the board", () => {
+  it("a_card_with_bad_tags_loses_only_its_tags_and_the_upload_goes_through", async () => {
+    const u = await setup("Lenient tags");
+    const r = await put(u.key, { cards: [
+      card(1, { tags: ["Work", "x".repeat(61)] }),            // too long
+      card(2, { tags: ["Work", "work"] }),                    // repeat, case ignored
+      card(3, { tags: "Work", tags_at: "not a date" }),       // not a list, bad time
+      card(4, { tags: ["Work", "Investor"] }),
+    ] });
+    expect(r.status).toBe(200);
+    const b = await board(u.cookie);
+    expect(b.cards.map((c: any) => c.tags ?? null)).toEqual([null, null, null, ["Work", "Investor"]]);
+    expect(b.cards[2].tags_at ?? null).toBeNull();
+  });
+
+  it("the_engine_takes_what_the_mac_rule_allows_60_utf16_units_and_20_tags", async () => {
+    const u = await setup("Edge tags");
+    const sixty = "季".repeat(58) + "😀";                       // 60 UTF-16 units
+    const twenty = Array.from({ length: 20 }, (_, i) => `Tag ${i}`);
+    expect((await put(u.key, { cards: [card(1, { tags: [sixty] }), card(2, { tags: twenty })] })).status).toBe(200);
+    const b = await board(u.cookie);
+    expect(b.cards[0].tags).toEqual([sixty]);
+    expect(b.cards[1].tags).toHaveLength(20);
   });
 });

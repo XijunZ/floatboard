@@ -759,6 +759,7 @@ await planningChecks()
 phoneDeleteChecks()
 foundationChecks()
 foundationCoreChecks()
+foundationRound1Checks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)

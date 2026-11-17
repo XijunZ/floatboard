@@ -110,12 +110,13 @@ const isMove = (action: string): action is Status => (STATUSES as readonly strin
 /** Actions decided by "newest change wins" against the card's last step change on the Mac: moves and delete. */
 const newestWins = (action: string) => isMove(action) || action === "delete";
 
-/** A task's tags: 1 to 20 names, each 1 to 60 characters, no repeats (case ignored). Throws on anything else. */
+/** A task's tags: 1 to 20 names, each 1 to 60 UTF-16 units once trimmed, no repeats (case ignored). Throws on anything
+ *  else. The Mac sends only tags that pass (`TagRules.forPhone` in mac/Sources/FloatBoardCore/Items/Tags.swift): keep the two equal. */
 function parseTags(v: unknown, at: string): string[] {
   if (!Array.isArray(v) || v.length < 1 || v.length > MAX_TAGS) throw new Error(`${at} must be a list of 1 to ${MAX_TAGS} tags`);
   const seen = new Set<string>();
   return v.map((t: unknown, i: number) => {
-    if (typeof t !== "string" || !t.trim() || t.length > MAX_TAG) throw new Error(`${at}[${i}] must be text of 1 to ${MAX_TAG} characters`);
+    if (typeof t !== "string" || !t.trim() || t.trim().length > MAX_TAG) throw new Error(`${at}[${i}] must be text of 1 to ${MAX_TAG} characters`);
     if (seen.has(t.trim().toLowerCase())) throw new Error(`${at}[${i}] repeats`);
     seen.add(t.trim().toLowerCase());
     return t.trim();
@@ -220,8 +221,14 @@ export function parseCards(body: any): Card[] {
       if (links) out.links = links;
       if (c.watch !== undefined && c.watch !== null) out.watch = cardWatch(c.watch);
       if (c.teach_on_delete === true) out.teach_on_delete = true;   // anything else: a plain delete (never a refused push)
-      if (c.tags !== undefined && c.tags !== null) out.tags = parseTags(c.tags, "tags");
-      if (c.tags_at !== undefined && c.tags_at !== null) out.tags_at = isoOrNull(c.tags_at, "tags_at");
+      // Tags never block the board: a card whose tags break the rule (the Mac's TagRules.forPhone is the same rule) just
+      // goes without them, and is logged; the rest of the push is stored.
+      if (c.tags !== undefined && c.tags !== null) {
+        try {
+          out.tags = parseTags(c.tags, "tags");
+          if (c.tags_at !== undefined && c.tags_at !== null && isIso(c.tags_at)) out.tags_at = c.tags_at;
+        } catch (e) { console.warn(JSON.stringify({ event: "board_tags_dropped", card: c.id, why: (e as Error).message })); }
+      }
       if (c.email !== undefined && c.email !== null) {
         if (!EMAIL_KINDS.includes(c.email)) throw new Error("email must be sorting or user when given");
         out.email = c.email;

@@ -221,13 +221,12 @@ public enum PhoneBoard {
         return chosen.map { c in
             var b = card(for: c, color: colors[c.area], calendar: calendar)
             b.statusAt = isoUTC(steps[c.id] ?? c.created)
-            b.tags = store.itemTags(ShortID(kind: .task, number: c.id)).all.map { clipTo($0, maxTag) }
+            let tags = TagRules.forPhone(store.itemTags(ShortID(kind: .task, number: c.id)).all)
+            b.tags = tags.isEmpty ? nil : tags
             b.tagsAt = isoUTC(store.tagsChangedAt(c.id) ?? c.created)
             return b
         }
     }
-
-    static let maxTag = 60
 
     /// The budget reminders waiting to be shown (at most 20), for the engine to send to the phone when the Mac does not.
     @MainActor
