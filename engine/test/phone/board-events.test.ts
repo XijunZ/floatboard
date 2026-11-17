@@ -51,11 +51,32 @@ describe("board events", () => {
     }
   });
 
-  it("caps_events_at_50", async () => {
+  it("caps_events_at_200", async () => {
     const u = await newUser("Cap user");
     const many = (n: number) => Array.from({ length: n }, (_, i) => ev(i + 1, { tasks: [] }));
-    expect((await put(u.key, { cards: [], events: many(50) })).status).toBe(200);
-    expect((await put(u.key, { cards: [], events: many(51) })).status).toBe(400);
+    expect((await put(u.key, { cards: [], events: many(200) })).status).toBe(200);
+    expect((await put(u.key, { cards: [], events: many(201) })).status).toBe(400);
+  });
+
+  it("serves_series_and_repeat_of_repeating_meetings", async () => {
+    const u = await newUser("Series user");
+    const { cookie } = await pairPhone(u.key);
+    expect((await put(u.key, { cards: [], events: [ev(1, { series: "S-0123456789abcdef", repeat: "  weekdays 09:00 " }), ev(2)] })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.events[0].series).toBe("S-0123456789abcdef");
+    expect(b.events[0].repeat).toBe("weekdays 09:00");
+    expect("series" in b.events[1]).toBe(false);
+    expect("repeat" in b.events[1]).toBe(false);
+  });
+
+  it("bad_series_or_repeat_is_dropped_and_the_push_succeeds", async () => {
+    const u = await newUser("Bad series user");
+    const { cookie } = await pairPhone(u.key);
+    const bad = [{ series: "S-<script>" }, { series: 5 }, { series: "x".repeat(100) }, { repeat: 7 }, { repeat: "x".repeat(81) }, { repeat: "a\u0000b" }];
+    expect((await put(u.key, { cards: [], events: bad.map((o, i) => ev(i + 1, o)) })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.events).toHaveLength(bad.length);
+    expect(b.events.every((e: any) => !("series" in e) && !("repeat" in e))).toBe(true);
   });
 
   it("rejects_malformed_events", async () => {

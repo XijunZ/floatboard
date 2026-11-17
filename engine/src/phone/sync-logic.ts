@@ -20,6 +20,9 @@
  * - `emailChoice(card)`, `linkAction(card, hit, id, nowIso)`, `hitLines(hit, nowMs)`: "Link an email" on a task the
  *   user made ("Remove email link" once they linked one; neither on the email sorting's own tasks), the queued action
  *   for a picked search result, and the two lines a result shows.
+ * - `dayKey(ms, zone)`, `planBlocks(events, cards, nowMs, zone)`: the planning summary above the board: Today, Rest of
+ *   this week (tomorrow to Sunday) and Next week (Monday to Sunday), in the Mac's zone; each with its meetings (a
+ *   repeating one once, with its label) and the open tasks due then. Bad entries are skipped.
  *
  * The functions themselves are in files/sync.client.js (bundled as text).
  */
@@ -30,4 +33,5 @@ export const SYNC_JS: string = SYNC_SRC;
 
 /** Names the tests pull out of SYNC_JS. */
 export const SYNC_EXPORTS = ["viewBoard", "takeBatch", "sendBatch", "afterSend", "rememberSent", "noticeSuperseded", "retryDelay", "statusText",
-  "replacedText", "byteLength", "undoFor", "undoLive", "undoText", "undoAction", "cardLinks", "linkLabel", "emailChoice", "linkAction", "hitLines"];
+  "replacedText", "byteLength", "undoFor", "undoLive", "undoText", "undoAction", "cardLinks", "linkLabel", "emailChoice", "linkAction", "hitLines",
+  "dayKey", "planBlocks"];
