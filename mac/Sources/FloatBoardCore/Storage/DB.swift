@@ -54,6 +54,8 @@ public final class DB {
                     try exec(DB.upgrade(from: Int(version)) + "PRAGMA user_version = \(DB.schemaVersion);")
                     if version < 11 { try backfillDueDays() }
                 }
+            } else if version == DB.schemaVersion {
+                try addMissingV11Columns()
             }
         } catch {
             sqlite3_close(handle)
@@ -63,6 +65,18 @@ public final class DB {
     }
 
     deinit { sqlite3_close(handle) }
+
+    /// Version 11 was amended before release (Round 6): a board already at 11 from before then lacks `cal_series`'
+    /// `master_start` and `master_zone`. They are added when missing, without changing the version; a board that has
+    /// them is not touched. ALTER puts each before the table's PRIMARY KEY clause, so the result matches a new board.
+    private func addMissingV11Columns() throws {
+        let have = Set(try query("PRAGMA table_info(cal_series)") { DB.text($0, 1) })
+        guard !have.isEmpty, !have.contains("master_start") || !have.contains("master_zone") else { return }
+        try transaction {
+            if !have.contains("master_start") { try exec("ALTER TABLE cal_series ADD COLUMN master_start REAL;") }
+            if !have.contains("master_zone") { try exec("ALTER TABLE cal_series ADD COLUMN master_zone TEXT;") }
+        }
+    }
 
     /// 10 -> 11: fills `due_day` / `due_has_time` for the existing tasks with the old rule (a due at 00:00 in this Mac's
     /// zone has no time), so nothing changes on screen.
@@ -148,10 +162,11 @@ public final class DB {
                 UNIQUE(account, calendar_id, event_id)
             );
             CREATE INDEX cal_events_start ON cal_events(start);
-            -- A repeating meeting's rule (Google's recurrence lines), read once per series and again at the daily full read.
+            -- A repeating meeting's rule (Google's recurrence lines), read once per series and again at the daily full read, with
+            -- the series' first start and its time zone (master_zone NULL: not read with them yet; '' none, e.g. all-day).
             CREATE TABLE cal_series(
                 account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',
-                read_at REAL NOT NULL,
+                read_at REAL NOT NULL, master_start REAL, master_zone TEXT,
                 PRIMARY KEY(account, calendar_id, series_id)
             );
             -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
@@ -289,10 +304,11 @@ public final class DB {
         UNIQUE(account, calendar_id, event_id)
     );
     CREATE INDEX cal_events_start ON cal_events(start);
-        -- A repeating meeting's rule (Google's recurrence lines), read once per series and again at the daily full read.
+        -- A repeating meeting's rule (Google's recurrence lines), read once per series and again at the daily full read, with
+        -- the series' first start and its time zone (master_zone NULL: not read with them yet; '' none, e.g. all-day).
         CREATE TABLE cal_series(
             account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',
-            read_at REAL NOT NULL,
+            read_at REAL NOT NULL, master_start REAL, master_zone TEXT,
             PRIMARY KEY(account, calendar_id, series_id)
         );
         -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).

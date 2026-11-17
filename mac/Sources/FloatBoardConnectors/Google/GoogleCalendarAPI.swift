@@ -142,11 +142,17 @@ public struct GoogleCalendarAPI: Sendable {
         return (r.eventID, r.fields)
     }
 
-    /// A repeating meeting's rule: the series' (master event's) `recurrence` lines (RRULE, EXDATE ...); [] when it has none.
-    public func recurrence(calendarID: String, seriesID: String) async throws -> [String] {
+    /// A repeating meeting's rule: the series' (master event's) `recurrence` lines (RRULE, EXDATE ...; [] when it has none),
+    /// with the master's start and the time zone its rule runs in (nil for an all-day series, or when Google gives none), so
+    /// a weekday and time can be shown in the app's zone (a Monday 23:00 in Los Angeles is a Tuesday in London).
+    public func recurrence(calendarID: String, seriesID: String) async throws -> (lines: [String], start: Date?, zone: String?) {
         let obj = try await json(try await send("GET", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(seriesID))",
-                                                query: [URLQueryItem(name: "fields", value: "recurrence")]))
-        return (obj["recurrence"] as? [Any] ?? []).compactMap { $0 as? String }
+                                                query: [URLQueryItem(name: "fields", value: "recurrence,start")]))
+        let lines = (obj["recurrence"] as? [Any] ?? []).compactMap { $0 as? String }
+        let start = obj["start"] as? [String: Any]
+        let at = (start?["dateTime"] as? String).flatMap(Self.parseRFC3339)
+        let zone = (start?["timeZone"] as? String).flatMap { TimeZone(identifier: $0) != nil ? $0 : nil }
+        return (lines, at, at == nil ? nil : zone)
     }
 
     /// Reads one event with its ETag (Google's version stamp), to change it only if it is still as read (`patch(ifMatch:)`).

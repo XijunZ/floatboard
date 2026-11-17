@@ -406,11 +406,15 @@ tasks linked to a meeting under it, then the open tasks due in that block. Empty
 
 - A repeating meeting (Google instances share `recurringEventId`) appears once per block with a short label instead of
   every instance: "Standup · weekdays 09:00", "1:1 · weekly Tue 14:00", "Board · monthly". Its linked tasks are those of
-  all its instances in the block; Today's Join opens today's instance.
+  all its instances in the block; Today's Join opens today's instance. In Today the row shows the occurrence's actual
+  time. An instance at another time than the series' usual one (the time in its label, else the time most of its
+  instances in the block share), e.g. one moved in Google, is listed as its own row with its own time and Join.
 - The label comes from the series' rule. The Mac reads it once per series with `events.get(calendarId, recurringEventId,
-  fields=recurrence)`, keeps it (`cal_series`), reads it again at the daily full read, and puts it in words itself:
-  FREQ DAILY / WEEKLY / MONTHLY / YEARLY, INTERVAL ("every 2 weeks"), BYDAY (MO-FR = "weekdays"); anything else, or a
-  rule not read yet, is "repeats".
+  fields=recurrence,start)`, keeps it with the series' start and time zone (`cal_series`), reads it again at the daily
+  full read, and puts it in words itself: FREQ DAILY / WEEKLY / MONTHLY / YEARLY, INTERVAL ("every 2 weeks"), BYDAY
+  (MO-FR = "weekdays"); anything else, or a rule not read yet, is "repeats". Weekdays and time are converted together
+  from the series' zone into the app's (Monday 23:00 in Los Angeles is "weekly Tue 07:00" in London); when a clock
+  change makes that differ between the days shown, the label has no time ("weekly Tue").
 - `PUT /v2/board`: `events` now cover today through the end of next week (weeks start on Monday), at most 200 (was 50).
   Each instance of a repeating meeting carries `series` (an opaque "S-" key: a hash, no Google id leaves the Mac) and
   `repeat` (the label). Robustness as before (R17): a `series` that is not an "S-" key or a `repeat` that is not short

@@ -307,7 +307,9 @@ public enum PhoneBoard {
             if let r = e.recurringID, !r.isEmpty {
                 series = seriesKey(account: e.account, calendarID: e.calendarID, seriesID: r)
                 label = RecurrenceLabel.text(rule: cache.seriesRule(account: e.account, calendarID: e.calendarID, seriesID: r) ?? "",
-                                             start: e.start, allDay: e.allDay)
+                                             start: e.start, allDay: e.allDay,
+                                             master: cache.seriesMaster(account: e.account, calendarID: e.calendarID, seriesID: r),
+                                             range: DateInterval(start: from, end: to))
             }
             return BoardEvent(id: ShortID(kind: .event, number: e.shortID).text,
                               title: clip(e.title.trimmingCharacters(in: .whitespacesAndNewlines)).trimmingCharacters(in: .whitespacesAndNewlines),
