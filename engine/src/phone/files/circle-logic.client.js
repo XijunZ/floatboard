@@ -66,3 +66,10 @@
     var m = /[#&]circle=(contacted|talked|snooze):(P-\d{1,12})/.exec(hash || "");
     return m ? { action: m[1], person: m[2] } : null;
   }
+
+  // An answer is used only if the phone is still in the session and account it was asked for (no sign-out or account
+  // switch meanwhile: `epoch` goes up on each), and the answer names that account when it names one.
+  function circleAccept(start, now, respAccount) {
+    if (!start || !now || start.epoch !== now.epoch || !start.account || start.account !== now.account) return false;
+    return respAccount == null || respAccount === start.account;
+  }

@@ -9,6 +9,7 @@
   var circleCopy = null;
   var circleQueue = { account: null, actions: [] };
   var circleQuery = "";
+  var circleEpoch = 0;   // up on every sign-out or account change: answers asked for before are dropped
   var CIRCLE_DONE = { contacted: "Marked as contacted", talked: "Marked as talked", snooze: "Snoozed" };
 
   function circleAccount() { return me ? me.account : shownAccount; }
@@ -22,6 +23,7 @@
 
   // Sign-out or another account: everything Circle kept on this phone goes.
   function circleDrop() {
+    circleEpoch++;
     circleCopy = null;
     circleQueue = { account: null, actions: [] };
     store(CIRCLE_KEY, null);
@@ -36,18 +38,23 @@
     if (circleQueue.account !== circleAccount()) circleLoad();
     if (circleHash(location.hash)) { circleFromHash(); return; }   // queues the tap, then syncs
     circleSyncing = true;
+    var asked = { epoch: circleEpoch, account: circleAccount() };
+    var still = function (respAccount) { return circleAccept(asked, { epoch: circleEpoch, account: circleAccount() }, respAccount); };
     try {
       if (circleQueue.actions.length) {
-        var r = await api("/app/api/circle/action", { method: "POST", body: { actions: circleQueue.actions.slice(0, 50) } });
+        var sent = circleQueue.actions.slice(0, 50);
+        var r = await api("/app/api/circle/action", { method: "POST", body: { actions: sent } });
+        if (!still()) return;   // signed out or another account meanwhile: nothing of this answer is kept
         var done = (r.accepted || []).concat((r.dropped || []).map(function (d) { return d.id; }));
         circleQueue.actions = circleQueue.actions.filter(function (a) { return done.indexOf(a.id) < 0; });
         store(CIRCLE_QUEUE_KEY, circleQueue);
       }
       var got = await api("/app/api/circle");
+      if (!still(got.account)) return;
       if (got.copy) {
         circleCopy = got.copy;
         // Actions the engine already holds stay shown until the Mac's next copy reflects them.
-        store(CIRCLE_KEY, { account: circleAccount(), copy: circleCopy, at: Date.now() });
+        store(CIRCLE_KEY, { account: asked.account, copy: circleCopy, at: Date.now() });
       }
     } catch (e) { /* offline or signed out: the copy kept on the phone is shown */ }
     finally { circleSyncing = false; }

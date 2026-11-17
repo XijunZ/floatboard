@@ -62,6 +62,21 @@ describe("phone Circle", () => {
     expect(L.circleAgo("2026-11-15T12:00:00Z", NOW)).toBe("3 days ago");
   });
 
+  it("a_late_answer_from_another_session_or_account_is_dropped", () => {
+    const start = { epoch: 3, account: "acc-a" };
+    expect(L.circleAccept(start, { epoch: 3, account: "acc-a" }, "acc-a")).toBe(true);
+    expect(L.circleAccept(start, { epoch: 3, account: "acc-a" }, undefined)).toBe(true);
+    expect(L.circleAccept(start, { epoch: 4, account: "acc-a" }, "acc-a")).toBe(false);   // signed out (and in again) meanwhile
+    expect(L.circleAccept(start, { epoch: 3, account: null }, "acc-a")).toBe(false);      // signed out meanwhile
+    expect(L.circleAccept(start, { epoch: 3, account: "acc-b" }, "acc-a")).toBe(false);   // another account now
+    expect(L.circleAccept(start, { epoch: 3, account: "acc-a" }, "acc-b")).toBe(false);   // the answer is another account's
+  });
+
+  it("sign_out_clears_circles_phone_cache", () => {
+    expect(CIRCLE_JS).toMatch(/function circleDrop\(\)[\s\S]*?circleEpoch\+\+[\s\S]*?store\(CIRCLE_KEY, null\)/);
+    expect(APP_JS).toMatch(/function dropAccountData\(\)[\s\S]*?circleDrop\(\)/);
+  });
+
   it("service_worker_adds_contacted_and_snooze_to_circle_alerts", () => {
     expect(SW_JS).toContain('action: "contacted", title: "Contacted"');
     expect(SW_JS).toContain('action: "snooze", title: "Snooze"');
