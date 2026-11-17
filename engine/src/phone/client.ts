@@ -29,5 +29,7 @@
  */
 import { SYNC_JS } from "./sync-logic";
 import APP_SRC from "./files/app.client.js";
+import { DECISIONS_LOGIC_JS, DECISIONS_UI_JS } from "./decisions-client";
 
-export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS);
+export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS)
+  .replace("/*@DECISIONS_LOGIC@*/", () => DECISIONS_LOGIC_JS).replace("/*@DECISIONS_UI@*/", () => DECISIONS_UI_JS);
