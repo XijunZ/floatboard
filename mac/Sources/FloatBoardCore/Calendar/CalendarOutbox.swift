@@ -29,16 +29,26 @@ public struct CalPatchBase: Equatable {
     public init(_ e: CalEvent) { self.init(title: e.title, start: e.start, end: e.end, allDay: e.allDay) }
 }
 
-/// FloatBoard's own last accepted writes to an event, kept per field group (the title; the time: start, end, all-day): for
+/// FloatBoard's own last accepted writes to an event, kept per field (the title; the start; the end, each with all-day): for
 /// each, Google's `updated` stamp on the answer to the write that last set it, and the value then. Up to that stamp a change
-/// to that group is FloatBoard's own doing, never one made in Google (C4). A group FloatBoard did not write keeps its own
-/// (older) record, so Google's change to it made meanwhile still counts as Google's.
+/// to that field is FloatBoard's own doing, never one made in Google (C4). A field FloatBoard did not write keeps its own
+/// (older) record, so Google's change to it made meanwhile still counts as Google's (a write of only the end leaves the
+/// start's record alone).
 public struct CalOwnWrite: Equatable, Codable {
     public struct Title: Equatable, Codable { public var updated: Date; public var title: String }
+    /// One end of the event's time as FloatBoard last wrote it.
+    public struct Edge: Equatable, Codable { public var updated: Date; public var value: Date; public var allDay: Bool }
+    /// Saved before start and end were kept apart: both ends at once. Read as both; never written any more.
     public struct Time: Equatable, Codable { public var updated: Date; public var start: Date; public var end: Date; public var allDay: Bool }
     public var title: Title?
+    public var start: Edge?
+    public var end: Edge?
     public var time: Time?
-    public init(title: Title? = nil, time: Time? = nil) { self.title = title; self.time = time }
+    public init(title: Title? = nil, start: Edge? = nil, end: Edge? = nil) { self.title = title; self.start = start; self.end = end }
+    /// The start's record (or the older both-ends one).
+    public var startAck: Edge? { start ?? time.map { Edge(updated: $0.updated, value: $0.start, allDay: $0.allDay) } }
+    /// The end's record (or the older both-ends one).
+    public var endAck: Edge? { end ?? time.map { Edge(updated: $0.updated, value: $0.end, allDay: $0.allDay) } }
 }
 
 /// A change waiting in the outbox.
@@ -226,12 +236,15 @@ public final class CalendarOutbox {
     /// Remembers Google's answer to FloatBoard's own write (`CalOwnWrite`) on the cached event. A failure is logged; the next
     /// patch to this event then compares with the event as queued, as before.
     private func recordOwnWrite(account: String, calendarID: String, eventID: String, _ w: CalWrite, _ f: CalEventFields) {
-        var setTitle = true, setTime = true
-        if case .patch(_, let t, let s, let e, let d) = w { setTitle = t != nil; setTime = s != nil || e != nil || d != nil }
-        guard setTitle || setTime else { return }
+        var setTitle = true, setStart = true, setEnd = true
+        // An all-day move writes both dates (the end defaults to the next day); a timed patch writes only what it carries.
+        if case .patch(_, let t, let s, let e, let d) = w { setTitle = t != nil; setStart = s != nil || d != nil; setEnd = e != nil || d != nil }
+        guard setTitle || setStart || setEnd else { return }
         var own = ownWrite(account: account, calendarID: calendarID, eventID: eventID) ?? CalOwnWrite()
+        if own.time != nil { own.start = own.startAck; own.end = own.endAck; own.time = nil }   // older form, now kept per end
         if setTitle { own.title = .init(updated: f.googleUpdated, title: f.title) }
-        if setTime { own.time = .init(updated: f.googleUpdated, start: f.start, end: f.end, allDay: f.allDay) }
+        if setStart { own.start = .init(updated: f.googleUpdated, value: f.start, allDay: f.allDay) }
+        if setEnd { own.end = .init(updated: f.googleUpdated, value: f.end, allDay: f.allDay) }
         do {
             let json = String(decoding: try JSONEncoder().encode(own), as: UTF8.self)
             try db.run("UPDATE cal_events SET own_write=? WHERE account=? AND calendar_id=? AND event_id=?", [json, account, calendarID, eventID])
@@ -305,16 +318,21 @@ public final class CalendarOutbox {
     public static func withoutNewerGoogleFields(_ w: CalWrite, queuedAt: Date, base: CalPatchBase?, own: CalOwnWrite? = nil,
                                                 current: CalEventFields) -> CalWrite? {
         guard case .patch(let id, var title, var start, var end, var day) = w else { return w }
-        let titleAck = own?.title, timeAck = own?.time
+        let titleAck = own?.title, startAck = own?.startAck, endAck = own?.endAck
         let titleNewer = current.googleUpdated > max(queuedAt, titleAck?.updated ?? .distantPast)
-        let timeNewer = current.googleUpdated > max(queuedAt, timeAck?.updated ?? .distantPast)
+        // Start and end are acknowledged one by one: a write of only the end says nothing about the start.
+        let startNewer = current.googleUpdated > max(queuedAt, startAck?.updated ?? .distantPast)
+        let endNewer = current.googleUpdated > max(queuedAt, endAck?.updated ?? .distantPast)
         let knownTitle = titleAck.flatMap { $0.updated > queuedAt ? $0.title : nil } ?? base?.title
-        let knownTime = timeAck.flatMap { $0.updated > queuedAt ? CalPatchBase(title: "", start: $0.start, end: $0.end, allDay: $0.allDay) : nil } ?? base
+        let ownStart = startAck.flatMap { $0.updated > queuedAt ? $0 : nil }, ownEnd = endAck.flatMap { $0.updated > queuedAt ? $0 : nil }
+        let knownStart = ownStart?.value ?? base?.start, knownEnd = ownEnd?.value ?? base?.end
+        let knownAllDay = [ownStart, ownEnd].compactMap { $0 }.max { $0.updated < $1.updated }?.allDay ?? base?.allDay
         if titleNewer, knownTitle.map({ $0 != current.title }) ?? true { title = nil }
-        if timeNewer, start != nil || end != nil || day != nil {
+        if startNewer || endNewer, start != nil || end != nil || day != nil {
             // Start and end are merged one by one; a switch between all-day and timed keeps them together.
-            let startChanged = knownTime.map { $0.start != current.start } ?? true, endChanged = knownTime.map { $0.end != current.end } ?? true
-            let kindChanged = knownTime.map { $0.allDay != current.allDay } ?? true
+            let startChanged = startNewer && (knownStart.map { $0 != current.start } ?? true)
+            let endChanged = endNewer && (knownEnd.map { $0 != current.end } ?? true)
+            let kindChanged = knownAllDay.map { $0 != current.allDay } ?? true
             let converts = (day != nil) != current.allDay
             if kindChanged || (startChanged && endChanged) || (converts && (startChanged || endChanged)) || (day != nil && startChanged) {
                 start = nil; end = nil; day = nil
