@@ -7,7 +7,7 @@
 import type { Env } from "../env";
 import { nowISO } from "../env";
 import { readCappedJSON } from "../lib/http";
-import { appJSON, requireAppSession, sameOrigin } from "./auth";
+import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
 import { circleOn, unseal } from "../circle/common";
 import { circleFetch } from "../circle/net";
 import { draftInput } from "../circle/ai";
@@ -28,7 +28,9 @@ export async function handleCircleApp(req: Request, env: Env): Promise<Response 
     if (!s) return appJSON({ error: "not signed in" }, 401);
     const row = await env.DB.prepare("SELECT data_enc, updated FROM circle_copy WHERE user_id=?").bind(s.userId).first<{ data_enc: string; updated: string }>();
     const pending = await env.DB.prepare("SELECT count(*) AS n FROM circle_actions WHERE user_id=? AND taken=0").bind(s.userId).first<{ n: number }>();
-    return appJSON({ copy: row ? await unseal(env, row.data_enc) : null, updated: row?.updated ?? null, pending: pending?.n ?? 0 }, 200, s.setCookie);
+    // `account`: the phone drops an answer that arrives after it signed out or switched account.
+    return appJSON({ account: await accountMarker(s.userId), copy: row ? await unseal(env, row.data_enc) : null, updated: row?.updated ?? null,
+      pending: pending?.n ?? 0 }, 200, s.setCookie);
   }
   if (path === "/app/api/circle/action" && req.method === "POST") {
     if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);

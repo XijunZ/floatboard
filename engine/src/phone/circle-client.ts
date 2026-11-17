@@ -9,4 +9,4 @@ import UI from "./files/circle.client.js";
 export const CIRCLE_LOGIC_JS: string = LOGIC;
 export const CIRCLE_JS: string = LOGIC + "\n" + UI;
 /** Names the tests pull out of CIRCLE_LOGIC_JS. */
-export const CIRCLE_EXPORTS = ["circleView", "circleAction", "circleSearch", "circleAgo", "badgeCount", "draftLink", "circleHash"];
+export const CIRCLE_EXPORTS = ["circleView", "circleAction", "circleSearch", "circleAgo", "badgeCount", "draftLink", "circleHash", "circleAccept"];
