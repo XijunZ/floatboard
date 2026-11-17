@@ -135,6 +135,31 @@ export function parseModules(v: unknown): Modules | undefined {
   return out;
 }
 
+/** One of this quarter's goals for More › Resolutions (the Mac sends them while Resolutions is on). */
+export type BoardGoal = { id: string; title: string; period: string; parent: string | null; done: number; open: number; tasks: number[] };
+const MAX_GOALS = 10;
+const MAX_GOAL_TASKS = 50;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 100_000;
+
+/** The optional `goals` of a push (Resolutions). Absent: undefined. Throws on anything malformed. */
+export function parseGoals(v: unknown): BoardGoal[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v) || v.length > MAX_GOALS) throw new Error(`goals must be a list of at most ${MAX_GOALS}`);
+  return v.map((g: any, i: number) => {
+    const at = `goals[${i}]`;
+    if (!g || typeof g !== "object") throw new Error(`${at} must be an object`);
+    if (typeof g.id !== "string" || !/^R-[1-9][0-9]{0,15}$/.test(g.id)) throw new Error(`${at}.id must be a goal id (R-n)`);
+    if (typeof g.title !== "string" || !g.title.trim() || g.title.length > MAX_TITLE) throw new Error(`${at}.title must be text of 1 to ${MAX_TITLE} characters`);
+    if (typeof g.period !== "string" || g.period.length > 20) throw new Error(`${at}.period must be short text`);
+    if (g.parent !== undefined && g.parent !== null && (typeof g.parent !== "string" || g.parent.length > MAX_TITLE)) throw new Error(`${at}.parent must be text or null`);
+    if (!isCount(g.done) || !isCount(g.open)) throw new Error(`${at}.done and .open must be whole numbers`);
+    if (!Array.isArray(g.tasks) || g.tasks.length > MAX_GOAL_TASKS || !g.tasks.every((t: unknown) => typeof t === "number" && Number.isInteger(t))) {
+      throw new Error(`${at}.tasks must be a list of at most ${MAX_GOAL_TASKS} task ids`);
+    }
+    return { id: g.id, title: g.title, period: g.period, parent: g.parent ?? null, done: g.done, open: g.open, tasks: g.tasks };
+  });
+}
+
 /** The optional `reminders` of a push (budget reminders the Mac has not shown). */
 export function parseReminders(v: unknown): BoardReminder[] | undefined {
   if (v === undefined || v === null) return undefined;
@@ -290,13 +315,15 @@ export function corrected(at: string | null | undefined, skew: number | null, re
   return iso(Math.min(Date.parse(at) + skew, receivedMs));
 }
 
-type Snapshot = { cards: Card[]; events?: BoardEvent[]; time_zone?: string; modules?: Modules; reminders?: BoardReminder[]; updated: string };
+type Snapshot = { cards: Card[]; events?: BoardEvent[]; time_zone?: string; modules?: Modules; reminders?: BoardReminder[]; goals?: BoardGoal[];
+  updated: string };
 async function loadSnapshot(env: Env, userId: string): Promise<Snapshot | null> {
   const row = await env.DB.prepare("SELECT data_enc, updated FROM board_snapshots WHERE user_id=?").bind(userId).first<{ data_enc: string; updated: string }>();
   if (!row) return null;
   const d = JSON.parse(await decrypt(env, row.data_enc));
   return { cards: d.cards as Card[], events: d.events as BoardEvent[] | undefined, time_zone: d.time_zone as string | undefined,
-    modules: d.modules as Modules | undefined, reminders: d.reminders as BoardReminder[] | undefined, updated: row.updated };
+    modules: d.modules as Modules | undefined, reminders: d.reminders as BoardReminder[] | undefined, goals: d.goals as BoardGoal[] | undefined,
+    updated: row.updated };
 }
 
 const ACTION_COLS = "id, rowid AS rid, client_id, card_id, action, title, group_name, created, COALESCE(made_at, created) AS made_at, taken, payload";
@@ -378,7 +405,7 @@ async function boardBody(env: Env, userId: string, deviceId: string) {
     notApplied(env, userId, deviceId), accountMarker(userId)]);
   return { updated: snap?.updated ?? null, server_time: nowISO(), account, cards: overlay(snap?.cards ?? [], actions, snap?.updated ?? null),
     ...(snap?.events ? { events: snap.events } : {}), ...(snap?.time_zone ? { time_zone: snap.time_zone } : {}),
-    ...(snap?.modules ? { modules: snap.modules } : {}), pending: waiting?.n ?? 0, superseded };
+    ...(snap?.modules ? { modules: snap.modules } : {}), ...(snap?.goals ? { goals: snap.goals } : {}), pending: waiting?.n ?? 0, superseded };
 }
 
 const logStmt = (env: Env, r: { id: string; userId: string; device: string; cardId: number | null; kind: string; value: string | null; madeAt: string;
@@ -405,9 +432,10 @@ route("PUT", "/v2/board", async (req, env, user) => {
   let cards: Card[];
   try { cards = parseCards(rb.body); } catch (e) { return json({ error: (e as Error).message }, 400); }
   let events: BoardEvent[] | undefined, timeZone: string | undefined, modules: Modules | undefined, reminders: BoardReminder[] | undefined;
+  let goals: BoardGoal[] | undefined;
   try {
     events = parseEvents(rb.body); timeZone = parseZone(rb.body.time_zone);
-    modules = parseModules(rb.body.modules); reminders = parseReminders(rb.body.reminders);
+    modules = parseModules(rb.body.modules); reminders = parseReminders(rb.body.reminders); goals = parseGoals(rb.body.goals);
   } catch (e) { return json({ error: (e as Error).message }, 400); }
   const sentAt = rb.body.sent_at ?? null;
   if (sentAt !== null && !isIso(sentAt)) return json({ error: "sent_at must be an ISO date" }, 400);
@@ -444,7 +472,7 @@ route("PUT", "/v2/board", async (req, env, user) => {
   }
   stmts.unshift(env.DB.prepare("INSERT INTO board_snapshots(user_id,data_enc,updated) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET data_enc=excluded.data_enc, updated=excluded.updated")
     .bind(user.id, await encrypt(env, JSON.stringify({ cards, ...(events ? { events } : {}), ...(timeZone ? { time_zone: timeZone } : {}),
-      ...(modules ? { modules } : {}), ...(reminders ? { reminders } : {}) })), now));
+      ...(modules ? { modules } : {}), ...(reminders ? { reminders } : {}), ...(goals ? { goals } : {}) })), now));
   // Each area's background jobs read which areas are on from settings.
   if (modules) stmts.push(env.DB.prepare("UPDATE settings SET modules=? WHERE user_id=?").bind(JSON.stringify(modules), user.id));
   await env.DB.batch(stmts);
