@@ -5,8 +5,8 @@ import Foundation
 /// A failed write or read goes to the Activity log (and `apply` and friends report failure), never swallowed.
 @MainActor
 public final class CalendarCache {
-    private let db: DB
-    private let store: Store?
+    let db: DB
+    let store: Store?
 
     /// `store` is where failures are logged (Activity). Without one they go to stderr, the last resort.
     public init(db: DB, store: Store? = nil) { self.db = db; self.store = store }
@@ -69,6 +69,8 @@ public final class CalendarCache {
         try db.run("DELETE FROM cal_events WHERE account=? AND calendar_id=?", [account, alias])
         try db.run("UPDATE cards SET gcal_calendar=? WHERE gcal_account=? AND gcal_calendar=?", [id, account, alias])
         try db.run("UPDATE cal_outbox SET calendar_id=? WHERE account=? AND calendar_id=?", [id, account, alias])
+        try db.run("UPDATE OR IGNORE cal_series SET calendar_id=? WHERE account=? AND calendar_id=?", [id, account, alias])
+        try db.run("DELETE FROM cal_series WHERE account=? AND calendar_id=?", [account, alias])
         try db.run("""
             UPDATE cal_calendars SET calendar_id=? WHERE account=? AND calendar_id=?
             AND NOT EXISTS (SELECT 1 FROM cal_calendars WHERE account=? AND calendar_id=?)

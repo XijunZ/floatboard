@@ -148,6 +148,12 @@ public final class DB {
                 UNIQUE(account, calendar_id, event_id)
             );
             CREATE INDEX cal_events_start ON cal_events(start);
+            -- A repeating meeting's rule (Google's recurrence lines), read once per series and again at the daily full read.
+            CREATE TABLE cal_series(
+                account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',
+                read_at REAL NOT NULL,
+                PRIMARY KEY(account, calendar_id, series_id)
+            );
             -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
             -- failed_at: Google refused the change for good (it is not retried; last_error says why).
             CREATE TABLE cal_outbox(
@@ -283,6 +289,12 @@ public final class DB {
         UNIQUE(account, calendar_id, event_id)
     );
     CREATE INDEX cal_events_start ON cal_events(start);
+        -- A repeating meeting's rule (Google's recurrence lines), read once per series and again at the daily full read.
+        CREATE TABLE cal_series(
+            account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',
+            read_at REAL NOT NULL,
+            PRIMARY KEY(account, calendar_id, series_id)
+        );
         -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
         -- failed_at: Google refused the change for good (it is not retried; last_error says why).
         CREATE TABLE cal_outbox(

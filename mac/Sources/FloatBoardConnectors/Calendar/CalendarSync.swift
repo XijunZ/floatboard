@@ -134,6 +134,7 @@ public final class CalendarSync {
             if cache.apply(account: c.account, calendarID: c.calendarID, changes: result.changes, nextToken: result.nextToken, fullRead: full, now: now()) {
                 if c.needsReconnect { cache.setNeedsReconnect(account: c.account, calendarID: c.calendarID, false) }
                 lastProblem[key] = nil
+                await readSeries(c, api: api, refresh: full)
                 return true
             }
             return false
@@ -147,6 +148,26 @@ public final class CalendarSync {
         } catch {
             problem(key, "Could not read calendar \"\(c.name)\" (\(c.account)) from Google; will try again", "\(error)")
             return false
+        }
+    }
+
+    /// Reads the rule of each repeating meeting of the calendar not read yet (at most 50 a pass), and at the daily full read
+    /// (`refresh`) every one read before this pass again, for the phone's short labels ("weekdays 09:00"). A series Google has
+    /// no rule for, or refuses for good, is kept with none ("repeats") until the next daily read; a passing failure is tried
+    /// at the next pass. Problems are written to Activity once.
+    private func readSeries(_ c: CalCalendar, api: GoogleCalendarAPI, refresh: Bool) async {
+        let started = now()
+        let key = "series:" + c.account + "|" + c.calendarID
+        for id in cache.seriesToRead(account: c.account, calendarID: c.calendarID, readBefore: refresh ? started : nil) {
+            do {
+                let lines = try await api.recurrence(calendarID: c.calendarID, seriesID: id)
+                cache.saveSeries(account: c.account, calendarID: c.calendarID, seriesID: id, rule: lines.joined(separator: "\n"), now: started)
+            } catch where CalendarSender.isPermanent(error) {
+                cache.saveSeries(account: c.account, calendarID: c.calendarID, seriesID: id, rule: "", now: started)
+            } catch {
+                problem(key, "Could not read how a meeting of \"\(c.name)\" (\(c.account)) repeats; will try again", "\(error)")
+                return
+            }
         }
     }
 
