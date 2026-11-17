@@ -1,7 +1,7 @@
 import FloatBoardCore
 import Foundation
 
-/// Sends the changes waiting in the calendar outbox to Google, one at a time, oldest first. A passing failure (Google busy,
+/// Sends the changes waiting in the calendar outbox to Google, one at a time, oldest first, each event's changes in order. A passing failure (Google busy,
 /// the network) keeps the change, tried again later with a growing wait, and is written to Activity once per change and reason.
 /// An answer that can never turn into success (the event is gone, the calendar is read-only for you, a bad request) ends the
 /// change for good: it is kept with Google's reply, never sent again, and written to Activity as an error. Nothing is sent
@@ -43,7 +43,12 @@ public final class CalendarSender {
             setReconnect(account, false)
             store.activity("calendar", .info, "\(account) is connected again; its waiting calendar changes will now be sent")
         }
-        for row in outbox.due(now: Date()) where !parked.contains(row.account) {
+        // One change at a time, each read again and marked as on its way just before it goes (never from a list made before
+        // an earlier send's wait: Undo may have taken a delete back meanwhile). A change that was waiting behind an earlier one
+        // for its event can go as soon as that one is sent. Each change is tried once per run.
+        var tried = Set<String>()
+        while let row = outbox.claimNext(now: Date(), skip: { tried.contains($0.uuid) || parked.contains($0.account) }) {
+            tried.insert(row.uuid)
             await send(row)
         }
     }
@@ -52,7 +57,9 @@ public final class CalendarSender {
         for c in cache.calendars() where c.account == account { cache.setNeedsReconnect(account: account, calendarID: c.calendarID, needs) }
     }
 
+    /// `row` was claimed (marked as on its way); the mark is cleared when this returns.
     private func send(_ row: CalOutboxRow) async {
+        defer { outbox.setInFlight(row.uuid, false) }
         guard let write = row.write else {
             // Cannot be read, so it can never succeed: keep it (for the record) and never send it.
             outbox.markDead(uuid: row.uuid, error: row.lastError)
@@ -60,8 +67,6 @@ public final class CalendarSender {
             return
         }
         let api = apiFor(row.account)
-        outbox.setInFlight(row.uuid, true)   // while on the wire, undo can't take it back
-        defer { outbox.setInFlight(row.uuid, false) }
         do {
             let saved: Bool
             switch write {
