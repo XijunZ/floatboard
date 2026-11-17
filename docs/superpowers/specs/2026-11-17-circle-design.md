@@ -28,7 +28,7 @@ CREATE TABLE circle_people(
     person_id INTEGER PRIMARY KEY, how_known TEXT NOT NULL DEFAULT '', company TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '',
     birthday TEXT NOT NULL DEFAULT '', language TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
     interval_days INTEGER, firm TEXT NOT NULL DEFAULT '', focus TEXT NOT NULL DEFAULT '', purpose TEXT NOT NULL DEFAULT '',
-    stage TEXT NOT NULL DEFAULT '', stage_at REAL, snoozed_until REAL, outreach_at REAL, reminded_at REAL, reminder_task INTEGER,
+    stage TEXT NOT NULL DEFAULT '', stage_at REAL, snoozed_until REAL, reminded_at REAL, reminder_task INTEGER,
     updates_on INTEGER NOT NULL DEFAULT 0, news_muted INTEGER NOT NULL DEFAULT 0, feed_url TEXT NOT NULL DEFAULT '',
     officer_id TEXT NOT NULL DEFAULT '', officer_name TEXT NOT NULL DEFAULT '', officer_confirmed REAL, manual_checked REAL
 );
