@@ -140,9 +140,9 @@ import Foundation
     /// The live person a handle belongs to (raw or normalised input).
     public func person(owning raw: Handle) -> Int64? {
         guard let v = Handles.normalize(raw.kind, raw.value) else { return nil }
-        let id = (try? store.db.query("""
+        let id = (try? store.db.query(""" // try?-ok: unreadable = nobody; the next read tries again
             SELECT h.person_id FROM person_handles h JOIN people p ON p.id=h.person_id WHERE h.kind=? AND h.value=? AND p.deleted=0
-            """, [raw.kind.rawValue, v]) { DB.int($0, 0) })?.first // try?-ok: unreadable = nobody; the next read tries again
+            """, [raw.kind.rawValue, v]) { DB.int($0, 0) })?.first
         return id
     }
 
@@ -152,8 +152,9 @@ import Foundation
     public func addHandle(_ personID: Int64, _ raw: Handle, now: Date = Date()) -> HandleResult {
         guard let v = Handles.normalize(raw.kind, raw.value) else { return .refused("That isn't a valid \(raw.kind.title.lowercased()).") }
         let h = Handle(kind: raw.kind, value: v)
-        let owner = (try? store.db.query("SELECT h.person_id, p.deleted FROM person_handles h LEFT JOIN people p ON p.id=h.person_id WHERE h.kind=? AND h.value=?",
-                                         [h.kind.rawValue, h.value]) { (DB.int($0, 0), DB.int($0, 1) != 0) })?.first // try?-ok: unreadable = no owner; the insert below then reports
+        let owner = (try? store.db.query( // try?-ok: unreadable = no owner; the insert below then reports
+            "SELECT h.person_id, p.deleted FROM person_handles h LEFT JOIN people p ON p.id=h.person_id WHERE h.kind=? AND h.value=?",
+                                         [h.kind.rawValue, h.value]) { (DB.int($0, 0), DB.int($0, 1) != 0) })?.first
         if let (other, deleted) = owner {
             if other == personID { return .exists }
             if !deleted {
