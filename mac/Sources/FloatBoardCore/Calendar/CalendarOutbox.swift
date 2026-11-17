@@ -286,9 +286,28 @@ public final class CalendarOutbox {
         guard case .patch(let id, var title, var start, var end, var day) = w, current.googleUpdated > since else { return w }
         let base = own.flatMap { $0.updated > queuedAt ? $0.base : nil } ?? base
         let titleChanged = base.map { $0.title != current.title } ?? true
-        let timeChanged = base.map { $0.start != current.start || $0.end != current.end || $0.allDay != current.allDay } ?? true
         if titleChanged { title = nil }
-        if timeChanged { start = nil; end = nil; day = nil }
+        if start != nil || end != nil || day != nil {
+            // Start and end are merged one by one; a switch between all-day and timed keeps them together.
+            let startChanged = base.map { $0.start != current.start } ?? true, endChanged = base.map { $0.end != current.end } ?? true
+            let kindChanged = base.map { $0.allDay != current.allDay } ?? true
+            let converts = (day != nil) != current.allDay
+            if kindChanged || (startChanged && endChanged) || (converts && (startChanged || endChanged)) || (day != nil && startChanged) {
+                start = nil; end = nil; day = nil
+            } else if let d = day, endChanged {
+                // All-day, Google changed only the length: the board's new first day keeps Google's new length in days.
+                let c = AppTime.calendar
+                let days = c.dateComponents([.day], from: c.startOfDay(for: current.start), to: c.startOfDay(for: current.end)).day ?? 1
+                end = days > 1 ? Due.startOfDay(d).flatMap { c.date(byAdding: .day, value: days, to: $0) } : nil
+            } else if startChanged {
+                // Google moved the start; the board's end stays if it still ends after it.
+                start = nil
+                if let e = end, e <= current.start { end = nil }
+            } else if endChanged {
+                // Google changed only the end: the board's start goes with Google's new length (or nothing about the end).
+                end = start.map { $0.addingTimeInterval(current.end.timeIntervalSince(current.start)) }
+            }
+        }
         if title == nil && start == nil && end == nil && day == nil { return nil }
         return .patch(eventID: id, title: title, start: start, end: end, allDayStart: day)
     }
