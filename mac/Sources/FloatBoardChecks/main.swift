@@ -755,6 +755,7 @@ oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()
 await finalFixChecks()
 await codexFixChecks()
+await calColourChecks()
 await planningChecks()
 phoneDeleteChecks()
 

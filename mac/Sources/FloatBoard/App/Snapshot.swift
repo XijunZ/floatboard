@@ -99,9 +99,11 @@ enum Snapshot {
         }
         // Drawn by an off-screen hosting view, as the app lays it out (scroll views, real buttons and pickers), which the
         // image renderer above cannot do.
-        func saveLive<V: View>(_ v: V, _ name: String, _ size: CGSize, inWindow: Bool = false) {
+        func saveLive<V: View>(_ v: V, _ name: String, _ size: CGSize, inWindow: Bool = false, dark: Bool = false) {
             let host = NSHostingView(rootView: v.environmentObject(store).environmentObject(ui).environmentObject(google)
-                .frame(width: size.width, height: size.height).background(Color(white: 0.97)).environment(\.colorScheme, .light))
+                .frame(width: size.width, height: size.height).background(Color(white: dark ? 0.12 : 0.97))
+                .environment(\.colorScheme, dark ? .dark : .light))
+            host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             host.frame = CGRect(origin: .zero, size: size)
             // Lists (AppKit tables) draw their rows only in a window: a borderless one far off screen, closed after.
             var window: NSWindow?
@@ -121,6 +123,20 @@ enum Snapshot {
             guard let png = rep.representation(using: .png, properties: [:]) else { return }
             do { try png.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name)) } catch {
                 store.activity("snapshot", .error, "Could not write the snapshot image \(name)", detail: "\(error)")
+            }
+        }
+        // Two Google accounts in their own colours: one shown with its main calendar only (no list permission), one with three
+        // calendars. The Calendar page (legend at the bottom left) and Settings › Outputs › Calendar, light and dark.
+        // Only on a scratch database: it fills the calendar cache.
+        if ProcessInfo.processInfo.environment["FLOATBOARD_CALCOLOURSHOTS"] != nil, LocalData.isScratchDatabase {
+            let accounts = seedTwoAccounts(store)
+            for dark in [false, true] {
+                let suffix = dark ? "-dark" : ""
+                saveLive(CalendarView(span: .week).padding(.horizontal, 12).padding(.bottom, 12).padding(.top, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading),
+                         "cal-colours-week\(suffix).png", CGSize(width: 1100, height: 620), inWindow: true, dark: dark)
+                saveLive(ScrollView { CalendarSettingsView(accounts: accounts).padding(14) }, "cal-colours-settings\(suffix).png",
+                         CGSize(width: 640, height: 560), inWindow: true, dark: dark)
             }
         }
         // The window's tab bar and Settings with its sections. Only on a scratch database.
@@ -273,6 +289,37 @@ enum Snapshot {
     }
 
     /// Made-up calendars, events and tasks for the Calendar pictures (this week, around today).
+    /// Two made-up accounts for the account-colour pictures; returns them in connection order.
+    private static func seedTwoAccounts(_ store: Store) -> [String] {
+        let cal = AppTime.calendar
+        let cache = CalendarCache(store: store)
+        let alex = "alex@example.com", sam = "sam.longer-name@example.org"
+        cache.upsertCalendars(account: alex, [CalCalendar(account: alex, calendarID: CalendarCache.primaryAlias, name: "Main calendar",
+                                                          color: AccountColors.fallback, owned: true, shown: true, primary: true)])
+        cache.upsertCalendars(account: sam, [
+            CalCalendar(account: sam, calendarID: sam, name: "Sam", color: "#4986e7", owned: true, shown: true, primary: true),
+            CalCalendar(account: sam, calendarID: "family", name: "Family", color: "#16a765", owned: false, shown: true),
+            CalCalendar(account: sam, calendarID: "team", name: "Team", color: "#cd74e6", owned: false, shown: true)])
+        CalendarListAttempts.record(alex, .mainOnly)
+        CalendarListAttempts.record(sam, .listed)
+        _ = store.accountColors(for: [alex, sam])
+        let monday = CalendarLayout.weekStart(containing: Date())
+        func at(_ d: Int, _ h: Int, _ m: Int = 0) -> Date {
+            cal.date(bySettingHour: h, minute: m, second: 0, of: cal.date(byAdding: .day, value: d, to: monday)!)!
+        }
+        func ev(_ id: String, _ t: String, _ d: Int, _ h: Int, _ m: Int, _ mins: Int) -> GoogleEventChange {
+            GoogleEventChange(eventID: id, cancelled: false, fields: CalEventFields(start: at(d, h, m), end: at(d, h, m).addingTimeInterval(Double(mins) * 60),
+                                                                                  title: t, googleUpdated: Date()))
+        }
+        cache.apply(account: alex, calendarID: CalendarCache.primaryAlias, changes: [
+            ev("a1", "Standup", 0, 9, 0, 30), ev("a2", "Client call", 1, 10, 0, 60), ev("a3", "Standup", 2, 9, 0, 30),
+            ev("a4", "Quarterly review", 3, 14, 0, 90), ev("a5", "Standup", 4, 9, 0, 30)], nextToken: nil)
+        cache.apply(account: sam, calendarID: sam, changes: [ev("s1", "Dentist", 1, 8, 30, 45), ev("s2", "Gym", 3, 7, 0, 60)], nextToken: nil)
+        cache.apply(account: sam, calendarID: "family", changes: [ev("f1", "School pick-up", 0, 8, 0, 30), ev("f2", "Swimming lesson", 2, 7, 30, 60)], nextToken: nil)
+        cache.apply(account: sam, calendarID: "team", changes: [ev("t1", "Hackathon planning", 4, 10, 0, 90)], nextToken: nil)
+        return [alex, sam]
+    }
+
     private static func seedCalendar(_ store: Store) {
         let cal = AppTime.calendar
         let cache = CalendarCache(store: store)

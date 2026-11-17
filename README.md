@@ -48,6 +48,7 @@ your Mac's Keychain; nothing goes through anyone else's server.
 The **Calendar** tab (next to Board) shows your Google calendars and your tasks together, as a day or a week.
 
 - Every calendar of every connected Google account shows, each with its own on/off switch (Settings › Outputs › Calendar). Tasks with a due time sit at that time; date-only tasks sit in a strip at the top.
+- Each Google account has its own colour, so you see which email an event comes from: the event's stripe, the bar's next meeting and the phone's meeting lines. The legend at the bottom left of the Calendar page names each account by colour; click an account there to hide or show its events. When an account shows several calendars, a small dot on the event gives the calendar's own colour. Change an account's colour in Settings › Outputs › Calendar.
 - Changes from FloatBoard go to Google: drag an event to move it, drag its bottom edge to resize, click empty time to add one. Changes made in Google show up here within about a minute. Offline, your changes wait and send when you are back.
 - A task only goes to Google when you drag it onto a time or press Add to calendar. Deleting that task deletes its event. Deleting the event in Google keeps the task and its date. Clearing a task's due leaves its event in Google.
 - To move an existing event to another calendar, use Open in Google Calendar; FloatBoard cannot do that yet.

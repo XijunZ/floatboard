@@ -166,6 +166,7 @@ struct CalendarView: View {
                 DueSoonList()
                     .frame(width: 200)
             }
+            AccountLegend(tick: tick)
         }
         .environmentObject(edits)
         .environment(\.calendarSnapshot, snapshotHours != nil)
@@ -211,5 +212,52 @@ struct CalendarView: View {
 
     private func step(_ by: Int) {
         anchor = AppTime.calendar.date(byAdding: .day, value: span == .day ? by : 7 * by, to: anchor) ?? anchor
+    }
+}
+
+/// Bottom left of the Calendar page: a colour dot and the email of each connected account (its events' colour). Clicking
+/// one hides that account's events on this page, or shows them again.
+struct AccountLegend: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.calendarSnapshot) private var snapshot
+    var tick = 0
+    @State private var changed = 0
+
+    var body: some View {
+        let _ = (tick, changed)
+        let accounts = CalendarCache(store: store).connectedAccountList()
+        let colours = store.accountColors(for: accounts)
+        let hidden = store.hiddenCalendarAccounts()
+        if !accounts.isEmpty {
+            HStack(spacing: 14) {
+                ForEach(accounts, id: \.self) { a in
+                    let off = hidden.contains(a)
+                    let label = HStack(spacing: 5) {
+                        Circle().fill(off ? Color.clear : Color(hex: colours[a] ?? AccountColors.fallback))
+                            .overlay(Circle().strokeBorder(Color(hex: colours[a] ?? AccountColors.fallback), lineWidth: 1.5))
+                            .frame(width: 9, height: 9)
+                        Text(Self.short(a)).font(.system(size: 11)).lineLimit(1).fixedSize()
+                            .foregroundStyle(off ? .tertiary : .secondary)
+                    }
+                    if snapshot { label } else {
+                        Button {
+                            store.setCalendarAccountHidden(a, !off)
+                            changed += 1
+                            NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
+                        } label: { label }
+                        .buttonStyle(.plain)
+                        .help(off ? "Show \(a)'s events" : "Hide \(a)'s events")
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// A long email cut in the middle ("sam.longer…@example.org"), so the legend stays one line.
+    static func short(_ email: String, limit: Int = 30) -> String {
+        guard email.count > limit else { return email }
+        let keep = limit - 1, head = keep / 2
+        return String(email.prefix(head)) + "…" + String(email.suffix(keep - head))
     }
 }
