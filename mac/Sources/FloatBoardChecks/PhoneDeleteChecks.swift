@@ -54,4 +54,32 @@ import FloatBoardConnectors
     r = store.applyPhoneActions([PhoneAction(id: "r2", clientID: "pd-restore-2", cardID: plain.id, action: "restore", madeAt: now.addingTimeInterval(40))],
                                 connector: "ph", now: now.addingTimeInterval(41))
     check(r.applied == ["r2"] && store.card(plain.id) != nil, "phone_restore_works_when_not_the_last_delete")
+
+    // Round 5. A phone delete's Google event delete waits for the phone's Undo to arrive (the Mac polls the phone every
+    // 120 s), so a phone Undo keeps the event; a late phone restore never brings back a task deleted later on the Mac.
+    let acct = "me@example.com"
+    let cache = CalendarCache(store: store)
+    let outbox = CalendarOutbox(store: store)
+    cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: acct, name: "Me", color: "#112233", owned: true, shown: true, primary: true)])
+    func onCalendar(_ title: String, event: String) -> Int64 {
+        store.add(title: title, area: "Work", importance: .medium, due: now.addingTimeInterval(86400), dueHasTime: true)
+        let id = store.cards.last { $0.title == title }?.id ?? 0
+        store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='\(acct)', gcal_event='\(event)' WHERE id=\(id)")
+        cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: event, cancelled: false, fields: CalEventFields(
+            start: now.addingTimeInterval(86400), end: now.addingTimeInterval(88200), title: title, googleUpdated: now, fbCard: id))], nextToken: nil)
+        store.reload()
+        return id
+    }
+    func calKinds() -> [String] { outbox.rows(unsent: true).compactMap { r in r.write.map { w in
+        switch w { case .create: "create"; case .patch: "patch"; case .delete: "delete" } } } }
+    let t = now.addingTimeInterval(1000)
+    let ev = onCalendar("PD meeting prep", event: "pdev1")
+    r = store.applyPhoneActions([PhoneAction(id: "d5", clientID: "pd-del-5", cardID: ev, action: "delete", madeAt: t)], connector: "ph", now: t)
+    let held = r.applied == ["d5"] && calKinds() == ["delete"] && outbox.due(now: t.addingTimeInterval(130)).isEmpty
+        && outbox.due(now: t.addingTimeInterval(Store.phoneCalendarDeleteDelay + 1)).count == 1
+    check(held && Store.phoneCalendarDeleteDelay >= ConnectorSync.phonePollInterval + Store.undoBarSeconds + 5, "phone_delete_holds_the_google_delete_for_the_phone_undo")
+    r = store.applyPhoneActions([PhoneAction(id: "r5", clientID: "pd-restore-5", cardID: ev, action: "restore", madeAt: t.addingTimeInterval(5))],
+                                connector: "ph", now: t.addingTimeInterval(125))
+    check(r.applied == ["r5"] && store.card(ev) != nil && calKinds().isEmpty, "phone_undo_within_the_window_keeps_the_event")
+
 }

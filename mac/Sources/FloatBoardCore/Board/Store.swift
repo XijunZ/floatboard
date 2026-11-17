@@ -237,6 +237,9 @@ public final class Store: ObservableObject {
     public static let undoBarSeconds: TimeInterval = 8
     /// How long a calendar delete waits before it may be sent: a little longer than the Undo bar, so Undo always wins.
     public static let calendarDeleteDelay: TimeInterval = undoBarSeconds + 2
+    /// The same for a delete made on the phone: the Mac reads the phone's changes every 120 s (`ConnectorSync.phonePollInterval`),
+    /// so the phone's Undo (8 s) can arrive up to about 128 s after its delete; the Google delete waits that long and a margin.
+    public static let phoneCalendarDeleteDelay: TimeInterval = 120 + undoBarSeconds + 7
 
     /// Soft delete: the row stays in the database (and in exports) for the record.
     public func delete(_ card: Card) { deleteCard(card, verdict: nil) }
@@ -252,13 +255,13 @@ public final class Store: ObservableObject {
 
     /// The body of `deleteCard`, for callers already inside a transaction (the phone's `delete`). Nil when the task is
     /// not there or already deleted.
-    func deleteCardRow(_ id: Int64, verdict: String?, now: Date) throws -> DeleteMemo? {
+    func deleteCardRow(_ id: Int64, verdict: String?, now: Date, calendarDelay: TimeInterval = Store.calendarDeleteDelay) throws -> DeleteMemo? {
         guard let cur = try currentCard(id), !cur.deleted else { return nil }
         try db.run("UPDATE cards SET deleted=1, updated=? WHERE id=?", [now, id])
         try log(id, "deleted", cur.card.status, nil, now)
         let uuid = try queueOutbox(cur.card, kind: .deleted, verdict: verdict, now: now)
         let links = try removeLinks(of: ShortID(kind: .task, number: id))
-        let event = try queueCalendarDelete(cardID: id, now: now)   // the event FloatBoard made for it goes too (D8)
+        let event = try queueCalendarDelete(cardID: id, now: now, delay: calendarDelay)   // the event FloatBoard made for it goes too (D8)
         return DeleteMemo(task: DeletedTask(id: id, title: cur.card.title, at: now), outbox: uuid, links: links, event: event)
     }
 

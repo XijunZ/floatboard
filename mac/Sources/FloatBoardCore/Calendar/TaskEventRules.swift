@@ -194,7 +194,8 @@ extension Store {
 
     /// Task deleted: delete the event FloatBoard made for it. An event that came from Google (not marked as ours in the
     /// cache) is left alone. Returns the event targeted and the outbox row that deletes it, so undo can take it back.
-    func queueCalendarDelete(cardID: Int64, now: Date) throws -> (link: EventLink, row: String)? {
+    /// `delay` is how long the delete is held back so Undo wins: the Undo bar here, or the phone's Undo (`phoneCalendarDeleteDelay`).
+    func queueCalendarDelete(cardID: Int64, now: Date, delay: TimeInterval = Store.calendarDeleteDelay) throws -> (link: EventLink, row: String)? {
         guard let t = try eventTarget(cardID) else { return nil }
         // An event marked as made for another task is not this one's. Events from before the mark existed carry none: they are ours.
         if let cached = CalendarCache(store: self).event(account: t.account, calendarID: t.calendar, eventID: t.event),
@@ -202,7 +203,7 @@ extension Store {
             return nil
         }
         let row = CalendarOutbox(store: self).enqueue(.delete(eventID: t.event), account: t.account, calendarID: t.calendar, now: now,
-                                                    delay: Store.calendarDeleteDelay)   // held back so Undo wins (R19)
+                                                    delay: delay)   // held back so Undo wins (R19)
         guard !row.isEmpty else { return nil }   // not queued (logged by enqueue): the event stays, nothing to undo
         // No scheduler nudge: the delete is not due until the Undo bar is gone.
         return (t, row)

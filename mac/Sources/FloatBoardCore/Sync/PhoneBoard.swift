@@ -484,7 +484,7 @@ extension Store {
                             outcome = "superseded"; return
                         }
                         let teach = card(cardID)?.teachOnDelete == true && ["not_action", "wrong_details", "duplicate"].contains(a.teach ?? "") ? a.teach : nil
-                        gone = try deleteCardRow(cardID, verdict: teach, now: now)
+                        gone = try deleteCardRow(cardID, verdict: teach, now: now, calendarDelay: Store.phoneCalendarDeleteDelay)
                         outcome = gone == nil ? "unknown" : "deleted"
                     } else if a.action == "restore", let cardID = a.cardID {
                         // Undo on the phone after its delete was sent: the task comes back as with Undo Delete here.
