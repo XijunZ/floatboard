@@ -69,6 +69,7 @@
 
   function queueDecision(a) {
     if (!a) return;
+    if (decQueue.account !== decAccount()) loadDecisionCache();   // never write over a queue this phone already holds
     decQueue.account = decAccount();
     decQueue.actions.push(a);
     saveDecQueue();
@@ -158,6 +159,67 @@
         toast("Review saved. Your Mac keeps it as a jot.");
       });
       sheet.appendChild(form);
+    });
+  }
+
+  // After each board sync: send queued Decisions changes made while offline (quiet; the screen shows what waits).
+  function decisionsFlush() {
+    if (decQueue.account !== decAccount()) loadDecisionCache();
+    if (decQueue.actions.length) syncDecisions();
+  }
+
+  // Make decision from a jot (Jots' sheet, only while Decisions is on): the 4-field form on the phone, filled by code at
+  // once, then by Claude (shared fill_form job) in the fields not touched. Save queues it; the Mac records it on its next
+  // sync, linked to the jot.
+  function decisionForm(selection, source, context) {
+    var form = decisionFormStart(selection), touched = {};
+    openSheet(function (sheet) {
+      sheet.appendChild(el("h3", null, "Make decision"));
+      var f = el("form", "dec-form");
+      var fields = {};
+      function area(key, label, rows, max) {
+        var l = el("label", null, label), t = el("textarea");
+        t.rows = rows; t.maxLength = max; t.id = "dec-make-" + key; l.htmlFor = t.id; t.value = form[key];
+        t.addEventListener("input", function () { touched[key] = true; });
+        f.appendChild(l); f.appendChild(t); fields[key] = t;
+      }
+      function choice(key, label, options) {
+        var l = el("label", null, label), c = el("select");
+        c.id = "dec-make-" + key; l.htmlFor = c.id;
+        options.forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; c.appendChild(op); });
+        c.value = form[key];
+        c.addEventListener("change", function () { touched[key] = true; });
+        f.appendChild(l); f.appendChild(c); fields[key] = c;
+      }
+      area("text", "Decision", 2, 300);
+      area("why", "Why", 2, 500);
+      area("expected", "Expected outcome", 2, 500);
+      choice("confidence", "Confidence", [["", "Not recorded"], ["low", "Low"], ["medium", "Medium"], ["high", "High"]]);
+      choice("type", "Type", [["operational", "Operational"], ["strategic", "Strategic"], ["investment", "Investment"]]);
+      var wait = el("p", "sub", "Claude is filling in the form…");
+      wait.setAttribute("role", "status");
+      var save = el("button", "btn", "Save decision"); save.type = "submit";
+      f.appendChild(wait); f.appendChild(save);
+      if (selection) sheet.appendChild(el("p", "dec-quote", "“" + String(selection).slice(0, 600) + "”"));
+      sheet.appendChild(f);
+      f.addEventListener("submit", function (e) {
+        e.preventDefault();
+        Object.keys(fields).forEach(function (k) { form[k] = fields[k].value; });
+        var act = makeDecisionAction(form, selection, source, newId(), new Date().toISOString());
+        if (!act) { toast("Write the decision first."); return; }
+        queueDecision(act);
+        closeSheet();
+        toast("Decision saved. Your Mac records it on its next sync.");
+      });
+      api("/app/api/decisions/fill", { method: "POST", body: { selection: String(selection || "").slice(0, 8000), context: String(context || "").slice(0, 8000) } })
+        .then(function (answer) {
+          if (!fields.text.isConnected) return;   // the sheet was closed
+          Object.keys(fields).forEach(function (k) { form[k] = fields[k].value; });
+          var filled = decisionFormFill(form, touched, answer);
+          Object.keys(fields).forEach(function (k) { if (!touched[k]) fields[k].value = filled[k]; });
+          wait.textContent = "Filled in by Claude from your words. Check it before saving.";
+        })
+        .catch(function () { if (fields.text.isConnected) wait.textContent = "Fill in the form yourself (Claude isn't available right now)."; });
     });
   }
 

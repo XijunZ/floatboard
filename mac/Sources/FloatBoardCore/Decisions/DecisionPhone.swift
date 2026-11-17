@@ -29,7 +29,8 @@ public struct PhoneDecision: Codable, Equatable {
     }
 }
 
-/// An action the phone queued: answer a review, or "Not a decision".
+/// An action the phone queued: answer a review, "Not a decision", or "make" (a new decision from the phone's Make decision
+/// form on a jot: its four fields, type, the selected words and the jot, by `J-n` or the jot's key).
 public struct PhoneDecisionAction: Codable, Equatable {
     public let id: String
     public let decision: String
@@ -37,7 +38,14 @@ public struct PhoneDecisionAction: Codable, Equatable {
     public let happened: String?
     public let sound: String?
     public let madeAt: String?
-    enum CodingKeys: String, CodingKey { case id, decision, action, happened, sound, madeAt = "made_at" }
+    public var text: String? = nil
+    public var why: String? = nil
+    public var expected: String? = nil
+    public var confidence: String? = nil
+    public var type: String? = nil
+    public var quote: String? = nil
+    public var source: String? = nil
+    enum CodingKeys: String, CodingKey { case id, decision, action, happened, sound, madeAt = "made_at", text, why, expected, confidence, type, quote, source }
     public init(id: String, decision: String, action: String, happened: String? = nil, sound: String? = nil, madeAt: String? = nil) {
         self.id = id; self.decision = decision; self.action = action; self.happened = happened; self.sound = sound; self.madeAt = madeAt
     }
@@ -70,12 +78,25 @@ public struct PhoneDecisionAction: Codable, Equatable {
         }
     }
 
-    /// Applies the phone's actions. Returns the ids applied and those skipped (with why). A review answer becomes a jot made on
+    /// How long a phone decision waits for its jot to reach this Mac before it is recorded without the link.
+    public static let sourceWait: TimeInterval = 86400
+
+    /// Applies the phone's actions. Returns the ids applied, those skipped (with why) and those left waiting (not acked: a
+    /// phone decision whose jot has not reached this Mac yet, for at most `sourceWait`). A review answer becomes a jot made on
     /// the phone; a review already answered, or a decision gone, is skipped. Repeats are harmless.
-    public static func apply(_ actions: [PhoneDecisionAction], store: Store, now: Date = Date()) -> (applied: [String], skipped: [(String, String)]) {
-        var applied: [String] = [], skipped: [(String, String)] = []
+    public static func apply(_ actions: [PhoneDecisionAction], store: Store, now: Date = Date())
+        -> (applied: [String], skipped: [(String, String)], waiting: [String]) {
+        var applied: [String] = [], skipped: [(String, String)] = [], waiting: [String] = []
         let ds = DecisionStore(store: store)
         for a in actions {
+            if a.action == "make" {
+                switch make(a, store: store, now: now) {
+                case .some(true): applied.append(a.id)
+                case .some(false): skipped.append((a.id, "empty decision"))
+                case .none: waiting.append(a.id)
+                }
+                continue
+            }
             guard let id = ShortID.parse(a.decision), id.kind == .decision, let d = ds.decision(id.number) else {
                 skipped.append((a.id, "decision not found")); continue
             }
@@ -93,8 +114,43 @@ public struct PhoneDecisionAction: Codable, Equatable {
                 skipped.append((a.id, "unknown action"))
             }
         }
-        return (applied, skipped)
+        return (applied, skipped, waiting)
     }
+
+    /// Records a decision from the phone's Make decision form: made by you on the phone, linked to its jot (`J-n` or the jot's
+    /// key) with the jot's tags. While Decisions is off it is kept as a Maybe draft (nothing is dropped, nothing waits on the
+    /// switch). True when recorded (or already recorded: a repeat), false when empty, nil when its jot hasn't arrived yet.
+    static func make(_ a: PhoneDecisionAction, store: Store, now: Date) -> Bool? {
+        let doneKey = "decisions.phone_made:\(a.id)"
+        let seen = (try? store.db.query("SELECT value FROM meta WHERE key=?", [doneKey]) { DB.text($0, 0) })?.first // try?-ok: unknown = not recorded yet (a repeat is then recorded again, never lost)
+        if seen != nil { return true }
+        let text = (a.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        let made = a.madeAt.flatMap { ISO8601DateFormatter().date(from: $0) ?? fractionalISO.date(from: $0) } ?? now
+        var source: ShortID?
+        if let ref = a.source?.trimmingCharacters(in: .whitespaces), !ref.isEmpty {
+            if let id = ShortID.parse(ref), id.kind == .jot, JotStore(store: store).jot(id.number) != nil { source = id }
+            else if let j = JotStore(store: store).jot(origin: ref) { source = j.shortID }
+            else if now.timeIntervalSince(made) < sourceWait { return nil }   // its jot is on its way: try at the next sync
+            else { store.activity("decisions", .warning, "A decision from the phone was recorded without its jot (the jot never reached this Mac)", detail: a.id) }
+        }
+        let on = store.isOn(.decisions)
+        var draft = DecisionDraft(text: text, quote: a.quote ?? "", why: a.why ?? "", expected: a.expected ?? "",
+                                  confidence: a.confidence.flatMap(Confidence.init(rawValue:)), type: a.type.flatMap(DecisionType.init(rawValue:)) ?? .operational,
+                                  status: on ? .decided : .maybe, foundByClaude: false, source: .phone, sourceItem: source)
+        if draft.quote.count > 4000 { draft.quote = String(draft.quote.prefix(4000)) }
+        guard let d = DecisionStore(store: store).record(draft, now: now) else { return false }
+        store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [doneKey, d.shortID.text]) }
+        store.activity("decisions", .info, on ? "Recorded a decision made on the phone" : "Kept a decision from the phone as a Maybe draft (Decisions is off)",
+                       detail: d.shortID.text)
+        return true
+    }
+
+    private static let fractionalISO: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     /// The hash of the copy an engine last accepted (so an unchanged copy is not sent again).
     public static func sentHash(store: Store, connector: String) -> String? {
