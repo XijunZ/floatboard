@@ -641,6 +641,7 @@ struct KeysSection: View {
     @State private var claude = ""
     @State private var gid = ""
     @State private var gsecret = ""
+    @State private var companiesHouse = ""
     @State private var message: String?
     @State private var refresh = 0
 
@@ -665,6 +666,21 @@ struct KeysSection: View {
         Divider()
         SettingsBlock(title: "Google client", help: "One client for Gmail and Calendar: this Mac signs in with it and hands Gmail sign-ins to the engine that screens.") {
             AccountsView(showAccounts: false)
+        }
+        Divider()
+        SettingsBlock(title: "Companies House key", help: "Circle's What's new: UK directorships and resignations. Get a free key at developer.company-information.service.gov.uk › Manage applications.") {
+            state(mac: Keys.value(Keys.companiesHouse, store: store) != nil, engine: engineKeys?.companiesHouse, waiting: waiting.contains(.companiesHouse))
+            HStack {
+                SecureField(Keys.value(Keys.companiesHouse, store: store) == nil ? "Companies House API key" : "Paste a new key to replace it", text: $companiesHouse)
+                    .textFieldStyle(.roundedBorder).frame(width: 360)
+                Button("Save") { save { try Keys.setCompaniesHouse(companiesHouse, store: store); companiesHouse = "" } }
+                    .disabled(companiesHouse.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Remove…") {
+                    guard ConnectFlow.confirmTwice("Remove the Companies House key?", "It is removed from this Mac and from your engine. Circle stops looking up directorships until you add one again.", action: "Remove") else { return }
+                    save { try Keys.setCompaniesHouse("", store: store) }
+                }
+                .disabled(Keys.value(Keys.companiesHouse, store: store) == nil && engineKeys?.companiesHouse != true)
+            }
         }
         Divider()
         SettingsBlock(title: "Gmail sign-ins", help: "Each inbox you connect. Connect or reconnect them in Connections › Inputs › Add an input › Gmail inbox.") {

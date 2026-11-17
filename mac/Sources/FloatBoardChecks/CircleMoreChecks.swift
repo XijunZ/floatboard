@@ -341,3 +341,30 @@ private func fakeWhatsAppForCircle(_ folder: URL, now: Date) -> Bool {
     _ = await CircleSync.run(store: s, client: client, connector: "c1", now: now)
     check(log.calls.count == before2, "circle_sync_idle_while_circle_off")
 }
+
+/// Settings › Keys › Companies House: saved on this Mac like the other keys, queued (names only), sent with PUT /v2/keys,
+/// removable, and the engine's status read back.
+@MainActor func circleKeyChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-chkey-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: temp cleanup
+    let store: Store
+    do { store = Store(db: try DB(url: root.appendingPathComponent("board.sqlite"))) } catch { check(false, "ch key setup: \(error)"); return }
+    do {
+        try ConnectorAccounts.add(id: "ch", name: "CH", baseURL: URL(string: "https://ch.example")!, key: "k", store: store)
+        try Keys.setCompaniesHouse("ch-secret-key-1", store: store)
+        let meta = (try? store.db.query("SELECT group_concat(value) FROM meta") { DB.text($0, 0) }.first) ?? "" // try?-ok: empty fails the check
+        check(Keys.pending(connector: "ch", store: store) == [.companiesHouse] && Keys.value(Keys.companiesHouse, store: store) == "ch-secret-key-1"
+              && !meta.contains("ch-secret"), "companies_house_key_saved_on_the_mac_and_queued")
+        let up = FakeEngine { _, p, _ in p == "/v2/keys" ? (200, #"{"ok":true,"keys":{"claude":false,"google_client_id":null,"companies_house":true}}"#) : (404, "{}") }
+        let ok = await Keys.push(connector: "ch", store: store, client: up.client())
+        check(ok && up.bodies("/v2/keys").first?["companies_house_key"] as? String == "ch-secret-key-1" && up.bodies("/v2/keys").first?["claude_key"] == nil,
+              "companies_house_key_sent_to_the_engine")
+        let keys = try JSONDecoder().decode(EngineKeys.self, from: Data(#"{"claude":true,"google_client_id":null,"companies_house":true}"#.utf8))
+        let old = try JSONDecoder().decode(EngineKeys.self, from: Data(#"{"claude":true,"google_client_id":null}"#.utf8))
+        check(keys.companiesHouse && !old.companiesHouse, "engine_reports_companies_house_key_status")
+        try Keys.setCompaniesHouse("", store: store)
+        _ = await Keys.push(connector: "ch", store: store, client: up.client())
+        check(up.bodies("/v2/keys").last?["companies_house_key"] as? String == "" && Keys.value(Keys.companiesHouse, store: store) == nil,
+              "companies_house_key_removed_on_the_engine_too")
+    } catch { check(false, "ch key: \(error)") }
+}
