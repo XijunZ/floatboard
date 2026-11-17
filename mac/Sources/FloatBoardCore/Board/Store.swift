@@ -202,6 +202,7 @@ public final class Store: ObservableObject {
                 try queueChange(old: old, new: new, now: now)
                 // Ids typed into the notes link the task to them (new ones only; one unlinked with ✕ stays unlinked).
                 try linkMentionsRow(in: card.notes, previous: oldNotes, from: ShortID(kind: .task, number: card.id), now: now) }
+            try saveTaskNoteRow(cardID: card.id, old: oldNotes, new: card.notes, now: now)   // Jots J10: the notes are a jot
         }
     }
 
