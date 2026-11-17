@@ -72,7 +72,10 @@ public enum CircleSync {
         }
         await step("send the people to follow") {
             let list = CircleCopy.watchList(store: store)
-            let body = try JSONEncoder().encode(["people": list])
+            // Sorted keys: JSONEncoder's key order can differ from one encoding to the next, which changed the hash and sent
+            // an unchanged list again.
+            let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+            let body = try enc.encode(["people": list])
             let h = hash(body)
             guard c.meta(watchHash + ":" + id) != h else { return }
             try await client.putCircleWatch(body)
