@@ -1,6 +1,6 @@
 # FloatBoard assistant: features per area, then links
 
-Date: 17 Nov 2026 · Status: **draft v3** (owner's 28 comments + market research folded in; Codex review next, then owner)
+Date: 17 Nov 2026 · Status: **draft v4** (owner comments, research, and Codex review of v3 folded in; for owner review)
 Research behind it: `docs/superpowers/research/2026-11-17-market-research.md`,
 `docs/superpowers/research/2026-11-17-people-intelligence.md`.
 
@@ -264,7 +264,85 @@ meeting labels, the 30-day buffer.
 Also: Circle (not People); phone shows a planning summary; no folders in Jots; Resolutions added;
 Haiku only.
 
-## 9. Open questions (each with a suggested default)
+## 9. Rules added after Codex's review of v3 (v4)
+
+These settle the gaps Codex found. Finer details go into each area's own design.
+
+**Prerequisites from Calendar (before Jots/Circle):** the `links` table gains a `kind` column; the
+calendar cache keeps guests (email, reply status), meeting link and a permanent record for linked
+events; Fathom meeting metadata (meeting link, scheduled start, invitee emails) is kept.
+
+**Items and tags**
+- Several tags per item; one is the **primary tag**, which decides a task's colour and board group.
+  Filters match any tag; counts count each item once. Existing groups become primary tags.
+  Investor and Prospect are fixed tags with their rules checked everywhere (forms, bulk edits, imports).
+
+**Jots**
+- **Task notes have one record:** the task-note jot *is* the task's notes. The task editor and the
+  Jots tab edit the same text (one history). 10 characters is only the threshold for creating it.
+  Deleting the task keeps the note jot (it shows "task deleted"); deleting the note jot empties the
+  task's notes; both can be undone. Fathom notes shown on a task are separate (read-only, linked).
+- **30-day online copy:** the engine keeps a jot **30 days after the Mac saved its latest version**;
+  any newer edit, or any edit or delete not yet saved by the Mac, is never removed. The phone shows
+  jots added in the last 30 days. Consequence: a capture the Mac never receives stays online until
+  it does.
+- **Daily nudge** counts only jots you typed or dictated (not meeting notes or task notes), by the
+  app's time zone.
+- **Daily files** belong to FloatBoard (rewritten whole and safely; an edit or delete changes the
+  file of the day the jot was added). Note history and decision quotes can still hold deleted text.
+
+**Circle**
+- **Three clocks per person:** *last conversation* (both directions within 14 days, or a meeting both
+  accepted), *last outreach* (your last outgoing message or "I contacted them"), *snoozed until*.
+  Due = interval passed since last conversation, not snoozed, and no outreach in the last 7 days.
+  Past accepted meetings count from the calendar directly (not from Fathom), shown as "met"; can be
+  corrected.
+- **Circle has its own readers** for message metadata (who, when, direction), separate from task
+  screening, with a backfill period (default 12 months) and a "data as of" line per channel.
+  Where a channel can't see something, the card says so instead of guessing.
+- **Privacy is scoped to Circle:** Circle stores no message text. Add-contact autofill uses only
+  names, addresses and phone numbers from message headers (no signatures, no body). Message text is
+  sent to Claude only for a requested draft or for active-prospect signals; nothing is kept but the
+  extracted promise/date. When a prospect becomes inactive, their extracted signals are removed.
+  (Task screening is unchanged and covered by its own rules.)
+- **LinkedIn export:** matched by profile URL; each import is dated; the card says "changed since
+  the export of 3 Nov", never an invented date; a missing row is "not in export", not a job change.
+- **Companies House:** each person is bound to an officer id **you confirm** once; until then
+  candidates are shown, not linked. New appointments and resignations are shown separately.
+- **News:** stays "possible" until you mark it right or wrong (opening doesn't count); person news
+  and firm news are separate; duplicates merged; mute per person; at most weekly per person.
+
+**Decisions**
+- **Two dates:** *recorded* (when the source jot was written) and *decided* (only if the text says
+  so, else "unknown"). Reviews count from the recorded date.
+- **Predictions are never invented:** expected outcome and confidence are empty for screened
+  decisions until you add them, and then show "added later".
+- **Screening processes each jot version once,** is safe to repeat, and treats a jot that quotes an
+  older decision (e.g. a review) as a reference, not a new decision.
+- **Selection outside a jot** (e.g. in a decision review): the selection's own item is the source.
+
+**Reminders and the weekly review**
+- The **weekly review** page lives under the bar (and the Sunday nudge), not inside one tab, and
+  holds: decisions recorded, Maybe, due decision reviews, Circle's due list.
+- The reminder budget (3 a day) covers Circle due people and decision reviews; resolution and
+  LinkedIn-export nudges are outside it but at most one each per period. A due person already has a
+  reminder task → no second one. One notification id, delivered once (phone when the Mac is asleep).
+
+**Modules**
+- Decisions needs Jots: Jots can't be switched off while Decisions is on. Switching off a tab also
+  stops its background jobs; captured data stays.
+
+**Resolutions**
+- Each goal has a level and a period (Q1 2027, 2027). At rollover, a kept goal becomes a new goal
+  for the next period; the reviewed version stays as it was. Parent links can't loop. A yearly
+  goal's progress counts its own and its quarterly goals' tasks, each once.
+
+**AI jobs added to §7:** person mentions in jots and people named in decisions are matched by code
+(names and aliases in Circle), not AI; D7 "tell / ask P-n" task suggestions are Haiku (low flag);
+"Not a decision" adds an example to the Decisions rulebook (no extra AI call). Tag suggestions,
+cleanup and form filling are judgement too, always shown for confirmation.
+
+## 10. Open questions (each with a suggested default)
 
 1. **Several tags per task** (needed for "same standard as jots"): today a task has one group.
    *Default: allow several; the first one keeps the card's colour.*
