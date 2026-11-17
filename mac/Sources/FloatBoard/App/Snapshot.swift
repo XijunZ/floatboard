@@ -130,6 +130,14 @@ enum Snapshot {
                 ui.settingsSection = s
                 saveLive(SettingsView().padding(12), "ui-settings-\(s.rawValue).png", CGSize(width: 1000, height: 560))
             }
+            // Settings › Groups at the smallest window (800 pt wide; the board's 12 pt padding each side), with tasks in
+            // "Work" and its delete question open.
+            if let work = store.areas.first?.name {
+                for t in ["Draft the plan", "Call the bank", "Book the venue"] { store.add(title: t, area: work, importance: .medium, due: nil) }
+                ui.settingsSection = .groups
+                saveLive(SettingsView().environment(\.groupsSnapshotDeleting, work).padding(.horizontal, 12).padding(.vertical, 10),
+                         "ui-settings-groups-800.png", CGSize(width: 800, height: 520), inWindow: true)
+            }
             // Settings › Bar in full (tall, in a window so its lists draw their rows).
             ui.settingsSection = .bar
             saveLive(ScrollView { BarSettingsView().padding(12) }, "ui-settings-bar-full.png", CGSize(width: 1000, height: 1100), inWindow: true)
