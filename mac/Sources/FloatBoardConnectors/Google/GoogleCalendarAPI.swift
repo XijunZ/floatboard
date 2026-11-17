@@ -7,6 +7,9 @@ public typealias HTTPFetch = @Sendable (URLRequest) async throws -> (Data, HTTPU
 public enum GoogleCalendarError: Error, Equatable {
     /// Google refused our access (not signed in, or the calendar permission is missing from the sign-in): the user has to sign in again.
     case needsReconnect(body: String)
+    /// Google refused the list of calendars only because the sign-in predates that permission (403 insufficient scope). Events of
+    /// calendars whose id is known still work, so the account's main calendar (its address) can be used without signing in again.
+    case missingCalendarListAccess(body: String)
     /// The saved sync bookmark is too old (HTTP 410 on an events list): forget it and read the whole window again.
     case syncExpired
     /// Any other failure, with Google's answer so the cause shows in Activity.
@@ -49,6 +52,18 @@ public struct GoogleCalendarAPI: Sendable {
     // MARK: Calendars
 
     public func listCalendars() async throws -> [CalCalendarInfo] {
+        do { return try await listCalendarPages() }
+        catch GoogleCalendarError.needsReconnect(let body) where Self.isScopeProblem(body) {
+            throw GoogleCalendarError.missingCalendarListAccess(body: body)   // a 401 or revoked sign-in stays needsReconnect
+        }
+    }
+
+    /// Google's 403 reasons for a sign-in that lacks a permission.
+    static func isScopeProblem(_ body: String) -> Bool {
+        body.contains("insufficientPermissions") || body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT")
+    }
+
+    private func listCalendarPages() async throws -> [CalCalendarInfo] {
         var out: [CalCalendarInfo] = []
         var pageToken: String?
         repeat {
@@ -270,7 +285,7 @@ public struct GoogleCalendarAPI: Sendable {
         if (200..<300).contains(status) { return data }
         let body = String(decoding: data, as: UTF8.self)
         if status == 401 { throw GoogleCalendarError.needsReconnect(body: body) }
-        if status == 403, body.contains("insufficientPermissions") || body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+        if status == 403, isScopeProblem(body) {
             throw GoogleCalendarError.needsReconnect(body: body)
         }
         if status == 410, mapGone { throw GoogleCalendarError.syncExpired }

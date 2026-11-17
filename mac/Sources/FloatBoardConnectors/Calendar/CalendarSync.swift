@@ -42,7 +42,7 @@ public final class CalendarSync {
         if lastListed.map({ now().timeIntervalSince($0) >= Self.listInterval }) ?? true {
             await refreshCalendars()
         } else {
-            let unlisted = accounts().filter { CalendarListAttempts.outcome($0) != .listed }
+            let unlisted = accounts().filter { ![.listed, .mainOnly].contains(CalendarListAttempts.outcome($0)) }
             if !unlisted.isEmpty { await refreshCalendars(only: unlisted) }
         }
         await syncOnce()
@@ -65,6 +65,15 @@ public final class CalendarSync {
                 })
                 lastProblem[key] = nil
                 CalendarListAttempts.record(account, .listed)
+            } catch GoogleCalendarError.missingCalendarListAccess {
+                // An older sign-in (events only): an account's main calendar id is its address, and events of a known calendar can
+                // be read, so show that one. Asked again after the normal list interval or a new sign-in, not every pass.
+                if !cache.calendars().contains(where: { $0.account == account }) {
+                    cache.upsertCalendars(account: account, [CalCalendar(account: account, calendarID: account, name: "Main calendar",
+                                                                          color: "#9aa0a6", owned: true, shown: true)])
+                }
+                lastProblem[key] = nil
+                CalendarListAttempts.record(account, .mainOnly)
             } catch GoogleCalendarError.notConnected {
                 CalendarListAttempts.record(account, .needsReconnect)
                 flagReconnect(account: account, calendarID: nil)

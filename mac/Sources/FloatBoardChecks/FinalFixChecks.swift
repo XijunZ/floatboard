@@ -82,6 +82,49 @@ import FloatBoardConnectors
         check(!fake.requests.contains { $0.url?.path.contains(removed) == true }, "sync_skips_calendars_of_removed_accounts")
     } catch { check(false, "relist checks: \(error)") }
 
+    // 2b. An account whose sign-in predates the calendar-list permission works at once with its main calendar (its address).
+    do {
+        let (store, cache, _) = try setup("mainonly")
+        let who = "main@example.com"
+        let fake = FakeGoogle()
+        var mode = "scope"
+        fake.handler = { r in
+            if r.url?.path.hasSuffix("/users/me/calendarList") == true {
+                switch mode {
+                case "scope": return (##"{"error":{"code":403,"message":"Insufficient Permission","errors":[{"reason":"insufficientPermissions"}],"details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}"##, 403)
+                case "revoked": return (##"{"error":"invalid_grant"}"##, 401)
+                default: return (##"{"items":[{"id":"main@example.com","summary":"Main Person","accessRole":"owner","primary":true,"backgroundColor":"#111111"},{"id":"team","summary":"Team","accessRole":"reader"}]}"##, 200)
+                }
+            }
+            return (#"{"items":[],"nextSyncToken":"T"}"#, 200)
+        }
+        let sync = CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [who] })
+        func lists() -> Int { fake.requests.filter { $0.url?.path.hasSuffix("/users/me/calendarList") == true }.count }
+        func eventReads() -> Int { fake.requests.filter { $0.url?.path.hasSuffix("/events") == true }.count }
+        await sync.tick()
+        let mine = cache.calendars().filter { $0.account == who }
+        check(mine.count == 1 && mine[0].calendarID == who && mine[0].name == "Main calendar" && mine[0].owned && mine[0].shown
+              && !mine[0].needsReconnect && eventReads() == 1 && mine[0].syncToken != nil, "scope_403_adds_main_calendar_and_syncs_it")
+        check(CalendarListAttempts.outcome(who) == .mainOnly
+              && CalendarSettings.state(account: who, calendars: mine, lastList: .mainOnly) == .mainOnly, "scope_403_is_main_only_not_reconnect")
+        await sync.tick(); await sync.tick()
+        check(lists() == 1, "main_only_is_not_listed_again_every_pass")
+        CalendarListAttempts.forget(who)   // a new sign-in
+        mode = "ok"
+        await sync.tick()
+        let after = cache.calendars().filter { $0.account == who }
+        check(lists() == 2 && after.count == 2 && after.first { $0.calendarID == who }?.name == "Main Person"
+              && after.first { $0.calendarID == who }?.shown == true && CalendarListAttempts.outcome(who) == .listed, "later_list_updates_the_same_main_calendar_row")
+        // A revoked sign-in is still a reconnect, and adds no calendar.
+        let other = "gone@example.com"
+        mode = "revoked"
+        let sync2 = CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [other] })
+        await sync2.tick()
+        check(CalendarListAttempts.outcome(other) == .needsReconnect && !cache.calendars().contains { $0.account == other }
+              && CalendarSettings.state(account: other, calendars: [], lastList: .needsReconnect) == .reconnect, "revoked_sign_in_still_needs_reconnect")
+        CalendarListAttempts.forget(who); CalendarListAttempts.forget(other)
+    } catch { check(false, "main-only checks: \(error)") }
+
     // 3. The task pop-up saves only what the user changed in it: Google's rename and Meet link made meanwhile stay.
     do {
         let (store, cache, outbox) = try setup("popup")
@@ -237,7 +280,7 @@ import FloatBoardConnectors
     let forbidden = #"{"error":{"code":403,"status":"PERMISSION_DENIED","errors":[{"reason":"forbidden","message":"Forbidden"}]}}"#
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
     var scopeIsReconnect = false
-    if case .needsReconnect? = await reject(403, scope, { _ = try await $0.listCalendars() }) { scopeIsReconnect = true }
+    if case .needsReconnect? = await reject(403, scope, { _ = try await $0.patch(calendarID: "c", eventID: "e", title: "x", start: nil, end: nil, allDayStart: nil) }) { scopeIsReconnect = true }
     let forbiddenErr = await reject(403, forbidden, { _ = try await $0.patch(calendarID: "c", eventID: "e", title: "x", start: nil, end: nil, allDayStart: nil) })
     check(scopeIsReconnect && forbiddenErr == .http(status: 403, body: forbidden), "only_scope_errors_ask_to_reconnect")
     let patchGone = await reject(410, #"{"error":{"code":410}}"#, { _ = try await $0.patch(calendarID: "c", eventID: "e", title: "x", start: nil, end: nil, allDayStart: nil) })
