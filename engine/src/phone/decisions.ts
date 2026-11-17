@@ -19,7 +19,7 @@ import { decrypt, encrypt } from "../lib/crypto";
 import { readCappedJSON } from "../lib/http";
 import { route } from "../lib/router";
 import { fillDecisionForm } from "../routes/decisions";
-import { appJSON, requireAppSession, sameOrigin } from "./auth";
+import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
 
 export const MAX_COPY = 300;
 const MAX_ACTIONS = 50;
@@ -133,8 +133,9 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
     const s = await requireAppSession(req, env);
     if (!s) return appJSON({ error: "not signed in" }, 401);
     const row = await env.DB.prepare("SELECT data_enc, updated FROM decision_copies WHERE user_id=?").bind(s.userId).first<{ data_enc: string; updated: string }>();
-    return appJSON({ decisions: row ? JSON.parse(await decrypt(env, row.data_enc)) : [], updated: row?.updated ?? null,
-      waiting: await waiting(env, s.userId) }, 200, s.setCookie);
+    // `account`: which account this session belongs to, so the phone caches and sends only under it.
+    return appJSON({ account: await accountMarker(s.userId), decisions: row ? JSON.parse(await decrypt(env, row.data_enc)) : [],
+      updated: row?.updated ?? null, waiting: await waiting(env, s.userId) }, 200, s.setCookie);
   }
   if (path === "/app/api/decisions/action" && req.method === "POST") {
     if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);
@@ -160,7 +161,9 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
           VALUES(?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), s.userId, a.clientId, s.deviceId, a.decision, a.action, payload, a.madeAt ?? now, now));
     }
     await env.DB.batch(stmts);
-    return appJSON({ accepted: list.map((a) => a.clientId), waiting: await waiting(env, s.userId) }, 200, s.setCookie);
+    // Stored under the session's own user only: a phone can never queue an action for another account.
+    return appJSON({ account: await accountMarker(s.userId), accepted: list.map((a) => a.clientId), waiting: await waiting(env, s.userId) },
+      200, s.setCookie);
   }
   if (path === "/app/api/decisions/fill" && req.method === "POST") {
     if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);
