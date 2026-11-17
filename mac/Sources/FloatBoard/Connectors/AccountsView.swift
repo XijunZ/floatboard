@@ -180,10 +180,11 @@ struct CalendarSettingsView: View {
 
     private func account(_ email: String, all: [CalCalendar]) -> some View {
         let mine = CalendarSettings.calendars(of: email, in: all)
+        let colour = store.accountColors(for: connected)[email] ?? AccountColors.fallback
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Image(systemName: "person.crop.circle").foregroundStyle(.secondary)
-                Text(email).font(.system(size: 12, weight: .semibold))
+                Circle().fill(Color(hex: colour)).frame(width: 12, height: 12).frame(width: 16)
+                Text(email).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                 Spacer()
                 Button("Remove…") {
                     if ConnectFlow.confirmTwice("Remove \(email)?",
@@ -191,6 +192,17 @@ struct CalendarSettingsView: View {
                         action: "Remove") { google.remove(email); tick += 1 }
                 }
             }
+            // The account's colour (its events, the legend, the bar and the phone): the same dots as Groups.
+            HStack(spacing: 5) {
+                ForEach(Palette.colors, id: \.hex) { c in
+                    Circle().fill(Color(hex: c.hex)).frame(width: 12, height: 12)
+                        .overlay(Circle().strokeBorder(Color.primary, lineWidth: colour.uppercased() == c.hex.uppercased() ? 2 : 0))
+                        .contentShape(Circle())
+                        .onTapGesture { if store.setAccountColor(email, c.hex) { tick += 1 } }
+                        .help(c.name)
+                }
+            }
+            .padding(.leading, 22)
             let state = CalendarSettings.state(account: email, calendars: all, lastList: CalendarListAttempts.outcome(email))
             if state == .loading {
                 Text("Loading your calendars…").font(.system(size: 12)).foregroundStyle(.secondary).padding(.leading, 22)

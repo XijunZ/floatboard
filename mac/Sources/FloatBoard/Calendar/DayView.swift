@@ -11,9 +11,20 @@ struct DayView: View {
 }
 
 private let gutter: CGFloat = 44
+
+private struct EventColoursKey: EnvironmentKey { static let defaultValue: [String: AccountColors.EventColors] = [:] }
+extension EnvironmentValues {
+    /// Per calendar (`TaskEventRules.key`): the colours its events are drawn with (the account's colour; the calendar's own
+    /// as a small mark when the account shows several). Set by the grid.
+    var eventColours: [String: AccountColors.EventColors] {
+        get { self[EventColoursKey.self] }
+        set { self[EventColoursKey.self] = newValue }
+    }
+}
 private let hourHeight: CGFloat = 46
 
-/// Hours down the side and one column per day. Events are coloured by their Google calendar; tasks have a checkbox and their
+/// Hours down the side and one column per day. Events are coloured by their Google account (which email they come from;
+/// the calendar's own colour is a small mark when an account shows several calendars); tasks have a checkbox and their
 /// group colour. All-day events and date-only tasks sit in a strip above the hours.
 struct TimeGrid: View {
     let days: [Date]
@@ -32,7 +43,16 @@ struct TimeGrid: View {
         let to = cal.date(byAdding: .day, value: days.count, to: from) ?? from
         let calendars = Dictionary(cache.calendars().map { (TaskEventRules.key($0.account, $0.calendarID), $0) }, uniquingKeysWith: { a, _ in a })
         let waitingNew = outbox.pendingNewEvents(from: from, to: to)
-        let events = cache.events(from: from, to: to).filter { !edits.deleted.contains($0.shortID) }.map(edits.shown) + waitingNew
+        // Accounts hidden with the legend are left out here (the bar and the phone still show them).
+        let hidden = store.hiddenCalendarAccounts()
+        let events = (cache.events(from: from, to: to).filter { !edits.deleted.contains($0.shortID) }.map(edits.shown) + waitingNew)
+            .filter { !hidden.contains($0.account) }
+        let accountColours = store.accountColors(for: cache.connectedAccountList())
+        let shownPerAccount = Dictionary(grouping: calendars.values.filter(\.shown), by: \.account).mapValues(\.count)
+        let tints = calendars.mapValues { c in
+            AccountColors.eventColors(accountColor: accountColours[c.account] ?? AccountColors.fallback, calendar: c,
+                                      shownCalendarsOfAccount: shownPerAccount[c.account] ?? 1)
+        }
         let pending = Set(waitingNew.map(\.shortID)).union(events.filter { outbox.pending(eventShortID: $0.shortID) }.map(\.shortID))
         let refused = outbox.failedNewEvents()
         let tasks = store.cards.filter { !$0.withdrawn }
@@ -72,6 +92,7 @@ struct TimeGrid: View {
                 }
             }
         }
+        .environment(\.eventColours, tints)
     }
 
     private func grid(placed: [[PlacedItem]], calendars: [String: CalCalendar], pending: Set<Int64>,
@@ -243,12 +264,15 @@ private struct EventBlock: View {
 
     @EnvironmentObject var edits: CalendarEdits
     @EnvironmentObject var store: Store
+    @Environment(\.eventColours) private var tints
     @State private var open = false
     @State private var showRefusal = false
     @State private var drag: CGSize = .zero
     @State private var grow: CGFloat = 0
 
-    private var colour: Color { calendar.map { Color(hex: $0.color) } ?? .gray }
+    private var tint: AccountColors.EventColors? { tints[TaskEventRules.key(event.account, event.calendarID)] }
+    /// The account's colour (which email it comes from).
+    private var colour: Color { tint.map { Color(hex: $0.stripe) } ?? calendar.map { Color(hex: $0.color) } ?? .gray }
     /// A new event that Google has not confirmed yet (no E-n): shown, but not editable until it arrives.
     private var placeholder: Bool { event.shortID < 0 }
     private var editable: Bool { !placeholder && (calendar?.owned ?? false) }
@@ -262,6 +286,9 @@ private struct EventBlock: View {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 3) {
                         Text(event.title.isEmpty ? "(no title)" : event.title).font(.system(size: 11, weight: .semibold)).lineLimit(h < 40 || narrow ? 1 : 2)
+                        if let mark = tint?.mark {
+                            Circle().fill(Color(hex: mark)).frame(width: 6, height: 6).help(calendar?.name ?? "Calendar")
+                        }
                         if refused != nil {
                             Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9)).foregroundStyle(.red)
                                 .help("Google refused this event; click for details")
@@ -376,14 +403,17 @@ private struct StripChip: View {
     let calendars: [String: CalCalendar]
     let compact: Bool
     @EnvironmentObject var store: Store
+    @Environment(\.eventColours) private var tints
 
     var body: some View {
         switch item.content {
         case .event(let e):
-            let colour = calendars[TaskEventRules.key(e.account, e.calendarID)].map { Color(hex: $0.color) } ?? .gray
+            let tint = tints[TaskEventRules.key(e.account, e.calendarID)]
+            let colour = tint.map { Color(hex: $0.stripe) } ?? calendars[TaskEventRules.key(e.account, e.calendarID)].map { Color(hex: $0.color) } ?? .gray
             HStack(spacing: 4) {
                 Rectangle().fill(colour).frame(width: 3)
                 Text(e.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                if let mark = tint?.mark { Circle().fill(Color(hex: mark)).frame(width: 6, height: 6) }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading).frame(height: 18)
