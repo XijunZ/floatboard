@@ -38,7 +38,8 @@ import UserNotifications
         content.body = r.body
         content.sound = .default
         content.userInfo = ["card": r.cardID]
-        let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: r.fireAt)
+        var parts = AppTime.calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: r.fireAt)
+        parts.timeZone = AppTime.zone
         let request = UNNotificationRequest(identifier: r.id, content: content,
                                             trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false))
         center.add(request) { [log] error in

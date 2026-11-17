@@ -10,7 +10,11 @@
     var addsShown = {};
     cards.forEach(function (c) { if (c.action_id) addsShown[c.action_id] = true; });
     var temp = 0;
+    var hidden = {};
     (actions || []).forEach(function (a) {
+      // Delete hides the card until the Mac has deleted it; a later restore (Undo after it was sent) shows it again.
+      if (a.action === "delete") { hidden[a.card_id] = true; return; }
+      if (a.action === "restore") { delete hidden[a.card_id]; return; }
       if (a.action === "add") {
         if (addsShown[a.id]) return;
         temp += 1;
@@ -36,6 +40,7 @@
         }
       }
     });
+    cards = cards.filter(function (c) { return !hidden[c.id]; });
     return Object.assign({}, board || {}, { cards: cards });
   }
 
@@ -56,12 +61,21 @@
       var item = { id: a.id, made_at: a.made_at, action: a.action };
       if (a.action === "add") { item.title = a.title; if (a.group) item.group = a.group; } else item.card_id = a.card_id;
       if (a.action === "link_email") { item.message_id = a.message_id; item.gmail_id = a.gmail_id; item.account = a.account; item.sent_at = a.sent_at || null; }
+      if (a.action === "delete" && a.teach) item.teach = a.teach;
       var n = byteLength(JSON.stringify(item)) + 1;
       if (out.length && size + n > BATCH_BYTES) break;
       size += n;
       out.push(item);
     }
     return { sent_at: sentAt, actions: out };
+  }
+
+  // Before a batch goes, its actions are marked as sent at least once (kept on this phone, never sent): the engine may take
+  // them even if its answer is lost, so a delete marked so is never taken back locally (see undoDeleteStep).
+  function markAttempted(actions, batch) {
+    var ids = {};
+    ((batch && batch.actions) || []).forEach(function (a) { ids[a.id] = true; });
+    return (actions || []).map(function (a) { return ids[a.id] && !a.attempted ? Object.assign({}, a, { attempted: true }) : a; });
   }
 
   function afterSend(actions, result) {
@@ -151,7 +165,25 @@
   }
 
   function undoText(u) {
-    return "Moved to " + (STEP_NAMES[u.to] || u.to);
+    return u.deleted ? "Deleted" : "Moved to " + (STEP_NAMES[u.to] || u.to);
+  }
+
+  // Undo for a delete: "Deleted · Undo" for the same 8 seconds.
+  function deleteUndoFor(card, del, nowMs) {
+    if (!card || card.pending || !del || del.action !== "delete" || card.id !== del.card_id) return null;
+    return { deleted: true, card_id: card.id, del_id: del.id, made_at: del.made_at, at: nowMs };
+  }
+
+  // Undo of a delete: never sent (not marked as attempted, not being sent): it is taken out of the queue and nothing is
+  // sent. Sent at least once (even if its answer was lost and it is still queued) or on its way: it stays (sending it again
+  // is harmless) and a `restore` of its own, made after the delete, brings the task back on the Mac.
+  function undoDeleteStep(u, actions, inFlight, id, nowIso) {
+    var list = actions || [];
+    var waiting = list.some(function (a) { return a.id === u.del_id && !a.attempted; });
+    if (waiting && !inFlight) return { actions: list.filter(function (a) { return a.id !== u.del_id; }), restore: null };
+    var after = Date.parse(u.made_at) + 1;
+    var made = Date.parse(nowIso) >= after ? nowIso : new Date(after).toISOString();
+    return { actions: list, restore: { id: id, made_at: made, card_id: u.card_id, action: "restore" } };
   }
 
   // The move back: a new action of its own, made after the move it undoes (even if the phone's clock went back).
@@ -223,3 +255,93 @@
     if (rejected) parts.push(rejected === 1 ? "1 change couldn't be sent" : rejected + " changes couldn't be sent");
     return parts.join(". ");
   }
+
+  // ---- planning summary: Today, Rest of this week, Next week
+
+  /** "YYYY-MM-DD" of a time on the calendar of the zone. */
+  function dayKey(ms, zone) {
+    var p = {};
+    new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
+    return p.year + "-" + p.month + "-" + p.day;
+  }
+
+  function keyParts(key) { var p = key.split("-"); return Date.UTC(+p[0], +p[1] - 1, +p[2]); }
+  function addDays(key, n) { return new Date(keyParts(key) + n * 86400000).toISOString().slice(0, 10); }
+  /** 1 = Monday ... 7 = Sunday. */
+  function weekdayOf(key) { var d = new Date(keyParts(key)).getUTCDay(); return d === 0 ? 7 : d; }
+
+  function planBlocks(events, cards, nowMs, zone) {
+    var today = dayKey(nowMs, zone);
+    var wd = weekdayOf(today);
+    var blocks = [{ key: "today", title: "Today", from: today, to: today }];
+    if (wd < 7) blocks.push({ key: "week", title: "Rest of this week", from: addDays(today, 1), to: addDays(today, 7 - wd) });
+    blocks.push({ key: "next", title: "Next week", from: addDays(today, 8 - wd), to: addDays(today, 14 - wd) });
+    var clock = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    var dayName = function (key) { return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekdayOf(key) - 1]; };
+
+    var evs = (Array.isArray(events) ? events : []).map(function (e) {
+      if (!e || typeof e !== "object" || typeof e.title !== "string") return null;
+      var s = Date.parse(e.start), n = Date.parse(e.end);
+      if (isNaN(s) || isNaN(n)) return null;
+      return { e: e, s: s, first: dayKey(s, zone), last: dayKey(n > s ? n - 1 : s, zone),
+        series: typeof e.series === "string" && e.series ? e.series : null,
+        // Moved in Google (its start is not its original start): never folded into the series row.
+        moved: typeof e.original_start === "string" && !isNaN(Date.parse(e.original_start)) && Date.parse(e.original_start) !== s,
+        label: typeof e.repeat === "string" && e.repeat ? e.repeat : null };
+    }).filter(Boolean).sort(function (a, b) { return a.s - b.s; });
+
+    var open = (Array.isArray(cards) ? cards : []).filter(function (c) {
+      return c && typeof c === "object" && c.status !== "done" && typeof c.due === "string";
+    }).map(function (c) {
+      var key = /^\d{4}-\d{2}-\d{2}$/.test(c.due) ? c.due : (isNaN(Date.parse(c.due)) ? null : dayKey(Date.parse(c.due), zone));
+      return key ? { c: c, key: key, at: /^\d{4}-\d{2}-\d{2}$/.test(c.due) ? keyParts(c.due) : Date.parse(c.due) } : null;
+    }).filter(Boolean).sort(function (a, b) { return a.at - b.at; });
+
+    // An instance's time of day ("all day" for an all-day one), to tell a series' usual instances from moved ones.
+    var timeKey = function (x) { return x.e.all_day ? "all day" : clock.format(new Date(x.s)); };
+
+    return blocks.map(function (b) {
+      var meetings = [], bySeries = {};
+      var inBlock = evs.filter(function (x) { return !(x.first > b.to || x.last < b.from); });
+      // A series' usual time in this block: the time in its label ("weekdays 09:00"), else the time most of its instances
+      // here share (the earliest on a tie), counting only instances not moved in Google. A moved instance (its original start
+      // differs) or one at another time is never hidden in the series row: it is its own row with its day, time and Join.
+      var usual = {};
+      inBlock.forEach(function (x) {
+        if (!x.series || x.moved || usual[x.series]) return;
+        var named = x.label && x.label.match(/\b\d{2}:\d{2}\b/);
+        if (named) { usual[x.series] = named[0]; return; }
+        var count = {}, best = null;
+        inBlock.forEach(function (y) {
+          if (y.series !== x.series || y.moved) return;
+          var k = timeKey(y);
+          count[k] = (count[k] || 0) + 1;
+          if (best === null || count[k] > count[best]) best = k;
+        });
+        usual[x.series] = best;
+      });
+      inBlock.forEach(function (x) {
+        var tasks = Array.isArray(x.e.tasks) ? x.e.tasks.filter(function (t) { return typeof t === "number"; }) : [];
+        var video = typeof x.e.video === "string" && /^https:\/\//.test(x.e.video) ? x.e.video : null;
+        var day = x.first < b.from ? b.from : x.first;
+        var time = x.e.all_day || x.first < b.from ? "" : clock.format(new Date(x.s));
+        var when = b.key === "today" ? (time || "All day") : dayName(day) + (time ? " " + time : "");
+        if (x.series && !x.moved && timeKey(x) === usual[x.series]) {
+          var m = bySeries[x.series];
+          if (m) { tasks.forEach(function (t) { if (m.tasks.indexOf(t) < 0) m.tasks.push(t); }); return; }
+          // The series row: its rule in words; in Today also the occurrence's actual time.
+          m = { id: x.e.id, title: x.e.title, label: x.label || "repeats", when: b.key === "today" ? when : "", tasks: tasks.slice(), video: video, color: x.e.color };
+          bySeries[x.series] = m;
+          meetings.push(m);
+          return;
+        }
+        meetings.push({ id: x.e.id, title: x.e.title, label: null, when: when, tasks: tasks, video: video, color: x.e.color });
+      });
+      var due = open.filter(function (t) { return t.key >= b.from && t.key <= b.to; }).map(function (t) { return t.c; });
+      // Open tasks due before today lead the Today block, oldest first.
+      var overdue = b.key === "today" ? open.filter(function (t) { return t.key < today; }).map(function (t) { return t.c; }) : [];
+      return { key: b.key, title: b.title, from: b.from, to: b.to, meetings: meetings, tasks: due, overdue: overdue };
+    });
+  }
+

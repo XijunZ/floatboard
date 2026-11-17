@@ -35,7 +35,7 @@ public enum WeChatNotifications {
 
     /// New WeChat messages to screen, grouped per chat. `cursors`: chat -> newest notification time already sent.
     public static func newChats(folder: URL = folder, cursors: [String: Double], now: Date = Date(),
-                                zone: TimeZone = .current) throws -> [WhatsAppLocal.Chat] {
+                                zone: TimeZone = AppTime.zone) throws -> [WhatsAppLocal.Chat] {
         let notes = try readNotes(folder: folder, since: now.addingTimeInterval(-maxAgeDays * 86_400))
         return chats(notes, cursors: cursors, zone: zone)
     }

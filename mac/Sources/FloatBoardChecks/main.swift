@@ -93,7 +93,7 @@ MainActor.assumeIsolated {
         let t0 = Date(timeIntervalSince1970: 1_800_000_000)
         func mk(_ id: Int64, _ imp: Importance, _ due: Date?, _ area: String, _ created: Date) -> Card {
             Card(id: id, title: "c\(id)", notes: "", area: area, importance: imp, due: due, status: .todo, created: created,
-                 started: nil, done: nil)
+                 started: nil, done: nil, dueHasTime: due != nil)
         }
         let a = mk(1, .low, t0.addingTimeInterval(3600), "B", t0)
         let b = mk(2, .high, nil, "A", t0.addingTimeInterval(10))
@@ -302,7 +302,7 @@ MainActor.assumeIsolated {
         let fm = FileManager.default
         let root = URL(fileURLWithPath: bkDir, isDirectory: true)
         try? fm.removeItem(at: root) // try?-ok: scratch dir may not exist yet
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 7, hour: 12))!
         func integrityOK(_ u: URL) -> Bool {
             var h: OpaquePointer?
@@ -670,7 +670,12 @@ MainActor.assumeIsolated {
     do { // the device's zone is whatever TZ says; switch it for one check, then restore it
         let savedTZ = ProcessInfo.processInfo.environment["TZ"]
         setenv("TZ", "Asia/Tokyo", 1); tzset(); NSTimeZone.resetSystemTimeZone()
-        check(TimeZone.current == tokyo && utc(Reconciler.parseDue("2026-07-01T09:00")) == "2026-07-01T00:00:00Z", "due_uses_current_time_zone")
+        let savedApp = AppTime.setting
+        AppTime.apply("Asia/Tokyo")
+        check(TimeZone.current == tokyo && utc(Reconciler.parseDue("2026-07-01T09:00")) == "2026-07-01T00:00:00Z", "due_uses_app_time_zone")
+        AppTime.apply("Europe/London")
+        check(utc(Reconciler.parseDue("2026-07-01T09:00")) == "2026-07-01T08:00:00Z", "due_ignores_the_mac_zone_when_app_zone_is_london")
+        AppTime.apply(savedApp)
         if let savedTZ { setenv("TZ", savedTZ, 1) } else { unsetenv("TZ") }
         tzset(); NSTimeZone.resetSystemTimeZone()
     }
@@ -702,8 +707,10 @@ MainActor.assumeIsolated {
     check(store.recentActivity(limit: 100).allSatisfy { $0.seen }, "activity_mark_seen")
 }
 
-check(GoogleAuthConfig.scopes == ["https://www.googleapis.com/auth/calendar.events", "openid", "email"]
+check(GoogleAuthConfig.scopes == ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "openid", "email"]
       && !GoogleAuthConfig.scopes.contains { $0.contains("mail.google") || $0.lowercased().contains("gm" + "ail") }, "google_scopes_calendar_only")
+check(GoogleAuthConfig.gmailScopes == ["https://www.googleapis.com/auth/gmail.modify"] + GoogleAuthConfig.scopes
+      && Set(GoogleAuthConfig.scopes).isSubset(of: Set(GoogleAuthConfig.gmailScopes)), "gmail_sign_in_scopes_are_gmail_plus_calendar")
 
 await connectorChecks(sharedStore!)
 await connectorsTabChecks(sharedStore!)
@@ -717,6 +724,7 @@ await healthChecks()
 await recheckChecks()
 await connectorEdgeCaseChecks()
 await phoneChecks()
+await phoneEventChecks()
 await whatsappChecks()
 await wechatChecks()
 updateChecks()
@@ -732,8 +740,23 @@ oneTaskChecks()
 phoneLinksChecks()
 await linkEmailChecks()
 dueReminderChecks()
+dueStorageChecks()
+linkChecks()
+calendarCacheChecks()
+calendarOutboxChecks()
+await calendarSenderChecks()
+await googleCalendarChecks()
+await taskEventChecks()
+calendarSettingsChecks()
+calendarLayoutChecks()
+calendarEditChecks()
+appTimeChecks()
 oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()
+await finalFixChecks()
+await codexFixChecks()
+await planningChecks()
+phoneDeleteChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)

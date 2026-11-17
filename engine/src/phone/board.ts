@@ -29,6 +29,9 @@ import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
 import { GMAIL_ID, ownGmail } from "../email/search";
 
 export const MAX_CARDS = 500;
+export const MAX_EVENTS = 200;   // two weeks of meetings (the planning summary: today through the end of next week)
+const MAX_REPEAT = 80;
+const MAX_EVENT_TASKS = 20;
 export const MAX_UNTAKEN_ACTIONS = 200;
 export const MAX_BATCH = 100;
 const MAX_TITLE = 200;
@@ -47,6 +50,8 @@ const ACTION_ID = /^[A-Za-z0-9-]{8,64}$/;
 const STATUSES = ["todo", "doing", "watch", "done"] as const;
 /** Link a task to an email (or remove that link) from the phone: the Mac applies it; it never changes the task's step. */
 const LINKS = ["link_email", "unlink_email"] as const;
+/** The "teach" reasons a delete of an email-sorting task can carry, as the Mac offers them. */
+const TEACH = ["not_action", "wrong_details", "duplicate"] as const;
 const EMAIL_KINDS = ["sorting", "user"] as const;
 const MAX_MESSAGE_ID = 998;
 const MAX_ACCOUNT = 320;
@@ -60,15 +65,26 @@ export type Card = {
   id: number; title: string; group: string; color: string; importance: 0 | 1 | 2; due: string | null; has_time: boolean;
   status: Status; link: string | null; links?: CardLink[]; email?: (typeof EMAIL_KINDS)[number]; done_at: string | null; status_at?: string | null;
   pending?: true; action_id?: string | null;
+  /** True for a task the email sorting made: the phone's Delete offers the Mac's "teach" choices. */
+  teach_on_delete?: true;
   /** Watch only: whom it waits on, how to recognise their reply ("email:<address>", "wa:<chat id>" or ""), and since when. */
   watch?: CardWatch;
 };
+/**
+ * A calendar event for the phone's planning summary: ISO UTC times, `tasks` = ids of the cards linked to it. A repeating
+ * meeting's instances share `series` (an opaque "S-" key) and carry `repeat` (its rule in a few words, "weekdays 09:00"),
+ * so the phone lists it once per block; both are absent for a one-off event.
+ */
+export type BoardEvent = { id: string; title: string; start: string; end: string; all_day: boolean; video: string | null; color: string; tasks: number[];
+  series?: string; repeat?: string; original_start?: string };
 export type CardWatch = { person: string; contact: string; since: string };
 /** The email a `link_email` action attaches (sent_at as the search gave it). */
 export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
 export type PhoneAction = {
-  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number] | "watch_reply"; title: string | null; group: string | null;
-  created: string; made_at: string; email?: LinkedEmail;
+  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number] | "watch_reply" | "delete" | "restore";
+  title: string | null; group: string | null; created: string; made_at: string; email?: LinkedEmail;
+  /** delete only: the "teach" reason chosen on the phone (not_action | wrong_details | duplicate). */
+  teach?: string;
   /** watch_reply only: the watched person wrote again ("Anna replied by email"); the Mac moves the task back to To do. */
   reason?: string;
 };
@@ -77,6 +93,8 @@ type ActionRow = {
   created: string; made_at: string; taken: number; payload: string | null;
 };
 const isMove = (action: string): action is Status => (STATUSES as readonly string[]).includes(action);
+/** Actions decided by "newest change wins" against the card's last step change on the Mac: moves and delete. */
+const newestWins = (action: string) => isMove(action) || action === "delete";
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const isIso = (v: unknown): v is string => typeof v === "string" && v.length <= 40 && !Number.isNaN(Date.parse(v));
@@ -147,6 +165,7 @@ export function parseCards(body: any): Card[] {
       const links = cardLinks(c.links);
       if (links) out.links = links;
       if (c.watch !== undefined && c.watch !== null) out.watch = cardWatch(c.watch);
+      if (c.teach_on_delete === true) out.teach_on_delete = true;   // anything else: a plain delete (never a refused push)
       if (c.email !== undefined && c.email !== null) {
         if (!EMAIL_KINDS.includes(c.email)) throw new Error("email must be sorting or user when given");
         out.email = c.email;
@@ -154,6 +173,49 @@ export function parseCards(body: any): Card[] {
       return out;
     } catch (e) { throw new Error(`${at}.${(e as Error).message}`); }
   });
+}
+
+/** The optional `events` of a push (absent from older Macs: none), strictly checked like cards; trimmed text, https-only video. */
+export function parseEvents(body: any): BoardEvent[] | undefined {
+  const v = body?.events;
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v)) throw new Error("events must be a list");
+  if (v.length > MAX_EVENTS) throw new Error(`at most ${MAX_EVENTS} events`);
+  return v.map((e: any, i: number): BoardEvent => {
+    const at = `events[${i}]`;
+    if (!e || typeof e !== "object" || Array.isArray(e)) throw new Error(`${at} must be an object`);
+    if (typeof e.id !== "string" || !/^E-[1-9][0-9]*$/.test(e.id) || e.id.length > 20) throw new Error(`${at}.id must look like E-37`);
+    if (typeof e.title !== "string") throw new Error(`${at}.title must be text`);
+    const title = e.title.trim();
+    if (title.length > MAX_TITLE) throw new Error(`${at}.title must be text up to ${MAX_TITLE} characters`);
+    if (!isIso(e.start)) throw new Error(`${at}.start must be an ISO date`);
+    if (!isIso(e.end)) throw new Error(`${at}.end must be an ISO date`);
+    if (typeof e.all_day !== "boolean") throw new Error(`${at}.all_day must be true or false`);
+    // A bad meeting link must not stop the push: anything but a clean https address becomes null.
+    let video: string | null = null;
+    if (typeof e.video === "string" && e.video.length <= MAX_LINK && !/\s/.test(e.video)) {
+      try { const u = new URL(e.video); if (u.protocol === "https:" && u.hostname) video = e.video; } catch { /* not an address: no Join button */ }
+    }
+    if (typeof e.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(e.color)) throw new Error(`${at}.color must be a hex colour like #aabbcc`);
+    if (!Array.isArray(e.tasks) || e.tasks.length > MAX_EVENT_TASKS || !e.tasks.every((t: unknown) => Number.isSafeInteger(t) && (t as number) > 0)) {
+      throw new Error(`${at}.tasks must be a list of up to ${MAX_EVENT_TASKS} positive integers`);
+    }
+    // Like the link: a bad series key or label is left out (the meeting is then listed like a one-off), never a refused push.
+    const series = typeof e.series === "string" && /^S-[0-9a-f]{1,32}$/.test(e.series) ? e.series : undefined;
+    const rep = typeof e.repeat === "string" ? e.repeat.trim() : "";
+    const repeat = rep && rep.length <= MAX_REPEAT && !/[\u0000-\u001f\u007f]/.test(rep) ? rep : undefined;
+    // An instance's original start (Google's originalStartTime; differs from `start` when moved): an ISO date, else left out.
+    const original = isIso(e.original_start) ? e.original_start as string : undefined;
+    return { id: e.id, title, start: e.start, end: e.end, all_day: e.all_day, video, color: e.color, tasks: e.tasks,
+      ...(series ? { series } : {}), ...(repeat ? { repeat } : {}), ...(original ? { original_start: original } : {}) };
+  });
+}
+
+/** The zone the Mac shows times in (an IANA name, e.g. Europe/London), so the phone shows the same times; absent: the device's. */
+function parseZone(v: unknown): string | undefined {
+  if (typeof v !== "string" || v.length > 64) return undefined; // unknown or bad: ignored, the phone uses its own zone
+  try { new Intl.DateTimeFormat("en", { timeZone: v }); } catch { return undefined; }
+  return v;
 }
 
 /**
@@ -172,10 +234,12 @@ export function corrected(at: string | null | undefined, skew: number | null, re
   return iso(Math.min(Date.parse(at) + skew, receivedMs));
 }
 
-async function loadSnapshot(env: Env, userId: string): Promise<{ cards: Card[]; updated: string } | null> {
+type Snapshot = { cards: Card[]; events?: BoardEvent[]; time_zone?: string; updated: string };
+async function loadSnapshot(env: Env, userId: string): Promise<Snapshot | null> {
   const row = await env.DB.prepare("SELECT data_enc, updated FROM board_snapshots WHERE user_id=?").bind(userId).first<{ data_enc: string; updated: string }>();
   if (!row) return null;
-  return { cards: JSON.parse(await decrypt(env, row.data_enc)).cards as Card[], updated: row.updated };
+  const d = JSON.parse(await decrypt(env, row.data_enc));
+  return { cards: d.cards as Card[], events: d.events as BoardEvent[] | undefined, time_zone: d.time_zone as string | undefined, updated: row.updated };
 }
 
 const ACTION_COLS = "id, rowid AS rid, client_id, card_id, action, title, group_name, created, COALESCE(made_at, created) AS made_at, taken, payload";
@@ -202,6 +266,7 @@ const statusAt = (c: Card, snapUpdated: string | null) => c.status_at ?? snapUpd
 export function overlay(cards: Card[], actions: ActionRow[], snapUpdated: string | null = null): Card[] {
   const out = cards.map((c) => ({ ...c }));
   const base = new Map(cards.map((c) => [c.id, statusAt(c, snapUpdated)]));
+  const hidden = new Set<number>();
   for (const a of actions) {
     if (a.action === "add") {
       if (a.taken) continue;
@@ -211,9 +276,13 @@ export function overlay(cards: Card[], actions: ActionRow[], snapUpdated: string
     } else if (isMove(a.action)) {
       const c = out.find((x) => x.id === a.card_id);
       if (c && a.made_at >= base.get(c.id)!) applyMove(c, a.action, a.made_at);
+    } else if (a.action === "delete" && a.card_id !== null && base.has(a.card_id) && a.made_at >= base.get(a.card_id)!) {
+      hidden.add(a.card_id);
+    } else if (a.action === "restore" && a.card_id !== null) {
+      hidden.delete(a.card_id);
     }
   }
-  return out;
+  return hidden.size ? out.filter((c) => !hidden.has(c.id)) : out;
 }
 
 function applyMove(c: Card, status: Status, at: string) {
@@ -238,6 +307,7 @@ async function boardBody(env: Env, userId: string, deviceId: string) {
     env.DB.prepare("SELECT COUNT(*) AS n FROM phone_actions WHERE user_id=? AND taken=0").bind(userId).first<{ n: number }>(),
     notApplied(env, userId, deviceId), accountMarker(userId)]);
   return { updated: snap?.updated ?? null, server_time: nowISO(), account, cards: overlay(snap?.cards ?? [], actions, snap?.updated ?? null),
+    ...(snap?.events ? { events: snap.events } : {}), ...(snap?.time_zone ? { time_zone: snap.time_zone } : {}),
     pending: waiting?.n ?? 0, superseded };
 }
 
@@ -264,6 +334,8 @@ route("PUT", "/v2/board", async (req, env, user) => {
   if (!rb.ok) return rb.tooLarge ? json({ error: "too large" }, 413) : json({ error: "Invalid JSON" }, 400);
   let cards: Card[];
   try { cards = parseCards(rb.body); } catch (e) { return json({ error: (e as Error).message }, 400); }
+  let events: BoardEvent[] | undefined, timeZone: string | undefined;
+  try { events = parseEvents(rb.body); timeZone = parseZone(rb.body.time_zone); } catch (e) { return json({ error: (e as Error).message }, 400); }
   const sentAt = rb.body.sent_at ?? null;
   if (sentAt !== null && !isIso(sentAt)) return json({ error: "sent_at must be an ISO date" }, 400);
   const skew = skewOf(sentAt, receivedMs);
@@ -298,7 +370,7 @@ route("PUT", "/v2/board", async (req, env, user) => {
     }
   }
   stmts.unshift(env.DB.prepare("INSERT INTO board_snapshots(user_id,data_enc,updated) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET data_enc=excluded.data_enc, updated=excluded.updated")
-    .bind(user.id, await encrypt(env, JSON.stringify({ cards })), now));
+    .bind(user.id, await encrypt(env, JSON.stringify({ cards, ...(events ? { events } : {}), ...(timeZone ? { time_zone: timeZone } : {}) })), now));
   await env.DB.batch(stmts);
   return json({ ok: true, count: cards.length });
 });
@@ -307,7 +379,8 @@ route("GET", "/v2/phone-actions", async (_req, env, user) => {
   const actions: PhoneAction[] = (await untaken(env, user.id)).map((a) => ({ id: a.id, client_id: a.client_id, card_id: a.card_id,
     action: a.action as PhoneAction["action"], title: a.title, group: a.group_name, created: a.created, made_at: a.made_at,
     ...(a.action === "link_email" && a.payload ? { email: JSON.parse(a.payload) as LinkedEmail } : {}),
-    ...(a.action === "watch_reply" && a.payload ? { reason: String(JSON.parse(a.payload).reason ?? "") } : {}) }));
+    ...(a.action === "watch_reply" && a.payload ? { reason: String(JSON.parse(a.payload).reason ?? "") } : {}),
+    ...(a.action === "delete" && a.payload ? { teach: String(JSON.parse(a.payload).teach ?? "") } : {}) }));
   return json({ server_time: nowISO(), actions });
 });
 
@@ -377,7 +450,7 @@ export async function handleBoard(req: Request, env: Env): Promise<Response | nu
   return null;
 }
 
-type Parsed = { card_id: number | null; action: PhoneAction["action"]; title: string | null; group: string | null; email?: LinkedEmail };
+type Parsed = { card_id: number | null; action: PhoneAction["action"]; title: string | null; group: string | null; email?: LinkedEmail; teach?: string };
 type Outcome = { accepted: string[]; dropped: { id: string | null; reason: string }[] } | { error: string; status: number };
 
 /** Validate one action's content (not its id or times); a message on anything off. */
@@ -406,7 +479,13 @@ function parseAction(body: any): Parsed | string {
     if (sent_at !== undefined && sent_at !== null && !isIso(sent_at)) return "sent_at must be an ISO date or null";
     return { card_id: body.card_id, action, title: null, group: null, email: { message_id, gmail_id, account, sent_at: sent_at ?? null } };
   }
-  return "action must be todo, doing, watch, done, add, link_email or unlink_email";
+  if (action === "delete" || action === "restore") {
+    if (!Number.isSafeInteger(body.card_id)) return "card_id must be an integer";
+    if (action === "restore" || body.teach === undefined || body.teach === null) return { card_id: body.card_id, action, title: null, group: null };
+    if (!(TEACH as readonly unknown[]).includes(body.teach)) return `teach must be one of ${TEACH.join(", ")}`;
+    return { card_id: body.card_id, action, title: null, group: null, teach: body.teach };
+  }
+  return "action must be todo, doing, watch, done, add, link_email, unlink_email, delete or restore";
 }
 
 type NewAction = Parsed & { clientId: string; madeAt: string; superseded: boolean };
@@ -422,10 +501,10 @@ async function store(env: Env, userId: string, deviceId: string, list: NewAction
     const id = crypto.randomUUID();
     stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO phone_actions(id,user_id,card_id,action,title,group_name,created,taken,client_id,device_id,made_at,sent_at,payload)
         VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?)`).bind(id, userId, a.card_id, a.action, a.title, a.group, now, a.clientId, deviceId, a.madeAt, sentAt,
-      a.email ? JSON.stringify(a.email) : null));
+      a.email ? JSON.stringify(a.email) : a.teach ? JSON.stringify({ teach: a.teach }) : null));
     // The log says a link was made or removed, never which email.
-    stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : isMove(a.action) ? "status" : "link",
-      value: a.action === "add" ? await encrypt(env, a.title!) : a.action, madeAt: a.madeAt, receivedAt: now, clientId: a.clientId }));
+    stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : isMove(a.action) ? "status" : a.action === "delete" || a.action === "restore" ? a.action : "link",
+      value: a.action === "add" ? await encrypt(env, a.title!) : a.action === "delete" ? (a.teach ?? null) : a.action, madeAt: a.madeAt, receivedAt: now, clientId: a.clientId }));
     if (a.superseded) stmts.push(...supersedeStmts(env, userId, { id, client_id: a.clientId, card_id: a.card_id }, deviceId, now));
   }
   if (stmts.length) await env.DB.batch(stmts);
@@ -469,7 +548,7 @@ async function doSingle(env: Env, userId: string, deviceId: string, body: any, r
   const clientId = crypto.randomUUID();
   const madeAt = iso(receivedMs);
   if (p.email && !(await ownGmail(env, userId, p.email.account))) return { error: "account must be one of your Gmail inboxes", status: 400 };
-  const err = await store(env, userId, deviceId, [{ ...p, clientId, madeAt, superseded: !!c && isMove(p.action) && madeAt < statusAt(c, snap!.updated) }], null, receivedMs);
+  const err = await store(env, userId, deviceId, [{ ...p, clientId, madeAt, superseded: !!c && newestWins(p.action) && madeAt < statusAt(c, snap!.updated) }], null, receivedMs);
   return err ? { error: err, status: 429 } : { accepted: [clientId], dropped: [] };
 }
 
@@ -501,11 +580,14 @@ async function doBatch(env: Env, userId: string, deviceId: string, body: any, re
     if (typeof p === "string" || (p.email && !mine.has(p.email.account))) { dropped.push({ id: typeof a?.id === "string" ? a.id.slice(0, 64) : null, reason: "invalid" }); return; }
     if (already.has(a.id) || inBatch.has(a.id)) { accepted.push(a.id); return; }
     const c = p.card_id === null ? undefined : cards.get(p.card_id);
-    if (p.card_id !== null && !c) { dropped.push({ id: a.id, reason: gone.has(p.card_id) ? "card gone" : "unknown card" }); return; }
+    // A restore is for a card the Mac already deleted (gone from its copy): accepted when the board ever had it.
+    if (p.card_id !== null && !c && !(p.action === "restore" && gone.has(p.card_id))) {
+      dropped.push({ id: a.id, reason: gone.has(p.card_id) ? "card gone" : "unknown card" }); return;
+    }
     const madeAt = corrected(a.made_at, skew, receivedMs) ?? iso(receivedMs);
     inBatch.add(a.id);
     accepted.push(a.id);
-    fresh.push({ ...p, clientId: a.id, madeAt, superseded: !!c && isMove(p.action) && madeAt < statusAt(c, snap!.updated) });
+    fresh.push({ ...p, clientId: a.id, madeAt, superseded: !!c && newestWins(p.action) && madeAt < statusAt(c, snap!.updated) });
   });
   const err = await store(env, userId, deviceId, fresh, sentAt, receivedMs);
   return err ? { error: err, status: 429 } : { accepted, dropped };

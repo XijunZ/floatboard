@@ -12,9 +12,9 @@ public final class Store: ObservableObject {
     @Published public private(set) var connectors: [ConnectorInfo] = []
     @Published public var lastError: String?
     /// The most recently deleted task (Undo bar and Edit → Undo Delete); cleared by undo or the next app start.
-    @Published public private(set) var lastDeleted: DeletedTask?
-    /// The outbox row that delete queued, so undo can take it back before it is sent.
-    private var lastDeletedOutbox: String?
+    @Published public internal(set) var lastDeleted: DeletedTask?
+    /// What recent deletes took away, by task (`DeleteMemo`), so undo or a phone restore can put back exactly that.
+    var deleteMemos: [Int64: DeleteMemo] = [:]
     /// What the health watchdog last found (set by `Health.refresh`); the bar warning reads this and nothing else.
     @Published public internal(set) var healthProblems: [HealthProblem] = []
     public let db: DB
@@ -23,6 +23,8 @@ public final class Store: ObservableObject {
     var txActivity: [(Date, String, ActivityLevel, String, String?, String?)] = []
     /// Outbox rows whose send request is on the wire (set by the connector sync around the request).
     var outboxInFlight = Set<String>()
+    /// Calendar outbox rows on their way to Google (set by the calendar sender around the request).
+    var calendarInFlight = Set<String>()
 
     public init(db: DB) {
         self.db = db
@@ -44,7 +46,7 @@ public final class Store: ObservableObject {
                        source,external_id,source_link,source_meta,imported_at,
                        source_mid,source_sent,withdrawn,ai_summary,connector,
                        reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at,
-                       watch_person,watch_contact,watch_since
+                       watch_person,watch_contact,watch_since,due_day,due_has_time,gcal_calendar,gcal_event
                 FROM cards WHERE deleted=0 ORDER BY created
                 """) { s in
                 var c = Card(
@@ -77,7 +79,10 @@ public final class Store: ObservableObject {
                     replyDraftRequest: DB.text(s, 26),
                     replyDraftSentAt: DB.date(s, 27)
                 )
+                c.gcalCalendar = DB.text(s, 33); c.gcalEvent = DB.text(s, 34)
                 c.watchPerson = DB.text(s, 28); c.watchContact = DB.text(s, 29); c.watchSince = DB.date(s, 30)
+                (c.due, c.dueHasTime) = Self.loadedDue(due: c.due, day: sqlite3_column_type(s, 31) == SQLITE_NULL ? nil : DB.text(s, 31),
+                                                       hasTime: DB.int(s, 32) != 0)
                 return c
             }
         } catch {
@@ -87,6 +92,14 @@ public final class Store: ObservableObject {
         do { connectors = try loadConnectors() } catch {
             activity("store", .error, "Could not read the connectors list", detail: "\(error)")
         }
+    }
+
+    /// A stored due as the card shows it. A date-only due is rebuilt from its day in the app's zone, so a zone change
+    /// leaves it on the same day; a timed due is the stored instant.
+    static func loadedDue(due: Date?, day: String?, hasTime: Bool) -> (Date?, Bool) {
+        if hasTime { return (due, due != nil) }
+        if let day, let start = Due.startOfDay(day) { return (start, false) }
+        return (due, false)
     }
 
     // MARK: Views of the data
@@ -123,16 +136,17 @@ public final class Store: ObservableObject {
     // MARK: Changes
 
     /// A new task of the user's, straight into any step (To do by default).
-    public func add(title: String, area: String, importance: Importance, due: Date?, status: Status = .todo) {
+    public func add(title: String, area: String, importance: Importance, due: Date?, dueHasTime: Bool = false, status: Status = .todo) {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         let now = Date()
         let started: Date? = status == .doing ? now : nil
         let done: Date? = status == .done ? now : nil
+        let d = Due.stored(due, hasTime: dueHasTime)
         perform {
             let id = try db.run(
-                "INSERT INTO cards(title,area,importance,due,status,created,started,done,updated) VALUES(?,?,?,?,?,?,?,?,?)",
-                [t, area, importance.rawValue, due, status.rawValue, now, started, done, now])
+                "INSERT INTO cards(title,area,importance,due,due_day,due_has_time,status,created,started,done,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                [t, area, importance.rawValue, d.due, d.day, d.hasTime, status.rawValue, now, started, done, now])
             try log(id, "created", nil, status, now)
         }
     }
@@ -162,13 +176,39 @@ public final class Store: ObservableObject {
     public func update(_ card: Card, now: Date = Date()) {
         perform {
             let old = try currentCard(card.id)?.card
-            try db.run("UPDATE cards SET title=?, notes=?, area=?, importance=?, due=?, link=?, updated=? WHERE id=?",
-                       [card.title, card.notes, card.area, card.importance.rawValue, card.due,
+            let d = Due.stored(card.due, hasTime: card.dueHasTime)
+            try db.run("UPDATE cards SET title=?, notes=?, area=?, importance=?, due=?, due_day=?, due_has_time=?, link=?, updated=? WHERE id=?",
+                       [card.title, card.notes, card.area, card.importance.rawValue, d.due, d.day, d.hasTime,
                         card.link.trimmingCharacters(in: .whitespaces), now, card.id])
             try log(card.id, "edited", nil, nil, now)
-            if let old { var new = old; new.title = card.title; new.area = card.area; new.importance = card.importance; new.due = card.due
+            if let old { var new = old; new.title = card.title; new.area = card.area; new.importance = card.importance
+                new.due = card.due; new.dueHasTime = card.dueHasTime
+                // Per-field history (calendar sync compares it with Google's update time), and the task's event follows.
+                try recordFieldChanges(old: old, new: new, actor: .user, now: now)
+                try queueCalendarPatch(old: old, new: new, now: now)
                 try queueChange(old: old, new: new, now: now) }
         }
+    }
+
+    /// Sets a task's due: the `day` (read in the app's zone), with a time of day if `time` is given, otherwise date-only.
+    public func setDue(_ cardID: Int64, day: Date, time: DateComponents?, actor: Actor, now: Date = Date()) {
+        perform { try setDueRow(cardID, day: day, time: time, actor: actor, now: now, patchCalendar: actor == .user) }
+    }
+
+    /// The body of `setDue`, for callers already inside a transaction. `patchCalendar` is false when the change came from
+    /// the calendar itself (it must not be sent back) or is queued some other way.
+    func setDueRow(_ cardID: Int64, day: Date, time: DateComponents?, actor: Actor, now: Date, patchCalendar: Bool) throws {
+        let cal = AppTime.calendar
+        let start = cal.startOfDay(for: day)
+        var due = start
+        if let time { due = cal.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0, second: 0, of: start) ?? start }
+        let d = Due.stored(due, hasTime: time != nil)
+        let old = try currentCard(cardID)?.card
+        try db.run("UPDATE cards SET due=?, due_day=?, due_has_time=?, updated=? WHERE id=?", [d.due, d.day, d.hasTime, now, cardID])
+        try insertEvent(cardID, "due: " + (d.due.map { Fmt.due($0, hasTime: d.hasTime == 1) } ?? "none"), actor: actor, at: now)
+        if let old { var new = old; new.due = d.due; new.dueHasTime = d.hasTime == 1
+            if patchCalendar { try queueCalendarPatch(old: old, new: new, now: now) }
+            try queueChange(old: old, new: new, now: now) }
     }
 
     public func setImportance(_ card: Card, _ importance: Importance, now: Date = Date()) {
@@ -193,6 +233,14 @@ public final class Store: ObservableObject {
         }
     }
 
+    /// How long the board's Undo bar stays up after a delete.
+    public static let undoBarSeconds: TimeInterval = 8
+    /// How long a calendar delete waits before it may be sent: a little longer than the Undo bar, so Undo always wins.
+    public static let calendarDeleteDelay: TimeInterval = undoBarSeconds + 2
+    /// The same for a delete made on the phone: the Mac reads the phone's changes every 120 s (`ConnectorSync.phonePollInterval`),
+    /// so the phone's Undo (8 s) can arrive up to about 128 s after its delete; the Google delete waits that long and a margin.
+    public static let phoneCalendarDeleteDelay: TimeInterval = 120 + undoBarSeconds + 7
+
     /// Soft delete: the row stays in the database (and in exports) for the record.
     public func delete(_ card: Card) { deleteCard(card, verdict: nil) }
 
@@ -200,28 +248,53 @@ public final class Store: ObservableObject {
     /// `not_action` / `wrong_details` / `duplicate`, a correction) in the same transaction. The engine learns from the
     /// first two; `duplicate` is only logged there.
     public func deleteCard(_ card: Card, verdict: String?, now: Date = Date()) {
-        var done: (DeletedTask, String?)?
-        perform {
-            guard let cur = try currentCard(card.id), !cur.deleted else { return }
-            try db.run("UPDATE cards SET deleted=1, updated=? WHERE id=?", [now, card.id])
-            try log(card.id, "deleted", cur.card.status, nil, now)
-            let uuid = try queueOutbox(cur.card, kind: .deleted, verdict: verdict, now: now)
-            done = (DeletedTask(id: card.id, title: cur.card.title, at: now), uuid)
-        }
-        if let done { lastDeleted = done.0; lastDeletedOutbox = done.1 }
+        var done: DeleteMemo?
+        perform { done = try deleteCardRow(card.id, verdict: verdict, now: now) }
+        if let done { remember(done); lastDeleted = done.task }
+    }
+
+    /// The body of `deleteCard`, for callers already inside a transaction (the phone's `delete`). Nil when the task is
+    /// not there or already deleted.
+    func deleteCardRow(_ id: Int64, verdict: String?, now: Date, calendarDelay: TimeInterval = Store.calendarDeleteDelay) throws -> DeleteMemo? {
+        guard let cur = try currentCard(id), !cur.deleted else { return nil }
+        try db.run("UPDATE cards SET deleted=1, updated=? WHERE id=?", [now, id])
+        try log(id, "deleted", cur.card.status, nil, now)
+        let uuid = try queueOutbox(cur.card, kind: .deleted, verdict: verdict, now: now)
+        let links = try removeLinks(of: ShortID(kind: .task, number: id))
+        let event = try queueCalendarDelete(cardID: id, now: now, delay: calendarDelay)   // the event FloatBoard made for it goes too (D8)
+        return DeleteMemo(task: DeletedTask(id: id, title: cur.card.title, at: now), outbox: uuid, links: links, event: event)
+    }
+
+    /// Keeps what a delete took away (the last 50 deletes, from the Mac or the phone), so undo or a phone restore can put
+    /// it back exactly.
+    func remember(_ m: DeleteMemo) {
+        deleteMemos[m.task.id] = m
+        if deleteMemos.count > 50, let oldest = deleteMemos.values.min(by: { $0.task.at < $1.task.at }) { deleteMemos[oldest.task.id] = nil }
     }
 
     /// Brings the last deleted task back where it was. A delete not yet sent to its connector is taken back with its
     /// lesson; one already sent stays sent (a plain delete changes nothing there; a "teach" lesson is kept).
     public func undoDelete(now: Date = Date()) {
         guard let d = lastDeleted else { return }
-        let outbox = lastDeletedOutbox
-        perform {
-            guard let row = try db.query("SELECT status, deleted FROM cards WHERE id=?", [d.id], {
-                (Status(rawValue: DB.text($0, 0)) ?? .todo, DB.int($0, 1) != 0) }).first, row.1 else { return }
-            try db.run("UPDATE cards SET deleted=0, updated=? WHERE id=?", [now, d.id])
-            try log(d.id, "restored", nil, row.0, now)
-            if let uuid = outbox {
+        let memo = deleteMemos[d.id]
+        perform { _ = try restoreCardRow(d.id, memo: memo, now: now) }
+        lastDeleted = nil; deleteMemos[d.id] = nil
+    }
+
+    /// The body of a restore (Undo Delete, or the phone's `restore`), inside a transaction. With what the delete took away
+    /// (`memo`): the same links come back, an unsent connector delete is taken back with its lesson, and the calendar event
+    /// is kept or made again (`undoCalendarDelete`). Without it (the app was restarted since): the task comes back and its
+    /// event's latest queued delete is taken back the same way; the connector, if it was told, stays told.
+    /// Returns false when the task is not deleted (nothing to do).
+    func restoreCardRow(_ id: Int64, memo: DeleteMemo?, now: Date) throws -> Bool {
+        guard let row = try db.query("SELECT status, deleted FROM cards WHERE id=?", [id], {
+            (Status(rawValue: DB.text($0, 0)) ?? .todo, DB.int($0, 1) != 0) }).first, row.1 else { return false }
+        try db.run("UPDATE cards SET deleted=0, updated=? WHERE id=?", [now, id])
+        try log(id, "restored", nil, row.0, now)
+        if let memo {
+            try restoreLinks(memo.links)
+            if let event = memo.event { try undoCalendarDelete(cardID: id, target: event.link, row: event.row, now: now) }
+            if let uuid = memo.outbox {
                 let unsent = try db.query("SELECT count(*) FROM outbox WHERE uuid=? AND sent IS NULL", [uuid]) { DB.int($0, 0) }.first ?? 0
                 if unsent > 0 && !outboxInFlight.contains(uuid) {
                     try db.run("DELETE FROM outbox WHERE uuid=?", [uuid])
@@ -231,8 +304,12 @@ public final class Store: ObservableObject {
                     activity("outbox", .info, "Delete undone; the connector had already been told", trace: uuid)
                 }
             }
+        } else if let t = try eventTarget(id), let deleteRow = try db.query("""
+            SELECT uuid FROM cal_outbox WHERE kind='delete' AND account=? AND calendar_id=? AND event_id=? ORDER BY created DESC, rowid DESC LIMIT 1
+            """, [t.account, t.calendar, t.event], { DB.text($0, 0) }).first {
+            try undoCalendarDelete(cardID: id, target: t, row: deleteRow, now: now)
         }
-        lastDeleted = nil; lastDeletedOutbox = nil
+        return true
     }
 
     /// Hide the Undo bar (the menu item still works until the next delete).
@@ -332,14 +409,15 @@ public final class Store: ObservableObject {
     /// The one place connector cards are inserted. Writes the card and its "created" history row, attributed to
     /// the connector. Must run inside a transaction.
     @discardableResult
-    func insertConnectorCard(connector: String, title: String, area: String, importance: Int, due: Date?, externalID: String,
+    func insertConnectorCard(connector: String, title: String, area: String, importance: Int, due: Date?, dueHasTime: Bool = false, externalID: String,
                              sourceKey: (mid: String, sent: String?)?, sourceLink: String, metaJSON: String,
                              proposalJSON: String, aiSummary: String = "", now: Date) throws -> Int64 {
+        let d = Due.stored(due, hasTime: dueHasTime)
         let id = try db.run("""
-            INSERT INTO cards(title,area,importance,due,status,created,updated,source,external_id,source_link,source_meta,imported_at,
+            INSERT INTO cards(title,area,importance,due,due_day,due_has_time,status,created,updated,source,external_id,source_link,source_meta,imported_at,
                               connector,source_mid,source_sent,proposal_json,ai_summary)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, [title, area, importance, due, Status.todo.rawValue, now, now, connector, externalID, sourceLink, metaJSON, now,
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, [title, area, importance, d.due, d.day, d.hasTime, Status.todo.rawValue, now, now, connector, externalID, sourceLink, metaJSON, now,
                   connector, sourceKey?.mid, sourceKey?.sent, proposalJSON, aiSummary])
         try insertEvent(id, "created (from \(connector))", to: .todo, actor: .connector(connector), at: now)
         return id
@@ -456,19 +534,6 @@ public final class Store: ObservableObject {
         let summary = current.isEmpty ? text : current + "\n\n" + text
         try db.run("UPDATE cards SET ai_summary=?, updated=? WHERE id=?", [summary, now, cardID])
         try insertEvent(cardID, kind, actor: actor, at: now)
-    }
-
-    /// Record that a task is now in Google Calendar; keep the Meet link on the task if it got one.
-    public func markInCalendar(_ card: Card, account: String, eventID: String, htmlLink: String, meetLink: String?) {
-        let now = Date()
-        perform {
-            try db.run("UPDATE cards SET gcal_account=?, gcal_event=?, gcal_link=?, updated=? WHERE id=?",
-                       [account, eventID, htmlLink, now, card.id])
-            if let meet = meetLink, card.link.trimmingCharacters(in: .whitespaces).isEmpty {
-                try db.run("UPDATE cards SET link=? WHERE id=?", [meet, card.id])
-            }
-            try insertEvent(card.id, "added to Google Calendar (\(account))", actor: .user, at: now)
-        }
     }
 
     // MARK: Groups
@@ -642,6 +707,16 @@ public enum ReplyDraftRequestError: Error, Equatable, CustomStringConvertible {
 }
 
 /// The last deleted task, for undo.
+/// What one delete took away: the connector outbox row it queued (undo takes it back before it is sent), the links it
+/// took off the task, and the Google event queued for deletion with the calendar outbox row that deletes it (undo takes the
+/// delete back, or once sent, makes the event again).
+struct DeleteMemo {
+    var task: DeletedTask
+    var outbox: String?
+    var links: [StoredLink]
+    var event: (link: EventLink, row: String)?
+}
+
 public struct DeletedTask: Equatable {
     public let id: Int64
     public let title: String

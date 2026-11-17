@@ -60,6 +60,9 @@ public struct Card: Identifiable, Equatable {
     /// Set once the task has been added to Google Calendar from FloatBoard.
     public var gcalAccount: String = ""
     public var gcalLink: String = ""
+    /// The calendar and Google event id of the task's event (empty when it has none).
+    public var gcalCalendar: String = ""
+    public var gcalEvent: String = ""
     /// Set when a connector created the card (e.g. "email"); empty for cards typed in.
     public var source: String = ""
     public var externalID: String = ""
@@ -89,6 +92,9 @@ public struct Card: Identifiable, Equatable {
     public var watchPerson: String = ""
     public var watchContact: String = ""
     public var watchSince: Date? = nil
+    /// Whether `due` carries a time of day. Stored, not guessed from the clock, so a time zone change never turns a
+    /// date-only task into a timed one (or the reverse).
+    public var dueHasTime: Bool = false
 
     public init(id: Int64, title: String, notes: String, area: String, importance: Importance, due: Date?, status: Status,
                 created: Date, started: Date?, done: Date?, link: String = "", gcalAccount: String = "",
@@ -96,7 +102,9 @@ public struct Card: Identifiable, Equatable {
                 sourceMeta: [String: String] = [:], importedAt: Date? = nil, sourceKey: SourceKey? = nil,
                 withdrawn: Bool = false, aiSummary: String = "", connector: String = "",
                 replyDraftState: ReplyDraftState? = nil, replyDraftLink: String = "", replyDraftError: String = "",
-                replyDraftRequest: String = "", replyDraftSentAt: Date? = nil) {
+                replyDraftRequest: String = "", replyDraftSentAt: Date? = nil, dueHasTime: Bool = false, gcalCalendar: String = "", gcalEvent: String = "") {
+        self.dueHasTime = dueHasTime
+        self.gcalCalendar = gcalCalendar; self.gcalEvent = gcalEvent
         self.replyDraftState = replyDraftState; self.replyDraftLink = replyDraftLink; self.replyDraftError = replyDraftError
         self.replyDraftRequest = replyDraftRequest; self.replyDraftSentAt = replyDraftSentAt
         self.sourceKey = sourceKey; self.withdrawn = withdrawn; self.aiSummary = aiSummary; self.connector = connector
@@ -128,13 +136,16 @@ public struct Card: Identifiable, Equatable {
         let dates: String
         if dueHasTime {
             let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
             f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
             f.timeZone = TimeZone(identifier: "UTC")
             dates = f.string(from: due) + "/" + f.string(from: due.addingTimeInterval(30 * 60))
         } else {
             let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = AppTime.zone
             f.dateFormat = "yyyyMMdd"
-            let next = Calendar.current.date(byAdding: .day, value: 1, to: due) ?? due
+            let next = AppTime.calendar.date(byAdding: .day, value: 1, to: due) ?? due
             dates = f.string(from: due) + "/" + f.string(from: next)
         }
         var details = notes
@@ -166,13 +177,10 @@ public struct Card: Identifiable, Equatable {
         return from.isEmpty ? "Source" : from
     }
 
-    /// Due dates without a time are stored at 00:00; anything else has a time (e.g. a meeting).
-    public var dueHasTime: Bool { due.map(Due.hasTime) ?? false }
-
     /// 0 = due today, 1 = tomorrow, negative = overdue, nil = no due date. Done tasks return nil.
-    var dueInDays: Int? {
+    public var dueInDays: Int? {
         guard let due, status != .done else { return nil }
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         return cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: due)).day
     }
 
@@ -190,7 +198,8 @@ public struct Card: Identifiable, Equatable {
     public var isOverdue: Bool {
         guard let due, status != .done else { return false }
         if dueHasTime { return due < Date() }
-        return Calendar.current.startOfDay(for: due) < Calendar.current.startOfDay(for: Date())
+        let cal = AppTime.calendar
+        return cal.startOfDay(for: due) < cal.startOfDay(for: Date())
     }
 
     /// For ordering: a date-only task counts as due at the end of that day,
@@ -198,31 +207,60 @@ public struct Card: Identifiable, Equatable {
     public var dueSortKey: Date? {
         guard let due else { return nil }
         if dueHasTime { return due }
-        return Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: Calendar.current.startOfDay(for: due))
+        let cal = AppTime.calendar
+        return cal.date(byAdding: DateComponents(day: 1, second: -1), to: cal.startOfDay(for: due))
     }
 }
 
-/// Search: every word in the query must appear somewhere in the task (any order, any case).
+/// Search: every word in the query must appear somewhere in the task (any order, any case). A query that is an id
+/// ("T-142") finds exactly that task, never T-1420 or a task that mentions the id.
 public enum Search {
     public static func words(_ q: String) -> [String] {
         q.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
     }
     public static func matches(_ card: Card, _ q: String) -> Bool {
+        if let id = ShortID.parse(q) { return id == ShortID(kind: .task, number: card.id) }
         let w = words(q)
         guard !w.isEmpty else { return true }
-        let hay = [card.title, card.notes, card.area, card.link].joined(separator: " ")
+        let hay = [card.title, card.notes, card.area, card.link, ShortID(kind: .task, number: card.id).text].joined(separator: " ")
         return w.allSatisfy { hay.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
     }
 }
 
 public enum Due {
+    /// The old rule: a due at 00:00 in this Mac's zone has no time. Only the upgrade to schema 11 uses it, to fill in
+    /// the stored flag for tasks made before it existed.
     public static func hasTime(_ d: Date) -> Bool {
         let c = Calendar.current.dateComponents([.hour, .minute], from: d)
         return (c.hour ?? 0) != 0 || (c.minute ?? 0) != 0
     }
+    /// Whether `d` is not midnight in `calendar`'s zone (the app's, by default).
+    public static func hasTime(_ d: Date, in calendar: Calendar) -> Bool {
+        let c = calendar.dateComponents([.hour, .minute], from: d)
+        return (c.hour ?? 0) != 0 || (c.minute ?? 0) != 0
+    }
+    /// The calendar day of `d` in the app's zone, "yyyy-MM-dd": how a date-only due is stored.
+    public static func dayString(_ d: Date) -> String {
+        let c = AppTime.calendar.dateComponents([.year, .month, .day], from: d)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+    /// The start of a stored "yyyy-MM-dd" day in the app's zone; nil if it is not a real day.
+    public static func startOfDay(_ s: String) -> Date? {
+        let p = s.split(separator: "-").compactMap { Int($0) }
+        guard p.count == 3 else { return nil }
+        return AppTime.calendar.date(from: DateComponents(year: p[0], month: p[1], day: p[2]))
+    }
+    /// What a due is stored as: (due instant, day, has-time flag). A date-only due is the start of its day in the
+    /// app's zone with its day kept apart; a timed due is the instant and has no day.
+    static func stored(_ due: Date?, hasTime: Bool) -> (due: Date?, day: String?, hasTime: Int) {
+        guard let due else { return (nil, nil, 0) }
+        if hasTime { return (due, nil, 1) }
+        let day = dayString(due)
+        return (startOfDay(day) ?? due, day, 0)
+    }
     /// Day from `day`, plus hour:minute from `time` if given; otherwise 00:00 (date only).
     public static func combine(day: Date, time: Date?) -> Date {
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         let start = cal.startOfDay(for: day)
         guard let time else { return start }
         let t = cal.dateComponents([.hour, .minute], from: time)
@@ -230,32 +268,41 @@ public enum Due {
     }
     /// A sensible default time for a new meeting: next whole hour.
     public static var nextHour: Date {
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         let h = cal.component(.hour, from: Date())
         return cal.date(bySettingHour: min(h + 1, 23), minute: 0, second: 0, of: Date()) ?? Date()
     }
 }
 
 public enum Fmt {
-    private static let day: DateFormatter = make("yyyy-MM-dd")
-    private static let dayYear: DateFormatter = make("yyyy-MM-dd")
-    private static let dayTime: DateFormatter = make("yyyy-MM-dd HH:mm")
-    private static let time: DateFormatter = make("HH:mm")
-    private static let longDay: DateFormatter = make("yyyy-MM-dd EEEE")
-    private static let csv: DateFormatter = make("yyyy-MM-dd HH:mm")
+    /// Formatters are cached per pattern and zone, and the zone is read at every call, so a change of time zone shows at once.
+    nonisolated(unsafe) private static var cache: [String: DateFormatter] = [:]
+    private static let lock = NSLock()
 
-    private static func make(_ f: String) -> DateFormatter {
-        let d = DateFormatter(); d.locale = Locale(identifier: "en_US_POSIX"); d.dateFormat = f; return d
+    private static func formatter(_ f: String) -> DateFormatter {
+        let zone = AppTime.zone
+        let key = f + "|" + zone.identifier
+        lock.lock(); defer { lock.unlock() }
+        if let d = cache[key] { return d }
+        let d = DateFormatter(); d.locale = Locale(identifier: "en_US_POSIX"); d.timeZone = zone; d.dateFormat = f
+        cache[key] = d
+        return d
     }
     public static func short(_ d: Date) -> String {
-        Calendar.current.isDate(d, equalTo: Date(), toGranularity: .year) ? day.string(from: d) : dayYear.string(from: d)
+        let f = formatter("yyyy-MM-dd")
+        return f.string(from: d)
     }
-    public static func withTime(_ d: Date) -> String { dayTime.string(from: d) }
+    public static func withTime(_ d: Date) -> String { formatter("yyyy-MM-dd HH:mm").string(from: d) }
     /// "12 Nov" for date-only, "12 Nov 14:30" when a time is set.
-    public static func due(_ d: Date) -> String { Due.hasTime(d) ? withTime(d) : short(d) }
-    public static func clock(_ d: Date) -> String { time.string(from: d) }
-    public static func heading(_ d: Date) -> String { longDay.string(from: d) }
-    public static func csvDate(_ d: Date?) -> String { d.map { csv.string(from: $0) } ?? "" }
+    public static func due(_ d: Date, hasTime: Bool) -> String { hasTime ? withTime(d) : short(d) }
+    public static func clock(_ d: Date) -> String { formatter("HH:mm").string(from: d) }
+    /// A meeting's time in a short line: "Thu 11:00" within a few days of `now`, "12 Nov 11:00" otherwise.
+    public static func meeting(_ d: Date, now: Date = Date()) -> String {
+        let near = abs(d.timeIntervalSince(now)) < 5 * 86400
+        return formatter(near ? "EEE HH:mm" : "d MMM HH:mm").string(from: d)
+    }
+    public static func heading(_ d: Date) -> String { formatter("yyyy-MM-dd EEEE").string(from: d) }
+    public static func csvDate(_ d: Date?) -> String { d.map { formatter("yyyy-MM-dd HH:mm").string(from: $0) } ?? "" }
     public static func duration(from a: Date, to b: Date) -> String {
         let mins = Int(b.timeIntervalSince(a) / 60)
         if mins < 60 { return "\(max(mins, 1))m" }

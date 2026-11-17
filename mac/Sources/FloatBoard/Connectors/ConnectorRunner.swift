@@ -74,6 +74,7 @@ final class ConnectorRunner {
             let ok = path.status == .satisfied
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
+                    Health.isOnline = ok
                     guard let self else { return }
                     if ok && !self.wasSatisfied {
                         self.store.retryOutboxNow(now: Date())   // changes backed off while offline go out now, not up to an hour later

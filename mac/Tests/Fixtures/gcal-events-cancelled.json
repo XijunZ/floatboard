@@ -1,0 +1,11 @@
+{
+  "_note": "documented shape; recapture live after reconnect",
+  "kind": "calendar#events", "timeZone": "Europe/London", "accessRole": "owner",
+  "nextSyncToken": "SyncTokenExample2",
+  "items": [
+    {"kind": "calendar#event", "id": "evt1example", "status": "cancelled"},
+    {"kind": "calendar#event", "id": "evt6changed", "status": "confirmed", "summary": "Moved lunch",
+     "start": {"dateTime": "2026-11-27T12:30:00Z"}, "end": {"dateTime": "2026-11-27T13:30:00Z"},
+     "updated": "2026-11-15T08:00:00Z"}
+  ]
+}

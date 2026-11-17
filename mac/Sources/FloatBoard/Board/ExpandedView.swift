@@ -12,7 +12,7 @@ struct ExpandedView: View {
     /// Step the new task goes into; back to To do after each add.
     @State private var newStatus: Status = .todo
     @State private var hasDue = false
-    @State private var newDue = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var newDue = AppTime.calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     @State private var hasTime = false
     @State private var newTime = Due.nextHour
     enum AddField: String, Hashable { case status, title, importance, group }
@@ -31,10 +31,8 @@ struct ExpandedView: View {
                 HStack(alignment: .top, spacing: 10) {
                     ForEach(Status.allCases) { Column(status: $0) }
                 }
-            case .bar:
-                BarSettingsView()
-            case .groups:
-                GroupsView()
+            case .calendar:
+                CalendarView()
             case .settings:
                 SettingsView()
             }
@@ -79,12 +77,7 @@ struct ExpandedView: View {
     /// Native toolbar: tabs in the middle, Guide and pin on the right (search is the system search field).
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Picker("View", selection: $ui.tab) {
-                ForEach(UIState.Tab.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
+            TabPicker(tab: $ui.tab)
         }
         // Push search / Guide / Pin to the right edge.
         if #available(macOS 26.0, *) { ToolbarSpacer(.flexible) }
@@ -232,13 +225,13 @@ struct ExpandedView: View {
     private func add() {
         guard !newTitle.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         store.add(title: newTitle, area: store.resolve(newArea), importance: newImportance,
-                  due: hasDue ? Due.combine(day: newDue, time: hasTime ? newTime : nil) : nil, status: newStatus)
+                  due: hasDue ? Due.combine(day: newDue, time: hasTime ? newTime : nil) : nil, dueHasTime: hasDue && hasTime, status: newStatus)
         newTitle = ""
         newStatus = .todo
         // Next task starts fresh: no due date or time.
         hasDue = false
         hasTime = false
-        newDue = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        newDue = AppTime.calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date()
         newTime = Due.nextHour
         addField = .title
         nav = "title"
@@ -258,3 +251,16 @@ extension SortKey {
     }
 }
 
+
+/// The window's tabs (in the toolbar).
+struct TabPicker: View {
+    @Binding var tab: UIState.Tab
+    var body: some View {
+        Picker("View", selection: $tab) {
+            ForEach(UIState.Tab.allCases, id: \.self) { Text($0.title).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+    }
+}

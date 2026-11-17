@@ -8,7 +8,7 @@ import SQLite3
 public enum Reconciler {
     /// "YYYY-MM-DD" -> 00:00 that day (the board's "no time" convention); "YYYY-MM-DDTHH:mm" -> that wall-clock time.
     /// Both are read in `zone`, the device's time zone unless given (the engine is told the same zone). Nil if invalid.
-    public static func parseDue(_ s: String, in zone: TimeZone = .current) -> Date? {
+    public static func parseDue(_ s: String, in zone: TimeZone = AppTime.zone) -> Date? {
         let parts = s.split(separator: "T", omittingEmptySubsequences: false).map(String.init)
         guard parts.count <= 2 else { return nil }
         let ymd = parts[0].split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
@@ -30,7 +30,7 @@ public enum Reconciler {
     }
 
     private struct Row {
-        var id: Int64, title: String, area: String, importance: Int, due: Date?, deleted: Bool, withdrawn: Bool
+        var id: Int64, title: String, area: String, importance: Int, due: Date?, dueHasTime: Bool, deleted: Bool, withdrawn: Bool
         var sent: String?, proposalJSON: String, sourceLink: String, metaJSON: String, aiSummary: String
     }
 
@@ -116,9 +116,10 @@ public enum Reconciler {
                 let title = p.title.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !title.isEmpty else { info("Ignored task with an empty title", .warning); return }
                 guard autoAdd else { info("Not added (auto-add is off)"); return }
+                let newDue = dueValue(p, info)
                 let newID = try store.insertConnectorCard(
                     connector: connector, title: title, area: area(p, store, defaultGroup), importance: min(max(p.importance, 0), 2),
-                    due: dueValue(p, info).date, externalID: "\(connector):\(key.messageID)", sourceKey: (key.messageID, key.sentAt),
+                    due: newDue.date, dueHasTime: newDue.hasTime, externalID: "\(connector):\(key.messageID)", sourceKey: (key.messageID, key.sentAt),
                     sourceLink: p.link, metaJSON: try meta(p, merging: [:]), proposalJSON: try json(p),
                     aiSummary: (p.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines), now: now)
                 sum.added += 1
@@ -133,6 +134,8 @@ public enum Reconciler {
             }
             let parsedDue = dueValue(p, info)
             let newDue = parsedDue.invalid ? row.due : parsedDue.date   // unreadable due: keep what the card has
+            let newHasTime = parsedDue.invalid ? row.dueHasTime : parsedDue.hasTime
+            let stored = Due.stored(newDue, hasTime: newHasTime)
             let newArea = area(p, store, defaultGroup), imp = min(max(p.importance, 0), 2)
             let title = p.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let (oldMeta, metaUnreadable) = metaDict(row.metaJSON)
@@ -143,7 +146,7 @@ public enum Reconciler {
             if !title.isEmpty && title != row.title { changed.append("title") }
             if newArea != row.area { changed.append("group") }
             if imp != row.importance { changed.append("importance") }
-            if newDue != row.due { changed.append("due") }
+            if newDue != row.due || (newDue != nil && newHasTime != row.dueHasTime) { changed.append("due") }
             if oldWhy != p.why { changed.append("why") }
             if p.link != row.sourceLink { changed.append("link") }
             if store.isTouched(row.id) {
@@ -154,8 +157,8 @@ public enum Reconciler {
             let restore = row.withdrawn
             if changed.isEmpty && !restore { sum.skippedExisting += 1; return }
             try store.db.run("""
-                UPDATE cards SET withdrawn=0, title=?, area=?, importance=?, due=?, source_link=?, source_meta=?, proposal_json=?, updated=? WHERE id=?
-                """, [title.isEmpty ? row.title : title, newArea, imp, newDue, p.link, newMeta, json(p), now, row.id])
+                UPDATE cards SET withdrawn=0, title=?, area=?, importance=?, due=?, due_day=?, due_has_time=?, source_link=?, source_meta=?, proposal_json=?, updated=? WHERE id=?
+                """, [title.isEmpty ? row.title : title, newArea, imp, stored.due, stored.day, stored.hasTime, p.link, newMeta, json(p), now, row.id])
             if restore { try store.insertEvent(row.id, "restored by connector", actor: actor, at: now) }
             if !changed.isEmpty || !restore { try store.insertEvent(row.id, "refreshed by connector" + (changed.isEmpty ? "" : ": " + changed.joined(separator: ", ")),
                                   actor: actor, at: now) }
@@ -241,13 +244,15 @@ public enum Reconciler {
     /// message id alone and get their sent date filled in.
     @MainActor
     private static func find(_ p: Proposal, connector: String, store: Store, now: Date) throws -> Row? {
-        let cols = "id,title,area,importance,due,deleted,withdrawn,source_sent,proposal_json,source_link,source_meta,ai_summary"
+        let cols = "id,title,area,importance,due,due_day,due_has_time,deleted,withdrawn,source_sent,proposal_json,source_link,source_meta,ai_summary"
         func rows(_ sql: String, _ args: [Any?]) throws -> [Row] {
             try store.db.query("SELECT \(cols) FROM cards WHERE \(sql) ORDER BY id", args) { s in
-                Row(id: DB.int(s, 0), title: DB.text(s, 1), area: DB.text(s, 2), importance: Int(DB.int(s, 3)), due: DB.date(s, 4),
-                    deleted: DB.int(s, 5) != 0, withdrawn: DB.int(s, 6) != 0,
-                    sent: sqlite3_column_type(s, 7) == SQLITE_NULL ? nil : DB.text(s, 7), proposalJSON: DB.text(s, 8),
-                    sourceLink: DB.text(s, 9), metaJSON: DB.text(s, 10), aiSummary: DB.text(s, 11))
+                Row(id: DB.int(s, 0), title: DB.text(s, 1), area: DB.text(s, 2), importance: Int(DB.int(s, 3)),
+                    due: Store.loadedDue(due: DB.date(s, 4), day: sqlite3_column_type(s, 5) == SQLITE_NULL ? nil : DB.text(s, 5), hasTime: DB.int(s, 6) != 0).0,
+                    dueHasTime: DB.int(s, 6) != 0 && DB.date(s, 4) != nil,
+                    deleted: DB.int(s, 7) != 0, withdrawn: DB.int(s, 8) != 0,
+                    sent: sqlite3_column_type(s, 9) == SQLITE_NULL ? nil : DB.text(s, 9), proposalJSON: DB.text(s, 10),
+                    sourceLink: DB.text(s, 11), metaJSON: DB.text(s, 12), aiSummary: DB.text(s, 13))
             }
         }
         if p.kind == .summary || p.kind == .withdraw || p.sourceKey == nil, let ref = p.taskRef, ref.hasPrefix("card:"),
@@ -272,11 +277,15 @@ public enum Reconciler {
         return store.resolve(defaultGroup)
     }
 
-    private static func dueValue(_ p: Proposal, _ info: (String, ActivityLevel) -> Void) -> (date: Date?, invalid: Bool) {
-        guard let s = p.due, !s.isEmpty else { return (nil, false) }
-        if let d = parseDue(s) { return (d, false) }
+    private static func dueValue(_ p: Proposal, _ info: (String, ActivityLevel) -> Void) -> (date: Date?, hasTime: Bool, invalid: Bool) {
+        guard let s = p.due, !s.isEmpty else { return (nil, false, false) }
+        if let d = parseDue(s) {
+            // The engine's has_time decides; a due with no "T" is never timed. Without has_time (older engine): the old rule.
+            let timed = s.contains("T") && (p.hasTimeMissing ? Due.hasTime(d, in: AppTime.calendar) : p.hasTime)
+            return (d, timed, false)
+        }
         info("Ignored unreadable due date \"\(s)\"", .warning)
-        return (nil, true)
+        return (nil, false, true)
     }
 
     private static func json(_ p: Proposal) throws -> String {

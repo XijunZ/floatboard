@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 10
+    public static let schemaVersion = 11
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -50,7 +50,12 @@ public final class DB {
             } else if version < DB.oldestSupportedVersion {
                 throw DBError.tooOld(file: url.lastPathComponent, version: Int(version))
             } else if version < DB.schemaVersion {
-                try transaction { try exec(DB.upgrade(from: Int(version)) + "PRAGMA user_version = \(DB.schemaVersion);") }
+                try transaction {
+                    try exec(DB.upgrade(from: Int(version)) + "PRAGMA user_version = \(DB.schemaVersion);")
+                    if version < 11 { try backfillDueDays() }
+                }
+            } else if version == DB.schemaVersion {
+                try addMissingV11Columns()
             }
         } catch {
             sqlite3_close(handle)
@@ -60,6 +65,46 @@ public final class DB {
     }
 
     deinit { sqlite3_close(handle) }
+
+    /// Version 11 was amended before release (Rounds 6 and 7): a board already at 11 from before then lacks `cal_series`'
+    /// `master_start` and `master_zone` and `cal_events`' `original_start`. They are added when missing, without changing
+    /// the version; a board that has them is not touched. ALTER puts each before the table's constraints (PRIMARY KEY,
+    /// UNIQUE), so the result matches a new board. Adding `original_start` also makes the next calendar pass a full read.
+    private func addMissingV11Columns() throws {
+        let wanted = [("cal_series", "master_start", "REAL"), ("cal_series", "master_zone", "TEXT"), ("cal_events", "original_start", "TEXT")]
+        var missing: [(String, String, String)] = []
+        for table in Set(wanted.map(\.0)) {
+            let have = Set(try query("PRAGMA table_info(\(table))") { DB.text($0, 1) })
+            guard !have.isEmpty else { continue }
+            missing += wanted.filter { $0.0 == table && !have.contains($0.1) }
+        }
+        guard !missing.isEmpty else { return }
+        try transaction {
+            for (table, column, type) in missing.sorted(by: { ($0.0, $0.1) < ($1.0, $1.1) }) {
+                try exec("ALTER TABLE \(table) ADD COLUMN \(column) \(type);")
+            }
+            // Cached events have no original start yet: the next pass does the daily full read of every calendar now
+            // (it first takes in what changed since the last pass, keeps its bookmark, and hides or deletes nothing).
+            if missing.contains(where: { $0.1 == "original_start" }) { try exec("UPDATE cal_calendars SET full_read_at=NULL;") }
+        }
+    }
+
+    /// 10 -> 11: fills `due_day` / `due_has_time` for the existing tasks with the old rule (a due at 00:00 in this Mac's
+    /// zone has no time), so nothing changes on screen.
+    private func backfillDueDays() throws {
+        let rows = try query("SELECT id, due FROM cards WHERE due IS NOT NULL") { (DB.int($0, 0), DB.date($0, 1)) }
+        for (id, due) in rows {
+            guard let due else { continue }
+            if Due.hasTime(due) {
+                try run("UPDATE cards SET due_has_time=1 WHERE id=?", [id])
+            } else {
+                // The day the old screen showed: read in this Mac's zone, not the app zone.
+                let c = Calendar.current.dateComponents([.year, .month, .day], from: due)
+                let day = String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+                try run("UPDATE cards SET due_day=?, due_has_time=0 WHERE id=?", [day, id])
+            }
+        }
+    }
 
     /// The steps from `version` up to `schemaVersion`. Each only adds, so the upgraded board has exactly `schema`.
     static func upgrade(from version: Int) -> String {
@@ -92,6 +137,57 @@ public final class DB {
                 source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL
             );
             CREATE INDEX instructions_part ON instructions(connector, part, at);
+
+            """
+        }
+        if version < 11 {
+            // 10 -> 11: a due date keeps its day and whether it has a time, so changing time zone never moves a task.
+            // The values are filled in by `backfillDueDays` right after these statements.
+            sql += """
+            ALTER TABLE cards ADD COLUMN due_day TEXT;
+            ALTER TABLE cards ADD COLUMN due_has_time INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE cards ADD COLUMN gcal_calendar TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cards ADD COLUMN gcal_synced_at REAL;
+            -- A task linked to an event by version 10: what both sides held at the first sync, so that sync changes neither.
+            ALTER TABLE cards ADD COLUMN gcal_baseline TEXT NOT NULL DEFAULT '';
+            -- Links between items by visible id (T-142, E-37); stored once, smaller text first.
+            CREATE TABLE links(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,
+                to_type TEXT NOT NULL, to_id TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL,
+                UNIQUE(from_type, from_id, to_type, to_id)
+            );
+            CREATE INDEX links_to ON links(to_type, to_id);
+            -- Google Calendar kept locally; short_id is the visible E-n and is never reused (AUTOINCREMENT).
+            CREATE TABLE cal_calendars(
+                account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,
+                owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,
+                needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL, is_primary INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(account, calendar_id)
+            );
+            CREATE TABLE cal_events(
+                short_id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT NOT NULL,
+                start REAL NOT NULL, end REAL NOT NULL, all_day INTEGER NOT NULL, start_day TEXT, end_day TEXT, title TEXT NOT NULL,
+                location TEXT NOT NULL DEFAULT '', video_link TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+                html_link TEXT NOT NULL DEFAULT '', recurring_id TEXT, google_updated REAL NOT NULL, fb_card INTEGER,
+                gone INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, own_write TEXT, original_start TEXT,
+                UNIQUE(account, calendar_id, event_id)
+            );
+            CREATE INDEX cal_events_start ON cal_events(start);
+            -- A repeating meeting's rule (Google's recurrence lines), read once per series and again at the daily full read, with
+            -- the series' first start and its time zone (master_zone NULL: not read with them yet; '' none, e.g. all-day).
+            CREATE TABLE cal_series(
+                account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',
+                read_at REAL NOT NULL, master_start REAL, master_zone TEXT,
+                PRIMARY KEY(account, calendar_id, series_id)
+            );
+            -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
+            -- failed_at: Google refused the change for good (it is not retried; last_error says why).
+            CREATE TABLE cal_outbox(
+                uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,
+                card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+                next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL,
+                conflicts INTEGER NOT NULL DEFAULT 0
+            );
 
             """
         }
@@ -133,7 +229,7 @@ public final class DB {
         reply_draft_link TEXT NOT NULL DEFAULT '',
         reply_draft_error TEXT NOT NULL DEFAULT '',
         reply_draft_request TEXT NOT NULL DEFAULT '',
-        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL
+        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0, gcal_calendar TEXT NOT NULL DEFAULT '', gcal_synced_at REAL, gcal_baseline TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX cards_external_id ON cards(external_id);
     CREATE UNIQUE INDEX cards_source_key ON cards(connector, source_mid, source_sent)
@@ -196,6 +292,44 @@ public final class DB {
         source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL
     );
     CREATE INDEX instructions_part ON instructions(connector, part, at);
+    -- Links between items by visible id (T-142, E-37); stored once, smaller text first.
+    CREATE TABLE links(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,
+        to_type TEXT NOT NULL, to_id TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL,
+        UNIQUE(from_type, from_id, to_type, to_id)
+    );
+    CREATE INDEX links_to ON links(to_type, to_id);
+    -- Google Calendar kept locally; short_id is the visible E-n and is never reused (AUTOINCREMENT).
+    CREATE TABLE cal_calendars(
+        account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,
+        owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,
+        needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL, is_primary INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(account, calendar_id)
+    );
+    CREATE TABLE cal_events(
+        short_id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT NOT NULL,
+        start REAL NOT NULL, end REAL NOT NULL, all_day INTEGER NOT NULL, start_day TEXT, end_day TEXT, title TEXT NOT NULL,
+        location TEXT NOT NULL DEFAULT '', video_link TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+        html_link TEXT NOT NULL DEFAULT '', recurring_id TEXT, google_updated REAL NOT NULL, fb_card INTEGER,
+        gone INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, own_write TEXT, original_start TEXT,
+        UNIQUE(account, calendar_id, event_id)
+    );
+    CREATE INDEX cal_events_start ON cal_events(start);
+        -- A repeating meeting's rule (Google's recurrence lines), read once per series and again at the daily full read, with
+        -- the series' first start and its time zone (master_zone NULL: not read with them yet; '' none, e.g. all-day).
+        CREATE TABLE cal_series(
+            account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',
+            read_at REAL NOT NULL, master_start REAL, master_zone TEXT,
+            PRIMARY KEY(account, calendar_id, series_id)
+        );
+        -- Changes to Google waiting to be sent (kept until sent, so nothing is lost offline or on a crash).
+        -- failed_at: Google refused the change for good (it is not retried; last_error says why).
+        CREATE TABLE cal_outbox(
+            uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,
+            card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+            next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL,
+            conflicts INTEGER NOT NULL DEFAULT 0
+        );
 
     """
 
@@ -266,4 +400,5 @@ public final class DB {
         sqlite3_column_type(s, i) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(s, i))
     }
     public static func int(_ s: OpaquePointer, _ i: Int32) -> Int64 { sqlite3_column_int64(s, i) }
+    public static func isNull(_ s: OpaquePointer, _ i: Int32) -> Bool { sqlite3_column_type(s, i) == SQLITE_NULL }
 }

@@ -46,6 +46,8 @@ struct BarConfig: Codable, Equatable {
     /// Counter at the left of the bar, in the board's column order: "7 tasks · 1 watch" or "3 to do · 4 doing · 1 watch".
     /// Counts every open task; Watch is named only when there is one.
     var splitCount: Bool? = false
+    /// The next meeting (from 60 minutes before it starts) on the bar, with Join when it has a video link. On unless turned off.
+    var showNextMeeting: Bool? = true
 
     func countLabel(_ open: [Card]) -> String {
         let watch = open.filter { $0.status == .watch }.count
@@ -60,7 +62,7 @@ struct BarConfig: Codable, Equatable {
 
     /// Which open tasks appear on the bar.
     func filtered(_ cards: [Card]) -> [Card] {
-        let cal = Calendar.current
+        let cal = AppTime.calendar
         let endToday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: Date()))!
         let endWeek = cal.date(byAdding: .day, value: 7, to: endToday)!
         return cards.filter { c in
@@ -138,13 +140,13 @@ struct BarConfig: Codable, Equatable {
 }
 
 extension SortKey {
-    /// How the bar uses this key (shown on the Bar tab).
+    /// How the bar uses this key (shown in Settings › Bar).
     var detail: String {
         switch self {
         case .due: "Soonest first; tasks without a date after"
         case .status: "Doing before To do"
         case .importance: "High, then Medium, then Low"
-        case .group: "In the order set on the Groups tab"
+        case .group: "In the order set in Settings › Groups"
         case .added: "Oldest first"
         }
     }
@@ -174,8 +176,8 @@ struct BarSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
 
-            HStack(alignment: .top, spacing: 20) {
-                VStack(alignment: .leading, spacing: 14) {
+            // One column: what to show, then the order, then what each task shows.
+            VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Show on the bar").font(.system(size: 13, weight: .semibold))
                     HStack(spacing: 8) {
@@ -196,9 +198,13 @@ struct BarSettingsView: View {
                            isOn: Binding(get: { ui.bar.splitCount ?? false }, set: { ui.bar.splitCount = $0 }))
                         .toggleStyle(.checkbox)
                         .font(.system(size: 12))
+                    Toggle("Show next meeting (from 60 minutes before it starts)",
+                           isOn: Binding(get: { ui.bar.showNextMeeting ?? true }, set: { ui.bar.showNextMeeting = $0 }))
+                        .toggleStyle(.checkbox)
+                        .font(.system(size: 12))
                 }
                 section("Order: what comes first",
-                        "Drag to set precedence. Ties are decided by the next ticked rule.") {
+                        "Drag to set precedence. Ties are decided by the next ticked rule.", rows: ui.bar.sort.count, rowHeight: 41) {
                     List {
                         ForEach($ui.bar.sort, id: \.key) { $item in
                             row(on: $item.on, title: item.key.title, detail: item.key.detail,
@@ -209,9 +215,8 @@ struct BarSettingsView: View {
                         .onMove { ui.bar.sort.move(fromOffsets: $0, toOffset: $1) }
                     }
                 }
-                }
                 section("What each task shows",
-                        "Drag to arrange, tick to show.") {
+                        "Drag to arrange, tick to show.", rows: ui.bar.fields.count, rowHeight: 28) {
                     List {
                         ForEach($ui.bar.fields, id: \.key) { $item in
                             row(on: $item.on, title: item.key.title, detail: nil,
@@ -244,13 +249,17 @@ struct BarSettingsView: View {
         ui.bar.sorted(store.cards.filter { $0.status.onBar && !$0.withdrawn }, groupOrder: store.areas.map(\.name))
     }
 
-    private func section<C: View>(_ title: String, _ hint: String, @ViewBuilder _ content: () -> C) -> some View {
+    /// A titled list, the full width of the column and just tall enough for its rows (`rowHeight`: one row as the list
+    /// draws it, with or without its second line), so nothing scrolls and no empty space is left below the last row.
+    private func section<C: View>(_ title: String, _ hint: String, rows: Int, rowHeight: CGFloat, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.system(size: 13, weight: .semibold))
             Text(hint).font(.system(size: 11)).foregroundStyle(.secondary)
             content()
                 .listStyle(.bordered(alternatesRowBackgrounds: false))
-                .frame(height: 250)
+                .scrollDisabled(true)
+                .frame(maxWidth: .infinity)
+                .frame(height: CGFloat(rows) * rowHeight + 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

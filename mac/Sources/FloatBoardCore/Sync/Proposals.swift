@@ -29,6 +29,8 @@ public struct Proposal: Codable, Equatable {
     /// "YYYY-MM-DD" (date only) or "YYYY-MM-DDTHH:mm" (wall-clock time in the device's time zone).
     public var due: String?
     public var hasTime: Bool
+    /// True when an older engine sent no `has_time` at all (then the old rule applies: a due at 00:00 has no time).
+    public internal(set) var hasTimeMissing = false
     public var group: String?
     public var importance: Int
     public var sourceLabel: String
@@ -72,6 +74,7 @@ public struct Proposal: Codable, Equatable {
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
         why = try c.decodeIfPresent(String.self, forKey: .why) ?? ""
         due = try c.decodeIfPresent(String.self, forKey: .due)
+        hasTimeMissing = !c.contains(.hasTime)
         hasTime = try c.decodeIfPresent(Bool.self, forKey: .hasTime) ?? false
         group = try c.decodeIfPresent(String.self, forKey: .group)
         importance = try c.decodeIfPresent(Int.self, forKey: .importance) ?? 1

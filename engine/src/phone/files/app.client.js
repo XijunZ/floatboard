@@ -32,6 +32,8 @@
   var failures = 0;
   var retryTimer = 0;
   var tab = "todo";
+  // The screen shown: the Board (always at launch: this is never stored), then Plan (the planning summary).
+  var view = "board";
   var current = "loading";
   var busy = false;
   var sheetOpen = false;
@@ -391,9 +393,62 @@
     return statusText({ waiting: queue.actions.length, offline: isOffline, lastSync: lastSync, now: Date.now() }) || "Syncing…";
   }
 
+  // ---- Planning summary: Today, Rest of this week, Next week, in the zone the Mac sent (the device's when absent)
+
+  function zoneOf() {
+    var z = board && board.time_zone;
+    if (typeof z !== "string" || !z) return undefined;
+    try { new Intl.DateTimeFormat("en", { timeZone: z }); return z; } catch (e) { return undefined; }
+  }
+
+  /** One meeting line: when, the title (a repeating meeting: "Standup · weekdays 09:00"), its linked tasks, Join. */
+  function meetingRow(m, byId) {
+    var row = el("div", "ev");
+    row.appendChild(el("span", "when", m.when));
+    var body = el("span", "body");
+    body.appendChild(el("span", "t", m.label ? m.title + " · " + m.label : m.title));
+    m.tasks.forEach(function (id) { if (byId[id]) body.appendChild(el("div", "task", byId[id].title)); });
+    row.appendChild(body);
+    if (m.video) {
+      var a = el("a", "join", "Join");
+      a.href = m.video;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      row.appendChild(a);
+    }
+    return row;
+  }
+
+  function renderToday() {
+    var box = $("today");
+    box.replaceChildren();
+    var any = false;
+    try {
+      var tz = zoneOf() || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      var byId = {};
+      shown.forEach(function (c) { byId[c.id] = c; });
+      planBlocks(board && Array.isArray(board.events) ? board.events : [], shown, Date.now(), tz).forEach(function (b) {
+        if (!b.meetings.length && !b.tasks.length && !b.overdue.length) return;
+        any = true;
+        box.appendChild(el("h2", null, b.title));
+        b.overdue.forEach(function (c) {
+          var btn = cardButton(c);
+          btn.classList.add("overdue");
+          btn.querySelector(".meta").prepend(el("span", "late", "Overdue"));
+          box.appendChild(btn);
+        });
+        b.meetings.forEach(function (m) { box.appendChild(meetingRow(m, byId)); });
+        b.tasks.forEach(function (c) { box.appendChild(cardButton(c)); });
+      });
+    } catch (err) { console.error("Planning summary failed", err); box.replaceChildren(); any = false; }
+    box.hidden = !any;
+    $("plan-empty").hidden = any;
+  }
+
   function render() {
     if (!board) return;
     shown = viewBoard(board, queue.actions).cards;
+    renderToday();
     STATUSES.forEach(function (s) {
       document.querySelector('[data-count="' + s + '"]').textContent = String(cardsFor(s).length);
       document.querySelector('[data-tab="' + s + '"]').setAttribute("aria-selected", String(s === tab));
@@ -414,6 +469,16 @@
       watch: "Nothing you're waiting on.",
       done: "Nothing done yet today.",
     }[tab];
+    // Board or Plan: the status tabs, list and + belong to the Board.
+    var onPlan = view === "plan";
+    $("plan").hidden = !onPlan;
+    document.querySelector("nav.tabs").hidden = onPlan;
+    list.hidden = onPlan;
+    if (onPlan) $("empty").hidden = true;
+    $("add").hidden = onPlan;
+    ["board", "plan"].forEach(function (v) {
+      document.querySelector('[data-view="' + v + '"]').setAttribute("aria-selected", String(v === view));
+    });
   }
 
   var noteTimer = 0;
@@ -460,6 +525,8 @@
       queue.account = b.account;
     }
     board = { updated: b.updated || null, cards: Array.isArray(b.cards) ? b.cards : [], pending: b.pending || 0 };
+    if (Array.isArray(b.events)) board.events = b.events;   // absent from Macs before the calendar
+    if (typeof b.time_zone === "string") board.time_zone = b.time_zone;
     var sup = noticeSuperseded(sentIds, b.superseded);
     sentIds = sup.sentIds;
     store(SENT_KEY, sentIds);
@@ -492,6 +559,9 @@
       while (queue.actions.length) {
         var body = takeBatch(queue.actions, new Date().toISOString());
         if (!body.actions.length) break;
+        // Marked before it goes: if the answer is lost, Undo of a delete in it sends a restore instead of dropping it.
+        queue.actions = markAttempted(queue.actions, body);
+        saveQueue();
         // A batch the engine refuses as malformed (400) is sent again one action at a time; one still refused leaves the queue.
         var sent = await sendBatch(body, function (b) { return api("/app/api/action", { method: "POST", body: b }); },
           function () { return new Date().toISOString(); });
@@ -562,10 +632,16 @@
     saveQueue();
     closeSheet();
     render();
-    var u = card ? undoFor(card, a, Date.now()) : null;
+    if (a.action === "delete" || a.action === "done") buzz();
+    var u = card ? (a.action === "delete" ? deleteUndoFor(card, a, Date.now()) : undoFor(card, a, Date.now())) : null;
     if (u) showUndo(u); else toast(done);
     failures = 0;
     sync();
+  }
+
+  /** A short vibration where the phone has one (Delete, Done). */
+  function buzz() {
+    try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { /* no vibration: nothing to do */ }
   }
 
   var undo = null;
@@ -590,7 +666,35 @@
     var u = undo;
     hideUndo();
     if (!undoLive(u, Date.now())) return;
+    if (u.deleted) {
+      // Not sent yet: taken out of the queue, nothing is sent. Sent (or being sent): a restore brings it back on the Mac.
+      var step = undoDeleteStep(u, queue.actions, syncing, newId(), new Date().toISOString());
+      if (step.restore) { act(step.restore, "Bringing it back"); return; }
+      queue.actions = step.actions;
+      saveQueue();
+      render();
+      toast("Not deleted");
+      return;
+    }
     act(undoAction(u, newId(), new Date().toISOString()), "Moved back to " + STEP_NAMES[u.from]);
+  }
+
+  // Delete: a task the email sorting made offers the Mac's "teach" choices, so the sorting learns; others just go.
+  var TEACH = [["not_action", "Not an action (teach)"], ["wrong_details", "Wrong details (teach)"], ["duplicate", "Duplicate (teach)"]];
+  function deleteCard(c) {
+    if (!c.teach_on_delete) { act({ card_id: c.id, action: "delete" }, "Deleted", c); return; }
+    openSheet(function (sheet) {
+      sheet.appendChild(el("h3", null, "Delete"));
+      sheet.appendChild(el("p", "sub", c.title));
+      TEACH.forEach(function (t) {
+        var b = el("button", "btn act", t[1]);
+        b.addEventListener("click", function () { act({ card_id: c.id, action: "delete", teach: t[0] }, "Deleted", c); });
+        sheet.appendChild(b);
+      });
+      var plain = el("button", "btn act danger", "Just delete");
+      plain.addEventListener("click", function () { act({ card_id: c.id, action: "delete" }, "Deleted", c); });
+      sheet.appendChild(plain);
+    });
   }
 
   // ------------------------------------------------------------ sheets
@@ -667,6 +771,13 @@
         a.appendChild(document.createTextNode(linkLabel(l)));
         sheet.appendChild(a);
       });
+      if (!c.pending) {
+        var del = el("button", "btn act danger");
+        del.appendChild(icon("trash"));
+        del.appendChild(document.createTextNode("Delete"));
+        del.addEventListener("click", function () { deleteCard(c); });
+        sheet.appendChild(del);
+      }
       sheet.appendChild(el("p", "sub hint", "Edit details on your Mac."));
     });
   }
@@ -987,6 +1098,9 @@
 
   STATUSES.forEach(function (s) {
     document.querySelector('[data-tab="' + s + '"]').addEventListener("click", function () { tab = s; render(); window.scrollTo(0, 0); });
+  });
+  ["board", "plan"].forEach(function (v) {
+    document.querySelector('[data-view="' + v + '"]').addEventListener("click", function () { view = v; render(); window.scrollTo(0, 0); });
   });
   $("pair-go").addEventListener("click", pair);
   $("pair-skip").addEventListener("click", function () { sessionSet(PAIR_KEY, null); start(); });

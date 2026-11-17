@@ -57,7 +57,7 @@ struct InstructionsHistory: View {
     }
 
     static func when(_ d: Date) -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "d MMM yyyy, HH:mm"
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.timeZone = AppTime.zone; f.dateFormat = "d MMM yyyy, HH:mm"
         return f.string(from: d)
     }
 

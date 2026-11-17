@@ -39,9 +39,22 @@ your Mac's Keychain; nothing goes through anyone else's server.
 - **Ctrl-Opt-N** quick add from anywhere. **Ctrl-Opt-B** show or hide. The menu bar icon has the rest (reset position, export).
 - Drag the grip to move the bar. `+` quick-adds, the expand icon opens the board, `-` minimises, `x` closes.
 - **Board**: drag cards between columns, or hover for arrows, tick, edit and delete. Right-click for more.
-- **Groups** tab: add, rename, recolour, reorder and delete groups.
+- **Settings › Groups**: add, rename, recolour, reorder and delete groups. **Settings › Bar**: what the bar shows and in which order. The window's tabs are Board, Calendar and Settings; the FloatBoard menu's "Bar…" and "Groups…" open those Settings sections.
 - **Help** menu: **Guide**, **Activity...** (everything the app did and every problem it hit) and **Restore from backup...**.
 - Menu bar, **Export to CSV** writes cards and history to `~/Downloads`.
+
+### Calendar
+
+The **Calendar** tab (next to Board) shows your Google calendars and your tasks together, as a day or a week.
+
+- Every calendar of every connected Google account shows, each with its own on/off switch (Settings › Outputs › Calendar). Tasks with a due time sit at that time; date-only tasks sit in a strip at the top.
+- Changes from FloatBoard go to Google: drag an event to move it, drag its bottom edge to resize, click empty time to add one. Changes made in Google show up here within about a minute. Offline, your changes wait and send when you are back.
+- A task only goes to Google when you drag it onto a time or press Add to calendar. Deleting that task deletes its event. Deleting the event in Google keeps the task and its date. Clearing a task's due leaves its event in Google.
+- To move an existing event to another calendar, use Open in Google Calendar; FloatBoard cannot do that yet.
+- Every task has an id like `T-142` and every event like `E-37`. Click an id to copy it, type it into search, or use it to link a meeting to a task (and back) from either side.
+- The bar shows your next meeting, with **Join** when it has a video link. The phone app opens on the Board; its second screen, **Plan**, is a read-only planning summary: Today, the rest of this week and next week (meetings, a repeating one once with its rule, and tasks due).
+- Accounts connected before the Calendar tab existed work at once with their main calendar (Settings › Outputs › Calendar says "Showing your main calendar."); press **Show all calendars…** once to see the others. Connecting Gmail for an account signs it in for Calendar too.
+- Settings › General › Time zone: UK time by default, or follow this Mac. Times then stay put when you travel.
 
 ### Keeping windows clear of the bar
 When the bar sits at the bottom, FloatBoard uses the Accessibility API to shrink standard windows whose bottom

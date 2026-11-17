@@ -18,11 +18,29 @@ public struct HealthProblem: Equatable {
 @MainActor
 public enum Health {
     static let hour: TimeInterval = 3600
+    /// A shown calendar not synced for this long while online is a problem.
+    static let calendarStale: TimeInterval = 30 * 60
+    /// Whether the Mac has a network connection (set by the app's network monitor); a calendar can't sync offline.
+    public static var isOnline = true
+    /// When the app started: a calendar synced before that is given this long (from launch) to sync again.
+    public static let launchedAt = Date()
 
     /// Decides from stored state only. It changes nothing in the board; the one thing it may write is an Activity row
     /// when a read fails or a backup file turns out to be damaged (reported once per file).
-    public static func evaluate(store: Store, backups: Backups?, now: Date) -> [HealthProblem] {
+    public static func evaluate(store: Store, backups: Backups?, now: Date, online: Bool? = nil,
+                                launchedAt: Date? = nil) -> [HealthProblem] {
         var out: [HealthProblem] = []
+        if online ?? isOnline {
+            let launchedAt = launchedAt ?? Self.launchedAt
+            for c in CalendarCache(store: store).connectedCalendars() where c.shown && !c.needsReconnect {
+                guard let synced = c.syncedAt else { continue }
+                let since = max(synced, launchedAt)
+                if now.timeIntervalSince(since) > calendarStale {
+                    out.append(HealthProblem(id: "calendar-stale:\(c.account):\(c.calendarID)",
+                                             message: "Calendar \"\(c.name)\" (\(c.account)) hasn't synced for over 30 minutes", since: since))
+                }
+            }
+        }
         do {
             for c in try store.loadConnectors() { out += connectorProblems(c, store: store, now: now) }
         } catch {

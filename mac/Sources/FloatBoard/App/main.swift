@@ -16,8 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var avoider: WindowAvoider!
     private var clickMonitor: Any?
     private var modeWatch: AnyCancellable?
+    private var calendarWatch: AnyCancellable?
     private var pendingLinks: [URL] = []
     private var connectors: ConnectorRunner!
+    private var calendarScheduler: CalendarScheduler?
     private var backupTimer: Timer?
     private var activityWindow: NSWindow?
     private var localClickMonitor: Any?
@@ -55,7 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let p = check.problem { preMigrateNote = p }
         }
         do {
-            store = Store(db: try DB())
+            let db = try DB()
+            AppTime.load(from: db)   // before the board loads: date-only dues are read in this zone
+            store = Store(db: db)
             google.attach(store: store)
             if let preMigrateError { store.activity("backup", .error, "Backup (pre-migrate) failed", detail: "\(preMigrateError)") }
             if let preMigrateNote { store.activity("backup", .warning, "Could not read schema version; backed up as a precaution", detail: preMigrateNote) }
@@ -121,6 +125,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         connectors = ConnectorRunner(store: store)
         connectors.start()
+        calendarScheduler = CalendarScheduler(store: store, google: google)
+        calendarScheduler?.start()
         Updater.shared.start(store: store)
         NotificationCenter.default.addObserver(forName: .floatBoardShowActivity, object: nil, queue: .main) { [weak self] n in
             MainActor.assumeIsolated { if n.object as? String == "open" { self?.showActivity() } }
@@ -132,9 +138,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.connectors.whatsappTick() }
         }
         startDueReminders()
+        // A new time zone (chosen in Settings, or the Mac's own when following it) re-reads the board, so every screen
+        // and the reminders redraw in it.
+        for name in [AppTime.didChange, .NSSystemTimeZoneDidChange] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.store.reload() }
+            }
+        }
         modeWatch = ui.$mode.removeDuplicates().sink { [weak self] m in
             guard m == .expanded else { return }
             self?.connectors.boardOpened()
+        }
+        // While the Calendar tab is open, or the bar is showing a meeting, the calendar syncs every minute instead of every five.
+        calendarWatch = ui.$tab.combineLatest(ui.$mode, ui.$nextMeeting).sink { [weak self] tab, mode, meeting in
+            self?.calendarScheduler?.fastMode = (tab == .calendar && mode == .expanded) || (meeting != nil && mode == .banner)
         }
         // A connect link opened before launch finished is handled now.
         for link in pendingLinks { handleConnectLink(link) }
@@ -287,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let a = NSAlert(); a.messageText = "No backups yet"
             a.informativeText = "A backup is made once a day while FloatBoard runs."; a.runModal(); return
         }
-        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
+        let f = DateFormatter(); f.timeZone = AppTime.zone; f.dateStyle = .medium; f.timeStyle = .short
         let pick = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26))
         for b in all { pick.addItem(withTitle: "\(f.string(from: b.date)) · \(b.reason)") }
         let a = NSAlert()
@@ -401,14 +418,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleSplitCount() { ui.bar.splitCount = !(ui.bar.splitCount ?? false) }
     @objc func resetBoard() { panel.resetBoard() }
     @objc func syncConnectors() { connectors.trigger("menu") }
-    @objc func barSettings() { ui.tab = .bar; ui.quickAdding = false; expand() }
+    @objc func barSettings() { ui.openSettings(.bar); ui.quickAdding = false; expand() }
     @objc func showSettings() { ui.tab = .settings; ui.quickAdding = false; expand() }
     @objc func showFeedback() { FeedbackWindow.show(store: store) }
     @objc func checkForUpdates() {
         ui.settingsSection = .mode; showSettings()
         Task { await Updater.shared.check() }
     }
-    @objc func manageGroups() { ui.tab = .groups; ui.quickAdding = false; expand() }
+    @objc func manageGroups() { ui.openSettings(.groups); ui.quickAdding = false; expand() }
 
     private func showError(_ title: String, _ error: Error) {
         let a = NSAlert()

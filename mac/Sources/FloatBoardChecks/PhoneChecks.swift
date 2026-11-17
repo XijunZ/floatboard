@@ -60,14 +60,14 @@ private final class PhoneEngine {
     let store: Store
     do { store = Store(db: try DB(url: root.appendingPathComponent("phone.sqlite"))) } catch { check(false, "phone setup: \(error)"); return }
     let now = Date()
-    let cal = Calendar.current
+    let cal = AppTime.calendar
     func newest(_ title: String) -> Card? { store.cards.last { $0.title == title } }
     func warnings(_ id: String) -> [ActivityEntry] { connectorActivity(store, id).filter { $0.level != .info } }
 
     // Board payload: open tasks + done today, the engine's fields, local dates.
     store.add(title: "P all-day", area: "Work", importance: .high, due: Due.combine(day: now, time: nil))
     store.add(title: "P timed", area: "Personal", importance: .low,
-              due: cal.date(bySettingHour: 14, minute: 30, second: 0, of: now), status: .doing)
+              due: cal.date(bySettingHour: 14, minute: 30, second: 0, of: now), dueHasTime: true, status: .doing)
     store.add(title: "P watch", area: "Work", importance: .medium, due: nil, status: .watch)
     store.add(title: "P done today", area: "Work", importance: .medium, due: nil)
     store.add(title: "P done before", area: "Work", importance: .medium, due: nil)
@@ -344,4 +344,63 @@ private final class PhoneEngine {
         _ = try await goodEngine().client().pairPhone()
         check(false, "phone_pairing_on_old_engine_says_no_phone_app")
     } catch { check((error as? ConnectorError) == .noPhoneApp, "phone_pairing_on_old_engine_says_no_phone_app") }
+}
+
+/// The phone's planning summary: meetings from today to the end of next week (not events made from tasks) with the tasks linked to them.
+@MainActor func phoneEventChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-phoneev-\(UUID().uuidString)")
+    let store: Store
+    do { store = Store(db: try DB(url: root.appendingPathComponent("phone.sqlite"))) } catch { check(false, "phone events setup: \(error)"); return }
+    let cache = CalendarCache(store: store)
+    let cal = AppTime.calendar
+    let acct = "me@example.com", cid = "primary"
+    let now = cal.date(bySettingHour: 8, minute: 0, second: 0, of: Date()) ?? Date()
+    let today = cal.startOfDay(for: now)
+    func at(_ dayOffset: Int, _ hour: Int) -> Date { cal.date(byAdding: .hour, value: hour, to: cal.date(byAdding: .day, value: dayOffset, to: today)!)! }
+    func fields(_ title: String, _ start: Date, hours: Double = 1, video: String = "", fbCard: Int64? = nil) -> CalEventFields {
+        CalEventFields(start: start, end: start.addingTimeInterval(hours * 3600), title: title, videoLink: video, googleUpdated: now, fbCard: fbCard)
+    }
+    func change(_ id: String, _ f: CalEventFields) -> GoogleEventChange { GoogleEventChange(eventID: id, cancelled: false, fields: f) }
+    cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: cid, name: "Me", color: "#112233", owned: true, shown: true)])
+
+    store.add(title: "PE prep", area: "Work", importance: .medium, due: nil)
+    store.add(title: "PE from task", area: "Work", importance: .medium, due: nil)
+    store.add(title: "PE linked after", area: "Work", importance: .medium, due: nil)
+    guard let prep = store.cards.last(where: { $0.title == "PE prep" }), let made = store.cards.last(where: { $0.title == "PE from task" }),
+          let later = store.cards.last(where: { $0.title == "PE linked after" }) else { check(false, "phone events seed"); return }
+    store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_event='task-ev' WHERE id=\(later.id)")
+
+    cache.apply(account: acct, calendarID: cid, changes: [
+        change("m1", fields("  Standup  ", at(0, 10), video: "https://meet.example.com/abc")),
+        change("m2", fields("Insecure call", at(0, 12), video: "http://meet.example.com/abc")),
+        change("m5", fields("Odd link", at(0, 13), video: "https://")),
+        change("m6", fields("Spaced link", at(0, 13), video: "https://meet.example.com/a b")),
+        change("m3", fields("Tomorrow review", at(1, 9))),
+        change("m4", fields("Next week", at(3, 9))),
+        change("t1", fields("Task block", at(0, 14), fbCard: made.id)),
+        change("task-ev", fields("Task block 2", at(0, 15)))], nextToken: "t")
+    guard let standup = cache.events(from: at(0, 0), to: at(1, 0)).first(where: { $0.eventID == "m1" }) else { check(false, "phone events seed event"); return }
+    store.link(ShortID(kind: .task, number: prep.id), ShortID(kind: .event, number: standup.shortID), actor: .user)
+
+    let events = PhoneBoard.events(store: store, now: now)
+    check(events.filter { $0.title.hasSuffix("link") }.allSatisfy { $0.video == nil } && events.count == 6, "phone_body_drops_malformed_https_link")
+    check(events.filter { !$0.title.hasSuffix("link") }.map(\.title) == ["Standup", "Insecure call", "Tomorrow review", "Next week"]
+          && events[0].id == "E-\(standup.shortID)" && events[0].video == "https://meet.example.com/abc" && events[0].tasks == [prep.id]
+          && events[0].color == "#112233" && events[0].allDay == false && events[1].video == nil && events[2].tasks.isEmpty
+          && PhoneBoard.parseISO(events[0].start) == at(0, 10) && PhoneBoard.parseISO(events[0].end) == at(0, 11),
+          "phone_body_includes_events_through_next_week")
+    check(!events.contains { $0.title.hasPrefix("Task block") }, "phone_body_skips_task_events")
+    do {
+        let data = try PhoneBoard.body([], events: events, timeZone: "Europe/London")
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let first = (obj?["events"] as? [[String: Any]])?.first
+        let plain = try JSONSerialization.jsonObject(with: try PhoneBoard.body([])) as? [String: Any]
+        check(obj?["time_zone"] as? String == "Europe/London" && Set(first?.keys.map { $0 } ?? []) == ["id", "title", "start", "end", "all_day", "video", "color", "tasks"]
+              && plain?["events"] == nil && plain?["time_zone"] == nil,
+              "phone_body_has_events_and_time_zone_only_when_given")
+        let h1 = try PhoneBoard.hash([], events: events, timeZone: "Europe/London", engine: "e")
+        let h2 = try PhoneBoard.hash([], events: Array(events.dropLast()), timeZone: "Europe/London", engine: "e")
+        let h3 = try PhoneBoard.hash([], events: events, timeZone: "Europe/London", engine: "e")
+        check(h1 != h2 && h1 == h3, "phone_hash_changes_with_events")
+    } catch { check(false, "phone event body: \(error)") }
 }

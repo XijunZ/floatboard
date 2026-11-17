@@ -39,7 +39,7 @@ enum ConnectorHealth {
     }
 
     static func time(_ d: Date) -> String {
-        Calendar.current.isDateInToday(d) ? Fmt.clock(d) : Fmt.withTime(d)
+        AppTime.calendar.isDateInToday(d) ? Fmt.clock(d) : Fmt.withTime(d)
     }
 
     static func statusLine(_ info: ConnectorInfo, waiting: Int) -> String {
