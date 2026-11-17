@@ -1,0 +1,157 @@
+import Foundation
+
+/// An item's tags: one primary (a task's decides its colour and board group) and any number of others.
+public struct ItemTags: Equatable {
+    public var primary: String?
+    public var others: [String]
+    public init(primary: String?, others: [String]) { self.primary = primary; self.others = others }
+    /// Primary first, each once.
+    public var all: [String] {
+        var out: [String] = []
+        for t in [primary].compactMap({ $0 }) + others where !out.contains(where: { $0.caseInsensitiveCompare(t) == .orderedSame }) { out.append(t) }
+        return out
+    }
+}
+
+/// The fixed tags' rules (features §3, §9), as one pure check used by every form, bulk edit and import.
+public enum TagRules {
+    public static let investor = "Investor"
+    public static let prospect = "Prospect"
+    public static let fixed = [investor, prospect]
+    /// Fixed tags' colours (they are never board groups unless a task already uses one).
+    static let fixedColors = [investor: "#FFD60A", prospect: "#40C8E0"]
+
+    /// What is wrong with these tags on an item of this tier, worded for the owner; empty = allowed.
+    public static func problems(tags: [String], tier: PersonTier?) -> [String] {
+        var out: [String] = []
+        if tier == .family && tags.contains(where: { $0.caseInsensitiveCompare(prospect) == .orderedSame }) {
+            out.append("Prospect can't be used on Family.")
+        }
+        return out
+    }
+
+    /// Investor caps a person's contact interval at 3 months (Circle applies it); nil = no cap.
+    public static func intervalCapMonths(tags: [String]) -> Int? {
+        tags.contains { $0.caseInsensitiveCompare(investor) == .orderedSame } ? 3 : nil
+    }
+}
+
+/// Filtering and counting by tag: a filter matches an item carrying any selected tag; counts count each item once per tag.
+public enum TagFilter {
+    public static func matches(_ tags: ItemTags, any selected: Set<String>) -> Bool {
+        guard !selected.isEmpty else { return true }
+        let wanted = Set(selected.map { $0.lowercased() })
+        return tags.all.contains { wanted.contains($0.lowercased()) }
+    }
+
+    public static func counts(_ items: [ItemTags]) -> [String: Int] {
+        var out: [String: Int] = [:]
+        for i in items { for t in i.all { out[t, default: 0] += 1 } }
+        return out
+    }
+}
+
+extension Store {
+    /// Adds the fixed tags if missing (an existing group of that name is reused) and marks them fixed. Runs at every start.
+    func seedFixedTags() {
+        do {
+            for (i, name) in TagRules.fixed.enumerated() {
+                try db.run("INSERT OR IGNORE INTO areas(name, color, position, fixed) VALUES(?,?,?,1)",
+                           [name, TagRules.fixedColors[name] ?? "#8E8E93", 2000.0 + Double(i)])
+                try db.run("UPDATE areas SET fixed=1 WHERE name=? COLLATE NOCASE AND fixed=0", [name])
+            }
+        } catch {
+            activity("store", .error, "Could not set up the fixed tags", detail: "\(error)")
+        }
+    }
+
+    private func tagID(_ name: String) throws -> Int64? {
+        try db.query("SELECT id FROM areas WHERE name=? COLLATE NOCASE", [name]) { DB.int($0, 0) }.first
+    }
+
+    /// The item's tags. A task's primary is its group; its others, and every tag of other items, are `item_tags` rows.
+    public func itemTags(_ id: ShortID) -> ItemTags {
+        do {
+            let rows = try db.query("""
+                SELECT a.name, t.is_primary FROM item_tags t JOIN areas a ON a.id=t.tag_id WHERE t.item=? ORDER BY t.is_primary DESC, a.position, a.id
+                """, [id.text]) { (DB.text($0, 0), DB.int($0, 1) != 0) }
+            if id.kind == .task {
+                let area = try db.query("SELECT area FROM cards WHERE id=?", [id.number]) { DB.text($0, 0) }.first
+                return ItemTags(primary: area, others: rows.map(\.0).filter { $0.caseInsensitiveCompare(area ?? "") != .orderedSame })
+            }
+            return ItemTags(primary: rows.first(where: \.1)?.0, others: rows.filter { !$0.1 }.map(\.0))
+        } catch {
+            activity("store", .error, "Could not read tags", detail: "\(error)")
+            return ItemTags(primary: nil, others: [])
+        }
+    }
+
+    /// Replaces an item's tags. Every name must be an existing tag; the fixed tags' rules are checked (`tier` for a person).
+    /// A task's primary must be one of its groups and is saved as its group (history, phone and colour follow as for any
+    /// group change). Returns why it was refused, or nil.
+    @discardableResult
+    public func setTags(_ id: ShortID, primary: String?, others: [String], tier: PersonTier? = nil, now: Date = Date()) -> String? {
+        var wanted = ItemTags(primary: primary, others: others)
+        wanted.others = wanted.all.filter { $0.caseInsensitiveCompare(primary ?? "") != .orderedSame }
+        if let p = TagRules.problems(tags: wanted.all, tier: tier).first { return p }
+        if let unknown = wanted.all.first(where: { name in !tags.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame } }) {
+            return "There's no tag called \(unknown)."
+        }
+        if id.kind == .task {
+            guard let p = primary, let card = card(id.number) else { return "A task needs a group." }
+            if card.area != p { setArea(card, tags.first { $0.name.caseInsensitiveCompare(p) == .orderedSame }?.name ?? p, now: now) }
+        }
+        let before = itemTags(id)
+        perform {
+            try db.run("DELETE FROM item_tags WHERE item=?", [id.text])
+            if id.kind != .task, let p = primary, let tid = try tagID(p) {
+                try db.run("INSERT INTO item_tags(item, tag_id, is_primary, added) VALUES(?,?,1,?)", [id.text, tid, now])
+            }
+            for name in wanted.others {
+                guard let tid = try tagID(name) else { continue }
+                try db.run("INSERT OR IGNORE INTO item_tags(item, tag_id, is_primary, added) VALUES(?,?,0,?)", [id.text, tid, now])
+            }
+            if id.kind == .task && Set(before.others) != Set(wanted.others) {
+                try db.run("UPDATE cards SET updated=? WHERE id=?", [now, id.number])
+                try insertEvent(id.number, "tags: " + (wanted.others.isEmpty ? "none" : wanted.others.joined(separator: ", ")), actor: .user, at: now)
+                try db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", ["tags_at:\(id.number)", String(now.timeIntervalSince1970)])
+            }
+        }
+        return nil
+    }
+
+    /// When a task's other tags last changed on this Mac (nil: never), so a phone change older than it loses.
+    public func tagsChangedAt(_ cardID: Int64) -> Date? {
+        let v = (try? db.query("SELECT value FROM meta WHERE key=?", ["tags_at:\(cardID)"]) { DB.text($0, 0) })?.first // try?-ok: unknown = never changed
+        return v.flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
+    }
+
+    /// Items carrying any of `tags` (live tasks by group or other tag; other kinds by their rows), each once, by id text.
+    public func items(taggedAny names: Set<String>, kind: ItemKind? = nil) -> [ShortID] {
+        guard !names.isEmpty else { return [] }
+        let lower = names.map { $0.lowercased() }
+        let marks = lower.map { _ in "?" }.joined(separator: ",")
+        do {
+            var out = Set(try db.query("""
+                SELECT t.item FROM item_tags t JOIN areas a ON a.id=t.tag_id WHERE lower(a.name) IN (\(marks))
+                """, lower) { ShortID.parse(DB.text($0, 0)) }.compactMap { $0 })
+            out.formUnion(cards.filter { lower.contains($0.area.lowercased()) }.map { ShortID(kind: .task, number: $0.id) })
+            let live = out.filter { id in id.kind != .task || card(id.number) != nil }
+            return live.filter { kind == nil || $0.kind == kind }.sorted { ($0.kind.rawValue, $0.number) < ($1.kind.rawValue, $1.number) }
+        } catch {
+            activity("store", .error, "Could not read tagged items", detail: "\(error)")
+            return []
+        }
+    }
+
+    /// A deleted group's `item_tags` rows go; an item whose primary it was gets its first other tag as primary.
+    func dropTagRows(_ tagID: Int64) throws {
+        let items = try db.query("SELECT item FROM item_tags WHERE tag_id=? AND is_primary=1", [tagID]) { DB.text($0, 0) }
+        try db.run("DELETE FROM item_tags WHERE tag_id=?", [tagID])
+        for item in items {
+            try db.run("""
+                UPDATE item_tags SET is_primary=1 WHERE rowid=(SELECT rowid FROM item_tags WHERE item=? ORDER BY added, tag_id LIMIT 1)
+                """, [item])
+        }
+    }
+}

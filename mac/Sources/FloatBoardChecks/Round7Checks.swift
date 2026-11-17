@@ -210,9 +210,8 @@ import FloatBoardConnectors
         func cols(_ db: DB) throws -> [String] { try db.query("PRAGMA table_info(cal_events)") { DB.text($0, 1) } }
         var before: [String] = []
         do {
-            let db = try DB(url: url)
-            _ = try db.run("ALTER TABLE cal_events DROP COLUMN original_start")
-            before = try cols(db)
+            guard makeV11Schema(url, extra: "ALTER TABLE cal_events DROP COLUMN original_start;") else { throw DBError.sql("v11 board setup") }
+            before = rawColumns(url, "cal_events")
         }
         let fresh = root.appendingPathComponent("v11-fresh.sqlite")
         _ = try DB(url: fresh)
@@ -223,7 +222,7 @@ import FloatBoardConnectors
         let same = try sql(db) == sql(DB(url: fresh))
         let after = try cols(db)
         let version = try db.query("PRAGMA user_version") { DB.int($0, 0) }.first
-        check(!before.contains("original_start") && after.contains("original_start") && same && version == 11,
+        check(!before.contains("original_start") && after.contains("original_start") && same && version == Int64(DB.schemaVersion),
               "r7_existing_v11_board_gets_original_start_in_place")
     } catch { check(false, "r7 v11 amend: \(error)") }
 

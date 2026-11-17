@@ -83,9 +83,11 @@ public final class CalendarCache {
     private func moveLinks(from gone: Int64, to kept: Int64) throws {
         let g = String(gone), event = ItemKind.event.rawValue
         let rows = try db.query("""
-            SELECT from_type, from_id, to_type, to_id, created, actor FROM links WHERE (from_type=? AND from_id=?) OR (to_type=? AND to_id=?)
+            SELECT from_type, from_id, to_type, to_id, created, actor, kind, made_by, subject, hidden_by FROM links
+            WHERE (from_type=? AND from_id=?) OR (to_type=? AND to_id=?)
             """, [event, g, event, g]) { s in
-            (DB.text(s, 0), DB.text(s, 1), DB.text(s, 2), DB.text(s, 3), DB.date(s, 4) ?? Date(), DB.text(s, 5))
+            (DB.text(s, 0), DB.text(s, 1), DB.text(s, 2), DB.text(s, 3), DB.date(s, 4) ?? Date(), DB.text(s, 5),
+             (DB.text(s, 6), DB.text(s, 7), DB.text(s, 8), DB.text(s, 9)))
         }
         try db.run("DELETE FROM links WHERE (from_type=? AND from_id=?) OR (to_type=? AND to_id=?)", [event, g, event, g])
         let keptID = ShortID(kind: .event, number: kept)
@@ -95,8 +97,12 @@ public final class CalendarCache {
             let o = ShortID(kind: kind, number: n)
             guard o != keptID else { continue }
             let (a, b) = keptID.text <= o.text ? (keptID, o) : (o, keptID)
-            try db.run("INSERT OR IGNORE INTO links(from_type, from_id, to_type, to_id, created, actor) VALUES(?,?,?,?,?,?)",
-                       [a.kind.rawValue, String(a.number), b.kind.rawValue, String(b.number), r.4, r.5])
+            let goneText = ShortID(kind: .event, number: gone).text
+            let subject = r.6.2 == goneText ? keptID.text : r.6.2, hidden = r.6.3 == goneText ? keptID.text : r.6.3
+            try db.run("""
+                INSERT OR IGNORE INTO links(from_type, from_id, to_type, to_id, created, actor, kind, made_by, subject, hidden_by)
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+                """, [a.kind.rawValue, String(a.number), b.kind.rawValue, String(b.number), r.4, r.5, r.6.0, r.6.1, subject, hidden])
         }
     }
 
@@ -166,6 +172,10 @@ public final class CalendarCache {
                             fb_card=excluded.fb_card, original_start=excluded.original_start, gone=0, cancelled=0
                         """, [account, calendarID, change.eventID, start, end, f.allDay ? 1 : 0, f.startDay, f.endDay, f.title,
                               f.location, f.videoLink, f.description, f.htmlLink, f.recurringID, f.googleUpdated, f.fbCard, f.originalStart])
+                    if let guests = change.guests {
+                        try db.run("UPDATE cal_events SET guests=? WHERE account=? AND calendar_id=? AND event_id=?",
+                                   [String(decoding: try JSONEncoder().encode(guests), as: UTF8.self), account, calendarID, change.eventID])
+                    }
                     // An event FloatBoard has written or sent to: note what Google has now (a changed field with its stamp).
                     if let json = try db.query("SELECT own_write FROM cal_events WHERE account=? AND calendar_id=? AND event_id=? AND own_write IS NOT NULL",
                                                [account, calendarID, change.eventID], { DB.text($0, 0) }).first {
@@ -234,11 +244,24 @@ public final class CalendarCache {
         return events("WHERE e.gone=0 AND c.shown=1 AND e.start<? AND e.end>?\(clause) AND \(Self.notTaskEvent) ORDER BY e.start, e.short_id", [to, from] + args)
     }
 
+    /// An event a link points to: the cached event while there is one, else its kept record (nil when neither exists).
+    public func kept(shortID: Int64) -> KeptEvent? {
+        if let e = event(shortID: shortID) {
+            return KeptEvent(shortID: shortID, title: e.title, start: e.start, end: e.end, allDay: e.allDay, videoLink: e.videoLink)
+        }
+        return read("Could not read a kept event") {
+            try db.query("SELECT title, start, \"end\", all_day, video_link FROM cal_kept WHERE short_id=?", [shortID]) { s in
+                KeptEvent(shortID: shortID, title: DB.text(s, 0), start: DB.date(s, 1) ?? Date(), end: DB.date(s, 2) ?? Date(),
+                          allDay: DB.int(s, 3) != 0, videoLink: DB.text(s, 4))
+            }.first
+        } ?? nil
+    }
+
     // MARK: Internals
 
     private static let columns = """
         e.short_id, e.account, e.calendar_id, e.event_id, e.start, e.end, e.all_day, e.start_day, e.end_day, e.title, e.location,
-        e.video_link, e.description, e.html_link, e.recurring_id, e.google_updated, e.fb_card, e.gone, e.cancelled, e.original_start
+        e.video_link, e.description, e.html_link, e.recurring_id, e.google_updated, e.fb_card, e.gone, e.cancelled, e.original_start, e.guests
         """
 
     private func events(_ tail: String, _ args: [Any?]) -> [CalEvent] {
@@ -258,6 +281,7 @@ public final class CalendarCache {
                                 recurringID: DB.isNull(s, 14) ? nil : DB.text(s, 14), googleUpdated: DB.date(s, 15) ?? Date(),
                                 fbCard: DB.isNull(s, 16) ? nil : DB.int(s, 16), gone: DB.int(s, 17) != 0, cancelled: DB.int(s, 18) != 0)
                 e.originalStart = Self.originalStart(DB.isNull(s, 19) ? nil : DB.text(s, 19))
+                e.guests = (try? JSONDecoder().decode([CalGuest].self, from: Data(DB.text(s, 20).utf8))) ?? [] // try?-ok: an unreadable list shows no guests; the stored text is untouched
                 return e
             }
         } ?? []

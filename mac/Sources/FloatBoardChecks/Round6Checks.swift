@@ -105,11 +105,12 @@ import FloatBoardConnectors
         func cols(_ db: DB) throws -> [String] { try db.query("PRAGMA table_info(cal_series)") { DB.text($0, 1) } }
         var before: [String] = []
         do {
-            let db = try DB(url: url)
-            _ = try db.run("INSERT INTO cal_series(account, calendar_id, series_id, rule, read_at) VALUES('a','c','s','RRULE:FREQ=DAILY',1)")
-            _ = try db.run("ALTER TABLE cal_series DROP COLUMN master_start")
-            _ = try db.run("ALTER TABLE cal_series DROP COLUMN master_zone")
-            before = try cols(db)
+            // A board at 11 from before the amendment (built from the v11 shape): it is amended, then upgraded.
+            guard makeV11Schema(url, extra: """
+                INSERT INTO cal_series(account, calendar_id, series_id, rule, read_at) VALUES('a','c','s','RRULE:FREQ=DAILY',1);
+                ALTER TABLE cal_series DROP COLUMN master_start; ALTER TABLE cal_series DROP COLUMN master_zone;
+                """) else { throw DBError.sql("v11 board setup") }
+            before = rawColumns(url, "cal_series")
         }
         let fresh = root.appendingPathComponent("v11-new.sqlite")
         _ = try DB(url: fresh)
@@ -123,7 +124,7 @@ import FloatBoardConnectors
         let rows = try db.query("SELECT rule, master_zone IS NULL FROM cal_series") { (DB.text($0, 0), DB.int($0, 1)) }
         check(!before.contains("master_start") && !before.contains("master_zone") && before.contains("rule"), "c4_v11_amend_setup")
         let sameSchema = try schemaSQL(db) == schemaSQL(DB(url: fresh))
-        check(after.contains("master_start") && after.contains("master_zone") && again == after && version == 11
+        check(after.contains("master_start") && after.contains("master_zone") && again == after && version == Int64(DB.schemaVersion)
               && rows.count == 1 && rows.first?.0 == "RRULE:FREQ=DAILY" && rows.first?.1 == 1
               && sameSchema, "c4_existing_v11_board_gets_the_new_columns_in_place")
     } catch { check(false, "c4 v11 amend: \(error)") }

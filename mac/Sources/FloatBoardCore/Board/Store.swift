@@ -7,7 +7,14 @@ import SQLite3
 @MainActor
 public final class Store: ObservableObject {
     @Published public private(set) var cards: [Card] = []
+    /// The board's groups: tags that are not fixed, plus a fixed one a live task uses as its group.
     @Published public private(set) var areas: [Category] = []
+    /// Every tag (groups and the fixed tags Investor and Prospect), in order.
+    @Published public private(set) var tags: [Category] = []
+    /// The assistant's areas that are switched on (Settings › Areas).
+    @Published public internal(set) var modules: Set<Module> = []
+    /// The link the last ✕ on a chip removed (Undo puts it back).
+    @Published public internal(set) var lastUnlinked: UnlinkedLink?
     /// Online connectors (Settings › Mode); reloaded with the board.
     @Published public private(set) var connectors: [ConnectorInfo] = []
     @Published public var lastError: String?
@@ -31,22 +38,27 @@ public final class Store: ObservableObject {
         pruneActivity()
         detachUnreadableOutbox()
         seedAreas()
+        seedFixedTags()
         fillWatchStarts()
         reload()
     }
 
     public func reload() {
         do {
-            areas = try db.query("SELECT id,name,color,position FROM areas ORDER BY position, id") { s in
-                Category(id: DB.int(s, 0), name: DB.text(s, 1), colorHex: DB.text(s, 2),
-                         position: sqlite3_column_double(s, 3))
+            let all = try db.query("SELECT id,name,color,position,fixed FROM areas ORDER BY position, id") { s in
+                (Category(id: DB.int(s, 0), name: DB.text(s, 1), colorHex: DB.text(s, 2),
+                          position: sqlite3_column_double(s, 3)), DB.int(s, 4) != 0)
             }
+            let used = Set(try db.query("SELECT DISTINCT lower(area) FROM cards WHERE deleted=0") { DB.text($0, 0) })
+            tags = all.map(\.0)
+            areas = all.filter { !$0.1 || used.contains($0.0.name.lowercased()) }.map(\.0)
+            modules = try Self.readModules(db)
             cards = try db.query("""
                 SELECT id,title,notes,area,importance,due,status,created,started,done,link,gcal_account,gcal_link,
                        source,external_id,source_link,source_meta,imported_at,
                        source_mid,source_sent,withdrawn,ai_summary,connector,
                        reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at,
-                       watch_person,watch_contact,watch_since,due_day,due_has_time,gcal_calendar,gcal_event
+                       watch_person,watch_contact,watch_since,due_day,due_has_time,gcal_calendar,gcal_event,item_source
                 FROM cards WHERE deleted=0 ORDER BY created
                 """) { s in
                 var c = Card(
@@ -79,7 +91,7 @@ public final class Store: ObservableObject {
                     replyDraftRequest: DB.text(s, 26),
                     replyDraftSentAt: DB.date(s, 27)
                 )
-                c.gcalCalendar = DB.text(s, 33); c.gcalEvent = DB.text(s, 34)
+                c.gcalCalendar = DB.text(s, 33); c.gcalEvent = DB.text(s, 34); c.itemSourceRaw = DB.text(s, 35)
                 c.watchPerson = DB.text(s, 28); c.watchContact = DB.text(s, 29); c.watchSince = DB.date(s, 30)
                 (c.due, c.dueHasTime) = Self.loadedDue(due: c.due, day: sqlite3_column_type(s, 31) == SQLITE_NULL ? nil : DB.text(s, 31),
                                                        hasTime: DB.int(s, 32) != 0)
@@ -176,6 +188,7 @@ public final class Store: ObservableObject {
     public func update(_ card: Card, now: Date = Date()) {
         perform {
             let old = try currentCard(card.id)?.card
+            let oldNotes = try db.query("SELECT notes FROM cards WHERE id=?", [card.id]) { DB.text($0, 0) }.first ?? ""
             let d = Due.stored(card.due, hasTime: card.dueHasTime)
             try db.run("UPDATE cards SET title=?, notes=?, area=?, importance=?, due=?, due_day=?, due_has_time=?, link=?, updated=? WHERE id=?",
                        [card.title, card.notes, card.area, card.importance.rawValue, d.due, d.day, d.hasTime,
@@ -186,7 +199,9 @@ public final class Store: ObservableObject {
                 // Per-field history (calendar sync compares it with Google's update time), and the task's event follows.
                 try recordFieldChanges(old: old, new: new, actor: .user, now: now)
                 try queueCalendarPatch(old: old, new: new, now: now)
-                try queueChange(old: old, new: new, now: now) }
+                try queueChange(old: old, new: new, now: now)
+                // Ids typed into the notes link the task to them (new ones only; one unlinked with ✕ stays unlinked).
+                try linkMentionsRow(in: card.notes, previous: oldNotes, from: ShortID(kind: .task, number: card.id), now: now) }
         }
     }
 
@@ -260,9 +275,9 @@ public final class Store: ObservableObject {
         try db.run("UPDATE cards SET deleted=1, updated=? WHERE id=?", [now, id])
         try log(id, "deleted", cur.card.status, nil, now)
         let uuid = try queueOutbox(cur.card, kind: .deleted, verdict: verdict, now: now)
-        let links = try removeLinks(of: ShortID(kind: .task, number: id))
+        try hideLinks(of: ShortID(kind: .task, number: id))   // kept, hidden; a restore brings them back (even after a restart)
         let event = try queueCalendarDelete(cardID: id, now: now, delay: calendarDelay)   // the event FloatBoard made for it goes too (D8)
-        return DeleteMemo(task: DeletedTask(id: id, title: cur.card.title, at: now), outbox: uuid, links: links, event: event)
+        return DeleteMemo(task: DeletedTask(id: id, title: cur.card.title, at: now), outbox: uuid, links: [], event: event)
     }
 
     /// Keeps what a delete took away (the last 50 deletes, from the Mac or the phone), so undo or a phone restore can put
@@ -291,6 +306,7 @@ public final class Store: ObservableObject {
             (Status(rawValue: DB.text($0, 0)) ?? .todo, DB.int($0, 1) != 0) }).first, row.1 else { return false }
         try db.run("UPDATE cards SET deleted=0, updated=? WHERE id=?", [now, id])
         try log(id, "restored", nil, row.0, now)
+        try unhideLinks(of: ShortID(kind: .task, number: id))
         if let memo {
             try restoreLinks(memo.links)
             if let event = memo.event { try undoCalendarDelete(cardID: id, target: event.link, row: event.row, now: now) }
@@ -541,7 +557,7 @@ public final class Store: ObservableObject {
     /// First run: create the starter groups, plus any group names already used by tasks.
     private func seedAreas() {
         do {
-            let n = try db.query("SELECT count(*) FROM areas") { DB.int($0, 0) }.first ?? 0
+            let n = try db.query("SELECT count(*) FROM areas WHERE fixed=0") { DB.int($0, 0) }.first ?? 0
             if n == 0 {
                 for (i, (name, hex)) in [("Work", "#0A84FF"), ("Personal", "#30D158")].enumerated() {
                     try db.run("INSERT INTO areas(name,color,position) VALUES(?,?,?)", [name, hex, Double(i)])
@@ -631,6 +647,7 @@ public final class Store: ObservableObject {
             try db.run("INSERT INTO events(card_id,at,kind,actor,uuid) SELECT id, ?, ?, 'user', lower(hex(randomblob(16))) FROM cards WHERE area=?",
                        [now, "group deleted: \(area.name) → moved to \(target)", area.name])
             try db.run("UPDATE cards SET area=? WHERE area=?", [target, area.name])
+            try dropTagRows(area.id)
             try db.run("DELETE FROM areas WHERE id=?", [area.id])
             try groupsChanged(.deleted(area.name), now: now)
         }

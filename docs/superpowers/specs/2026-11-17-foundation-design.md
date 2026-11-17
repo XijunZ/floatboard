@@ -135,16 +135,16 @@ extension Store {
 
 ### Links (§6)
 ```swift
-public enum LinkKind: String, CaseIterable { case ownEvent = "own-event", related, source, notesOf = "notes-of",
+public enum ItemLinkKind: String, CaseIterable { case ownEvent = "own-event", related, source, notesOf = "notes-of",
                                               reviewOf = "review-of", supersedes, serves; public var directed: Bool }
 public enum LinkMaker: String, CaseIterable { case auto, suggested, manual }
-public struct ItemLink: Equatable { public let other: ShortID; public let kind: LinkKind; public let madeBy: LinkMaker
+public struct ItemLink: Equatable { public let other: ShortID; public let kind: ItemLinkKind; public let madeBy: LinkMaker
                                     public let isSubject: Bool; public let created: Date }   // isSubject: the asked-about item is the one the kind is said of
 extension Store {
     /// `a` is the subject of a directed kind: link(task, jot, kind: .source) = "the task was made from the jot".
     /// A pair already linked keeps one row: a manual link is never downgraded by auto/suggested; otherwise kind, subject and
     /// made_by are replaced. Linking to itself, or to a deleted item, does nothing. Returns false when nothing changed.
-    @discardableResult public func link(_ a: ShortID, _ b: ShortID, kind: LinkKind = .related, madeBy: LinkMaker = .manual,
+    @discardableResult public func link(_ a: ShortID, _ b: ShortID, kind: ItemLinkKind = .related, madeBy: LinkMaker = .manual,
                                         actor: Actor, now: Date = Date()) -> Bool
     public func unlink(_ a: ShortID, _ b: ShortID)              // existing; no Undo
     public func unlinkWithUndo(_ a: ShortID, _ b: ShortID)      // the ✕ on a chip; sets lastUnlinked

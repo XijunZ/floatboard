@@ -66,7 +66,7 @@ import FloatBoardCore
         let midnight = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 20))!.timeIntervalSince1970
         let half2 = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 20, hour: 14, minute: 30))!.timeIntervalSince1970
         let sql = """
-            ALTER TABLE cards DROP COLUMN due_day; ALTER TABLE cards DROP COLUMN due_has_time; ALTER TABLE cards DROP COLUMN gcal_calendar; ALTER TABLE cards DROP COLUMN gcal_synced_at; ALTER TABLE cards DROP COLUMN gcal_baseline; DROP TABLE cal_outbox; DROP TABLE cal_series; DROP TABLE links; DROP TABLE cal_events; DROP TABLE cal_calendars; PRAGMA user_version = 10;
+            ALTER TABLE cards DROP COLUMN due_day; ALTER TABLE cards DROP COLUMN due_has_time; ALTER TABLE cards DROP COLUMN gcal_calendar; ALTER TABLE cards DROP COLUMN gcal_synced_at; ALTER TABLE cards DROP COLUMN gcal_baseline; ALTER TABLE cards DROP COLUMN item_source; ALTER TABLE areas DROP COLUMN fixed; DROP TABLE item_tags; DROP TABLE jots; DROP TABLE jot_history; DROP TABLE people; DROP TABLE reminders; DROP TABLE cal_kept; DROP TABLE cal_outbox; DROP TABLE cal_series; DROP TABLE links; DROP TABLE cal_events; DROP TABLE cal_calendars; PRAGMA user_version = 10;
             INSERT INTO cards(title,area,due,status,created) VALUES('Old date only','Personal',\(midnight),'todo',1);
             INSERT INTO cards(title,area,due,status,created) VALUES('Old timed','Personal',\(half2),'todo',1);
             INSERT INTO cards(title,area,status,created) VALUES('Old no due','Personal','todo',1);
@@ -93,7 +93,7 @@ import FloatBoardCore
             guard sqlite3_open(shanghai.path, &h) == SQLITE_OK else { throw DBError.sql("cannot open") }
             let midnight = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 20))!.timeIntervalSince1970
             let sql = """
-                ALTER TABLE cards DROP COLUMN due_day; ALTER TABLE cards DROP COLUMN due_has_time; ALTER TABLE cards DROP COLUMN gcal_calendar; ALTER TABLE cards DROP COLUMN gcal_synced_at; ALTER TABLE cards DROP COLUMN gcal_baseline; DROP TABLE cal_outbox; DROP TABLE cal_series; DROP TABLE links; DROP TABLE cal_events; DROP TABLE cal_calendars; PRAGMA user_version = 10;
+                ALTER TABLE cards DROP COLUMN due_day; ALTER TABLE cards DROP COLUMN due_has_time; ALTER TABLE cards DROP COLUMN gcal_calendar; ALTER TABLE cards DROP COLUMN gcal_synced_at; ALTER TABLE cards DROP COLUMN gcal_baseline; ALTER TABLE cards DROP COLUMN item_source; ALTER TABLE areas DROP COLUMN fixed; DROP TABLE item_tags; DROP TABLE jots; DROP TABLE jot_history; DROP TABLE people; DROP TABLE reminders; DROP TABLE cal_kept; DROP TABLE cal_outbox; DROP TABLE cal_series; DROP TABLE links; DROP TABLE cal_events; DROP TABLE cal_calendars; PRAGMA user_version = 10;
                 INSERT INTO cards(title,area,due,status,created) VALUES('Shanghai midnight','Personal',\(midnight),'todo',1);
                 """
             guard sqlite3_exec(h, sql, nil, nil, nil) == SQLITE_OK else { throw DBError.sql("v10 setup") }

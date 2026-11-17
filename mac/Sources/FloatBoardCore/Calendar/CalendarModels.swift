@@ -65,10 +65,29 @@ public struct GoogleEventChange: Equatable {
     public var eventID: String
     public var cancelled: Bool
     public var fields: CalEventFields?
+    /// The guest list as Google sent it; nil when it was not read (the stored list is then kept).
+    public var guests: [CalGuest]?
 
-    public init(eventID: String, cancelled: Bool, fields: CalEventFields?) {
-        self.eventID = eventID; self.cancelled = cancelled; self.fields = fields
+    public init(eventID: String, cancelled: Bool, fields: CalEventFields?, guests: [CalGuest]? = nil) {
+        self.eventID = eventID; self.cancelled = cancelled; self.fields = fields; self.guests = guests
     }
+}
+
+/// One guest of an event: their address and reply ("needsAction", "accepted", "declined", "tentative").
+public struct CalGuest: Codable, Equatable {
+    public let email: String
+    public let status: String
+    public init(email: String, status: String) { self.email = email; self.status = status }
+}
+
+/// The permanent minimal record of an event a link points to (kept after it leaves the window or is deleted in Google).
+public struct KeptEvent: Equatable {
+    public let shortID: Int64
+    public let title: String
+    public let start: Date
+    public let end: Date
+    public let allDay: Bool
+    public let videoLink: String
 }
 
 /// An event kept on the board. `shortID` is its visible number (E-n) and never changes or gets reused.
@@ -95,6 +114,8 @@ public struct CalEvent: Equatable {
     /// For an instance of a repeating meeting: where the series put it (midnight of its day in the app's zone for an
     /// all-day one). Differs from `start` when the instance was moved in Google.
     public var originalStart: Date? = nil
+    /// Guests with their replies (empty when Google listed none, or before version 12 read them).
+    public var guests: [CalGuest] = []
 
     public init(shortID: Int64, account: String, calendarID: String, eventID: String, start: Date, end: Date, allDay: Bool,
                 title: String, location: String, videoLink: String, description: String, htmlLink: String,

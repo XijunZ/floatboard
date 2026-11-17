@@ -28,6 +28,8 @@ public enum LinkPickerSearch {
             all = events.filter { !$0.gone && !$0.cancelled }.map {
                 LinkCandidate(id: $0.id, title: $0.title, start: $0.start, done: false)
             }
+        default:
+            all = []
         }
         let pool = all.filter { !exclude.contains($0.id) }
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -52,6 +54,8 @@ public enum LinkPickerSearch {
                 if starts(a) != starts(b) { return starts(a) }
                 return a.id.number > b.id.number
             }
+        default:
+            ranked = hits
         }
         return Array(ranked.prefix(limit))
     }
