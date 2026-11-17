@@ -99,10 +99,22 @@ enum Snapshot {
         }
         // Drawn by an off-screen hosting view, as the app lays it out (scroll views, real buttons and pickers), which the
         // image renderer above cannot do.
-        func saveLive<V: View>(_ v: V, _ name: String, _ size: CGSize) {
+        func saveLive<V: View>(_ v: V, _ name: String, _ size: CGSize, inWindow: Bool = false) {
             let host = NSHostingView(rootView: v.environmentObject(store).environmentObject(ui).environmentObject(google)
                 .frame(width: size.width, height: size.height).background(Color(white: 0.97)).environment(\.colorScheme, .light))
             host.frame = CGRect(origin: .zero, size: size)
+            // Lists (AppKit tables) draw their rows only in a window: a borderless one far off screen, closed after.
+            var window: NSWindow?
+            if inWindow {
+                let w = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
+                w.isReleasedWhenClosed = false
+                w.contentView = host
+                w.setFrameOrigin(NSPoint(x: -30000, y: -30000))
+                w.orderFrontRegardless()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+                window = w
+            }
+            defer { window?.close() }
             host.layoutSubtreeIfNeeded()
             guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
             host.cacheDisplay(in: host.bounds, to: rep)
@@ -118,6 +130,26 @@ enum Snapshot {
                 ui.settingsSection = s
                 saveLive(SettingsView().padding(12), "ui-settings-\(s.rawValue).png", CGSize(width: 1000, height: 560))
             }
+            // Settings › Groups at the smallest window (800 pt wide; the board's 12 pt padding each side), with tasks in
+            // "Work" and its delete question open.
+            if let work = store.areas.first?.name {
+                for t in ["Draft the plan", "Call the bank", "Book the venue"] { store.add(title: t, area: work, importance: .medium, due: nil) }
+                ui.settingsSection = .groups
+                saveLive(SettingsView().environment(\.groupsSnapshotDeleting, work).padding(.horizontal, 12).padding(.vertical, 10),
+                         "ui-settings-groups-800.png", CGSize(width: 800, height: 520), inWindow: true)
+            }
+            // The same with very long group names (about 80 characters each), the source of the delete and its destination.
+            if store.areas.count >= 2 {
+                let long1 = "Client onboarding and contract renewals for the northern region accounts team"
+                let long2 = "Personal errands, family admin, school paperwork and household maintenance list"
+                _ = store.renameArea(store.areas[0], to: long1)
+                _ = store.renameArea(store.areas[1], to: long2)
+                saveLive(SettingsView().environment(\.groupsSnapshotDeleting, long1).padding(.horizontal, 12).padding(.vertical, 10),
+                         "ui-settings-groups-800-long.png", CGSize(width: 800, height: 520), inWindow: true)
+            }
+            // Settings › Bar in full (tall, in a window so its lists draw their rows).
+            ui.settingsSection = .bar
+            saveLive(ScrollView { BarSettingsView().padding(12) }, "ui-settings-bar-full.png", CGSize(width: 1000, height: 1100), inWindow: true)
         }
         let backdrop = LinearGradient(colors: [.blue, .orange, .green], startPoint: .leading, endPoint: .trailing)
         save(RootView().background(backdrop), "banner.png", CGSize(width: 900, height: 30))

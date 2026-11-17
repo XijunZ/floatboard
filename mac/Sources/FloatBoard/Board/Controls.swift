@@ -8,9 +8,12 @@ struct Dropdown<T: Hashable>: View {
     @Binding var selection: T
     var title: (T) -> String = { "\($0)" }
     var dot: ((T) -> Color)? = nil
+    /// At most this many characters of the chosen value on the button (then "…"); the menu shows every name in full.
+    /// The button sizes itself to its text, so this is what bounds its width.
+    var labelLimit: Int? = nil
 
-    init(options: [T], selection: Binding<T>, title: @escaping (T) -> String = { "\($0)" }, dot: ((T) -> Color)? = nil) {
-        self.options = options; self._selection = selection; self.title = title; self.dot = dot
+    init(options: [T], selection: Binding<T>, title: @escaping (T) -> String = { "\($0)" }, dot: ((T) -> Color)? = nil, labelLimit: Int? = nil) {
+        self.options = options; self._selection = selection; self.title = title; self.dot = dot; self.labelLimit = labelLimit
     }
 
     var body: some View {
@@ -23,11 +26,16 @@ struct Dropdown<T: Hashable>: View {
         } label: {
             HStack(spacing: 5) {
                 if let dot { Circle().fill(dot(selection)).frame(width: 7, height: 7) }
-                Text(title(selection))
+                Text(labelLimit.map { Self.clipped(title(selection), $0) } ?? title(selection))
             }
         }
         .menuStyle(.button)
         .fixedSize()
+    }
+
+    /// `text` cut to `limit` characters with "…" when longer.
+    static func clipped(_ text: String, _ limit: Int) -> String {
+        text.count > limit ? String(text.prefix(max(1, limit - 1))).trimmingCharacters(in: .whitespaces) + "…" : text
     }
 }
 
