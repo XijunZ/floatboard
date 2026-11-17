@@ -759,6 +759,8 @@ await planningChecks()
 phoneDeleteChecks()
 foundationChecks()
 foundationCoreChecks()
+CircleDue.register()
+circleChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)

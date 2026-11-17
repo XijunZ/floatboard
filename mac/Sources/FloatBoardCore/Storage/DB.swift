@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 12
+    public static let schemaVersion = 14
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -205,6 +205,10 @@ public final class DB {
             ALTER TABLE cal_events ADD COLUMN guests TEXT NOT NULL DEFAULT '[]';
 
             """ + v12Tables
+        }
+        if version < 14 {
+            // 12 -> 14 (13 is Jots'): Circle (docs/superpowers/specs/2026-11-17-circle-design.md). New tables only.
+            sql += v14Tables
         }
         return sql
     }
@@ -410,7 +414,69 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables
+    """ + v12Tables + v14Tables
+
+    /// The tables Circle adds in version 14 (the same text for a new board and an upgraded one).
+    static let v14Tables = """
+    -- Circle's fields of a person (the core row is `people`); made on first save.
+    CREATE TABLE circle_people(
+        person_id INTEGER PRIMARY KEY, how_known TEXT NOT NULL DEFAULT '', company TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '',
+        birthday TEXT NOT NULL DEFAULT '', language TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+        interval_days INTEGER, firm TEXT NOT NULL DEFAULT '', focus TEXT NOT NULL DEFAULT '', purpose TEXT NOT NULL DEFAULT '',
+        stage TEXT NOT NULL DEFAULT '', stage_at REAL, snoozed_until REAL, reminded_at REAL, reminder_task INTEGER,
+        updates_on INTEGER NOT NULL DEFAULT 0, news_muted INTEGER NOT NULL DEFAULT 0, feed_url TEXT NOT NULL DEFAULT '',
+        officer_id TEXT NOT NULL DEFAULT '', officer_name TEXT NOT NULL DEFAULT '', officer_confirmed REAL, manual_checked REAL
+    );
+    -- A person's handles: phone (international digits), email (lower case), whatsapp (chat id), wechat (chat name), linkedin (profile path).
+    CREATE TABLE person_handles(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL, added REAL NOT NULL,
+        UNIQUE(kind, value)
+    );
+    CREATE INDEX person_handles_person ON person_handles(person_id);
+    -- Message and meeting metadata (who, when, channel, direction), never any text: one row per handle, channel, day and direction.
+    CREATE TABLE circle_exchanges(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL, direction TEXT NOT NULL, at REAL NOT NULL, handle_kind TEXT NOT NULL,
+        handle TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', key TEXT NOT NULL UNIQUE, ref TEXT NOT NULL DEFAULT '',
+        ignored INTEGER NOT NULL DEFAULT 0, added REAL NOT NULL
+    );
+    CREATE INDEX circle_exchanges_handle ON circle_exchanges(handle_kind, handle, at);
+    -- Each reader's state: data as of, complete back to, its cursor, and what it can't see.
+    CREATE TABLE circle_channels(
+        channel TEXT PRIMARY KEY, as_of REAL, complete_from REAL, cursor TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT ''
+    );
+    -- Merges (automatic on an exact phone or email match, or by hand) and what moved, so each can be split.
+    CREATE TABLE circle_merges(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, kept INTEGER NOT NULL, merged INTEGER NOT NULL, moved TEXT NOT NULL, auto INTEGER NOT NULL,
+        at REAL NOT NULL, split REAL
+    );
+    -- People suggested by imports (LinkedIn, Google Contacts), never added in bulk. state: new, added, dismissed.
+    CREATE TABLE circle_candidates(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        handles TEXT NOT NULL DEFAULT '[]', company TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'new',
+        added REAL NOT NULL
+    );
+    -- Suggestions the owner said no to (merge pairs, conversation handles).
+    CREATE TABLE circle_dismissed(key TEXT PRIMARY KEY, at REAL NOT NULL);
+    -- LinkedIn connection exports, each dated, and their rows by profile path.
+    CREATE TABLE linkedin_imports(id INTEGER PRIMARY KEY AUTOINCREMENT, export_date TEXT NOT NULL, imported REAL NOT NULL, rows INTEGER NOT NULL);
+    CREATE TABLE linkedin_rows(
+        import_id INTEGER NOT NULL, url TEXT NOT NULL, name TEXT NOT NULL, company TEXT NOT NULL, position TEXT NOT NULL,
+        PRIMARY KEY(import_id, url)
+    );
+    -- What's new for a person; match 'possible' or 'unlikely' (set aside by Claude); verdict '' until marked right or wrong.
+    CREATE TABLE circle_updates(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', at REAL, found REAL NOT NULL, match TEXT NOT NULL DEFAULT 'possible',
+        verdict TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX circle_updates_person ON circle_updates(person_id, found);
+    -- Companies House officers that might be a person, shown until one is confirmed.
+    CREATE TABLE officer_candidates(
+        person_id INTEGER NOT NULL, officer_id TEXT NOT NULL, name TEXT NOT NULL, born TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '',
+        found REAL NOT NULL, PRIMARY KEY(person_id, officer_id)
+    );
+
+    """
 
     func exec(_ sql: String) throws {
         if sqlite3_exec(handle, sql, nil, nil, nil) != SQLITE_OK { throw DBError.sql(lastMessage) }
