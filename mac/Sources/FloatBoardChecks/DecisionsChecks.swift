@@ -170,7 +170,8 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
     check(rec?.foundByClaude == true && rec?.source == .claude && rec?.status == .decided && rec?.expected == "" && rec?.confidence == nil,
           "screened_decision_found_by_claude_without_predictions")
     check(out.maybe.compactMap { ds.decision($0)?.status } == [.maybe, .maybe], "unverified_quote_goes_to_maybe")
-    DecisionScreening.finishRun(store: s, started: decisionsNow, readFrom: DecisionScreening.readFrom(store: s, now: decisionsNow), complete: out.unreadable == 0, now: decisionsNow)
+    DecisionScreening.finishRun(store: s, started: decisionsNow, readFrom: DecisionScreening.readFrom(store: s, now: decisionsNow), complete: out.unreadable == 0, now: decisionsNow,
+                                jotsUpTo: DecisionScreening.lastJotID(store: s))
     let again = DecisionScreening.pending(store: s, now: decisionsNow.addingTimeInterval(60))
     check(again.map(\.ref) == [pending[1].ref], "each_jot_version_screened_once_unreadable_retried")
     // An edit is a new version; decisions already recorded from the jot are not recorded again.
@@ -194,6 +195,15 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
             ScreenFound(quote: "Stop the weekly newsletter", decision: "Stop the weekly newsletter", type: "operational")])], sent: [r], store: s, now: decisionsNow)
         check(o3.recorded.isEmpty && o3.references == 1, "quoted_older_decision_is_a_reference")
     }
+    // Integration: a jot that reaches the Mac after a complete run but carries an older time (a phone capture made offline,
+    // or meeting notes the engine held while the Mac was off) is still screened: it is new by arrival.
+    let runAt = decisionsNow.addingTimeInterval(400)
+    DecisionScreening.finishRun(store: s, started: runAt, readFrom: runAt, complete: true, now: runAt, jotsUpTo: DecisionScreening.lastJotID(store: s))
+    if let late = js.add("Captured offline: we decided to keep the old supplier.", kind: .jot, source: .phone, origin: "late-1",
+                         tags: [], now: decisionsNow.addingTimeInterval(-10 * 86400)) {
+        let p2 = DecisionScreening.pending(store: s, now: runAt.addingTimeInterval(60))
+        check(p2.map(\.ref) == ["J-\(late.id)@\(DecisionScreening.version(late.text))"], "late_arriving_jot_with_older_time_is_screened")
+    } else { check(false, "late jot setup") }
 }
 
 // MARK: Reviews (D6) and the weekly review (D4)

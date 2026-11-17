@@ -115,6 +115,7 @@ extension ConnectorClient {
         defer { screening = false }
         DecisionRulebook.applyPending(store: store, connector: connector, now: now)
         let readFrom = DecisionScreening.readFrom(store: store, now: now)
+        let jotsUpTo = DecisionScreening.lastJotID(store: store)
         let pending = DecisionScreening.pending(store: store, now: now)
         var total = ScreenOutcome()
         for batch in DecisionScreening.batches(pending) {
@@ -132,7 +133,8 @@ extension ConnectorClient {
             }
         }
         lastFailure = nil
-        DecisionScreening.finishRun(store: store, started: now, readFrom: readFrom, complete: total.unreadable == 0, now: now)
+        DecisionScreening.finishRun(store: store, started: now, readFrom: readFrom, complete: total.unreadable == 0, now: now,
+                                    jotsUpTo: jotsUpTo)
         if total.unreadable > 0 {
             store.activity("decisions", .warning, "Couldn't read Claude's answer for \(total.unreadable) jot\(total.unreadable == 1 ? "" : "s"); they are read again next week")
         }
