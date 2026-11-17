@@ -1,6 +1,6 @@
 # FloatBoard assistant: features per area, then links
 
-Date: 17 Nov 2026 · Status: **draft v4** (owner comments, research, and Codex review of v3 folded in; for owner review)
+Date: 17 Nov 2026 · Status: **draft v5** (owner answers round 2, phone app section; for owner review)
 Research behind it: `docs/superpowers/research/2026-11-17-market-research.md`,
 `docs/superpowers/research/2026-11-17-people-intelligence.md`.
 
@@ -14,7 +14,7 @@ Build order: Calendar (built, in review) → Jots → Circle → Decisions → R
 ## Ground rules
 
 - **The board stays home.** The app opens on the board; the bar is always visible. Tabs:
-  Board · Calendar · Jots · Circle · Decisions · Resolutions. Each area is a module that can be
+  Board · Calendar · Jots · Circle · Decisions · Resolutions · Settings. Each area is a module that can be
   switched off (nothing deleted; off by default for new installs).
 - **One shared standard for items.** Tasks, jots, people, decisions and resolutions all have: a
   visible id (`T- E- J- P- D- R-`), date added, date updated, source (typed / phone / meeting /
@@ -34,8 +34,8 @@ Build order: Calendar (built, in review) → Jots → Circle → Decisions → R
   owner's mode) holds what the phone needs and runs Claude's background jobs. Phone features need
   Always-on mode.
 - **Privacy:** Circle uses message metadata (who, when, channel, direction) and never stores message
-  text. Message text reaches Claude only for a draft the owner asks for, or for Prospect signals
-  (5 people at most, see 3).
+  text. Message text reaches Claude only for a draft the owner asks for. Promises and follow-ups in
+  messages are caught by the board's existing screening as tasks, not by Circle.
 
 ---
 
@@ -138,8 +138,8 @@ closer relationship). Plus the shared tags.
 | P7 | **Context nudges:** birthday; "you meet P-n next week" |
 | P8 | **Timeline:** per person, recent exchanges (channel, date, direction), meetings, jots, tasks and decisions, each opening its source. No message text stored |
 | P9 | **Draft a message** (on request): a short draft in the owner's voice and usual language, from notes and the last few messages; never invents a reason; one tap opens WhatsApp or Gmail with it. Never sent automatically |
-| P10 | **Active prospects (at most 5 at a time):** a purpose (career, investing, venture, learning) and a stage moved by hand (*want to meet → in touch → regular*, or *dropped*). Only for these, Claude also spots **promises and follow-up dates** in your messages with them, and shows them on the card |
-| P11 | **Updates (people intelligence)** for Investor- and Prospect-tagged people (others on request): job and title changes from the **LinkedIn connections export** (you download it monthly; FloatBoard reminds you and compares); **UK Companies House** directorships and resignations; **news** for that person or firm (Google News feed); posts from their **blog / Substack / company news** page if they have one. Shown on the card as "What's new" |
+| P10 | **Active prospects (at most 5 at a time):** a purpose (career, investing, venture, learning) and a stage moved by hand (*want to meet → in touch → regular*, or *dropped*). Their card shows the open **tasks the board's screening already made from their messages** (promises, follow-ups), so nothing extra reads their messages |
+| P11 | **Updates (people intelligence)** for Investor- and Prospect-tagged people, **except Family** (others on request): job and title changes from the **LinkedIn connections export** (you download it monthly; FloatBoard reminds you and compares); **UK Companies House** directorships and resignations; **news** for that person or firm (Google News feed); posts from their **blog / Substack / company news** page if they have one. Shown on the card as "What's new" |
 | P12 | **LinkedIn posts:** not read automatically (it breaks LinkedIn's terms and risks your account). The card links to their profile and reminds you to turn on LinkedIn's own "notify me about posts" for the people you most want to follow |
 | P13 | **Chinese contacts:** no automatic sources exist that can be used safely from the UK; the card keeps a "last checked" date and links for a manual look |
 
@@ -243,7 +243,6 @@ probabilistically is flagged here for the owner.
 | **Find decisions in the week's jots** | Decisions | new/edited jots, weekly batch | **⚑ judgement: what counts as a decision, and its type; recorded without confirm, so mistakes show up as noise. Mitigations: Maybe list, "Not a decision" teaches the rulebook, weekly batch only** |
 | Suggest "supersedes" | Decisions | new decision + same-tag earlier ones | **⚑ judgement; suggestion only** |
 | Fill the add-contact form | Circle | that person's recent message headers and signatures | low (owner confirms) |
-| **Spot promises and follow-up dates** | Circle | message text, **5 active prospects only** | **⚑ judgement and message text leaves the Mac; limited to 5 people** |
 | **Is this news about this person?** | Circle | news headline + person's name, firm | **⚑ same-name confusion; shown as "possible" until opened** |
 | Draft a message | Circle | notes + last few messages, on request | low (never sent automatically); note: user-facing text on Haiku by owner's choice |
 
@@ -302,8 +301,7 @@ events; Fathom meeting metadata (meeting link, scheduled start, invitee emails) 
   Where a channel can't see something, the card says so instead of guessing.
 - **Privacy is scoped to Circle:** Circle stores no message text. Add-contact autofill uses only
   names, addresses and phone numbers from message headers (no signatures, no body). Message text is
-  sent to Claude only for a requested draft or for active-prospect signals; nothing is kept but the
-  extracted promise/date. When a prospect becomes inactive, their extracted signals are removed.
+  sent to Claude only for a requested draft; nothing is kept from it.
   (Task screening is unchanged and covered by its own rules.)
 - **LinkedIn export:** matched by profile URL; each import is dated; the card says "changed since
   the export of 3 Nov", never an invented date; a missing row is "not in export", not a job change.
@@ -342,13 +340,44 @@ events; Fathom meeting metadata (meeting link, scheduled start, invitee emails) 
 "Not a decision" adds an example to the Decisions rulebook (no extra AI call). Tag suggestions,
 cleanup and form filling are judgement too, always shown for confirmation.
 
-## 10. Open questions (each with a suggested default)
+## 10. Phone app
 
-1. **Several tags per task** (needed for "same standard as jots"): today a task has one group.
-   *Default: allow several; the first one keeps the card's colour.*
-2. **Six tabs** is a lot next to the board. *Default: keep six; Resolutions is a quiet tab you open
-   at review time.*
-3. **Prospect signals send message text to Claude** for up to 5 people. *Default: yes, only for
-   active prospects, and the card says so.*
-4. **News watch per person** costs nothing but can be noisy. *Default: on for Investor and Prospect
-   tags only.*
+The phone is for **capture, a glance and quick actions** on the go; setting things up and long
+editing stay on the Mac. One installable web app on the Pixel (Chrome "Install app"), as today:
+passkey sign-in, works offline (last copy shown, changes queued, "N waiting to sync"), push alerts.
+
+**Five screens, bottom bar** (Decisions, Resolutions and Settings sit under More):
+
+| Screen | What it shows | Actions |
+|---|---|---|
+| **Plan** (opens first) | Overdue tasks (red) and Today, Rest of this week, Next week: meetings (repeating ones once, with "weekly Tue"), tasks due; Circle's due people; on Sundays, the weekly review | tap a meeting → Join / linked tasks; tick a task done; "I contacted them" |
+| **Board** | To do / Doing / Watch / Done today, as now | move, done, add, edit due and tags, **delete with Undo and the same "teach" choices as the Mac** (a task made by email sorting asks why, so the rules learn), a short vibration on delete and done |
+| **Jots** | writing box on top (keyboard microphone for voice), the last 30 days below, search and tag filter | save; Claude cleanup with before/after; select text → **Make task / Make decision** button |
+| **Circle** | due this week, search, person cards (last talked, what's new, open tasks, timeline) | "I contacted them", snooze, **Draft** → opens WhatsApp or Gmail with it |
+| **More** | Decisions (read-only list and due reviews), Resolutions (this quarter's goals), Settings (alerts, quiet hours, sign out) | answer a decision review; mark "Not a decision" |
+
+**Android extras (no app store needed):**
+- **Long-press the app icon:** "New jot" (opens straight to the writing box) and "Plan".
+- **Share into FloatBoard:** from any app (Chrome, WhatsApp, Gmail), Share → FloatBoard saves the
+  text or link as a jot, or as a task if you pick "Task".
+- **Notification buttons:** a due-person alert has "Contacted" and "Snooze"; a task alert has "Done".
+- **Badge** on the icon: overdue tasks plus due people.
+
+**Rules:** the Mac stays the record; every phone change carries its time and newest wins (existing
+sync v2). Jots and Circle cards are cached on the phone for offline reading (signing out clears them).
+Alerts stay inside the shared budget and quiet hours. Checked at 360/390/430 px, light and dark,
+long and Chinese text.
+
+**When:** delete-with-teach and overdue-on-Plan come with the Calendar release (the board and Plan
+exist now); Jots, Circle and More arrive with their areas; share-into and icon shortcuts come with Jots.
+
+## 11. Owner answers (17 Nov 2026, second round)
+
+1. Several tags per item: **yes** (primary tag sets colour and board group).
+2. Tabs: **yes, plus a seventh, Settings**.
+3. Prospect promises: **no extra Claude reading**; the board's screening already turns promises in
+   messages into tasks, and the prospect's card shows them.
+4. News and "what's new": Investor and Prospect, **not Family**.
+5. Overdue tasks at the top of Today on the phone: **yes**.
+6. Phone: **delete with feedback** (Undo, teach choices, vibration).
+7. Phone app designed in §10.
