@@ -29,9 +29,11 @@ struct EventPanel: View {
 
     private var editable: Bool { calendar?.owned ?? false }
 
-    /// Sends only the fields the user changed since the panel opened (an untouched panel sends nothing).
+    /// Sends only the fields the user changed since the panel opened (an untouched panel sends nothing), on top of the event
+    /// as it is now (Google may have changed it while the panel was open).
     private func save() {
         guard editable, !deleted else { return }
+        let event = edits.current(self.event)
         let change = EventPanelEdit.changes(event: event, opened: opened, now: .init(title: title, day: day, start: start, end: end))
         if let t = change.title { edits.rename(event, to: t) }
         if let m = change.move { edits.move(event, start: m.start, end: m.end) }

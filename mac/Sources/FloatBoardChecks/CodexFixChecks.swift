@@ -237,6 +237,30 @@ import FloatBoardConnectors
         let synced = patchedSpan("md2")
         check(synced?.0 == Due.dayString(days(2)) && synced?.1 == days(5), "f5_sync_move_keeps_a_3_day_event_3_days")
     } catch { check(false, "f5 multiday: \(error)") }
+
+    // F6. The event panel saves only the fields the user changed since it opened, on top of the event as it is now.
+    do {
+        let (store, cache, outbox) = try setup("f6-panel")
+        cacheEvent(cache, "p6", "Design review", at(10), at(11), updated: Date().addingTimeInterval(-3600))
+        guard let openedEvent = cache.event(account: acct, calendarID: acct, eventID: "p6") else { check(false, "f6 setup"); return }
+        let opened = EventPanelEdit.Fields(openedEvent)
+        // While the panel is open, Google moves the event to 12:00-13:00.
+        cacheEvent(cache, "p6", "Design review", at(12), at(13), updated: Date())
+        guard let current = cache.event(account: acct, calendarID: acct, eventID: "p6") else { check(false, "f6 setup 2"); return }
+        var endOnly = opened; endOnly.end = at(14)
+        let c1 = EventPanelEdit.changes(event: current, opened: opened, now: endOnly)
+        if let m = c1.move { store.moveCalendarEvent(current, start: m.start, end: m.end) }
+        var sent: (Date?, Date?)?
+        if case .patch(_, nil, let st, let en, nil)? = outbox.rows(unsent: true).first?.write { sent = (st, en) }
+        check(c1.move?.start == at(12) && c1.move?.end == at(14) && sent != nil && sent?.0 == nil && sent?.1 == at(14),
+              "f6_end_only_edit_keeps_googles_new_start_and_sends_only_the_end")
+        // Google moves it to the next day; the user changes only the start time: the new day stays.
+        cacheEvent(cache, "p6", "Design review", at(10, plusDays: 1), at(11, plusDays: 1), updated: Date())
+        guard let moved = cache.event(account: acct, calendarID: acct, eventID: "p6") else { check(false, "f6 setup 3"); return }
+        var startOnly = opened; startOnly.start = at(9)
+        let c2 = EventPanelEdit.changes(event: moved, opened: opened, now: startOnly)
+        check(c2.move?.start == at(9, plusDays: 1) && c2.move?.end == at(10, plusDays: 1), "f6_clock_only_edit_keeps_googles_new_day")
+    } catch { check(false, "f6 panel: \(error)") }
 }
 
 /// A Google event as the API returns it.
