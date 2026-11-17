@@ -383,12 +383,12 @@ private final class PhoneEngine {
     store.link(ShortID(kind: .task, number: prep.id), ShortID(kind: .event, number: standup.shortID), actor: .user)
 
     let events = PhoneBoard.events(store: store, now: now)
-    check(events.filter { $0.title.hasSuffix("link") }.allSatisfy { $0.video == nil } && events.count == 5, "phone_body_drops_malformed_https_link")
-    check(events.filter { !$0.title.hasSuffix("link") }.map(\.title) == ["Standup", "Insecure call", "Tomorrow review"]
+    check(events.filter { $0.title.hasSuffix("link") }.allSatisfy { $0.video == nil } && events.count == 6, "phone_body_drops_malformed_https_link")
+    check(events.filter { !$0.title.hasSuffix("link") }.map(\.title) == ["Standup", "Insecure call", "Tomorrow review", "Next week"]
           && events[0].id == "E-\(standup.shortID)" && events[0].video == "https://meet.example.com/abc" && events[0].tasks == [prep.id]
           && events[0].color == "#112233" && events[0].allDay == false && events[1].video == nil && events[2].tasks.isEmpty
           && PhoneBoard.parseISO(events[0].start) == at(0, 10) && PhoneBoard.parseISO(events[0].end) == at(0, 11),
-          "phone_body_includes_today_and_tomorrow_events")
+          "phone_body_includes_events_through_next_week")
     check(!events.contains { $0.title.hasPrefix("Task block") }, "phone_body_skips_task_events")
     do {
         let data = try PhoneBoard.body([], events: events, timeZone: "Europe/London")

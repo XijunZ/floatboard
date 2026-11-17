@@ -755,6 +755,7 @@ oneTaskPayloadChecks(sharedStore!)
 await archiveChecks()
 await finalFixChecks()
 await codexFixChecks()
+await planningChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)

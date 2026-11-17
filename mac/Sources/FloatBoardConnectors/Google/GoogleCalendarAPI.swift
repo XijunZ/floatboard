@@ -142,6 +142,13 @@ public struct GoogleCalendarAPI: Sendable {
         return (r.eventID, r.fields)
     }
 
+    /// A repeating meeting's rule: the series' (master event's) `recurrence` lines (RRULE, EXDATE ...); [] when it has none.
+    public func recurrence(calendarID: String, seriesID: String) async throws -> [String] {
+        let obj = try await json(try await send("GET", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(seriesID))",
+                                                query: [URLQueryItem(name: "fields", value: "recurrence")]))
+        return (obj["recurrence"] as? [Any] ?? []).compactMap { $0 as? String }
+    }
+
     /// Reads one event with its ETag (Google's version stamp), to change it only if it is still as read (`patch(ifMatch:)`).
     public func getForUpdate(calendarID: String, eventID: String) async throws -> (eventID: String, fields: CalEventFields, etag: String?) {
         let obj = try await json(try await send("GET", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(eventID))"))

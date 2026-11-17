@@ -10,7 +10,9 @@ public struct BoardLink: Codable, Equatable {
     public init(kind: String, url: String, label: String? = nil) { self.kind = kind; self.url = url; self.label = label }
 }
 
-/// One calendar event in the copy for the phone's Today list. Times are ISO 8601 UTC; `tasks` are the ids of the cards linked to it.
+/// One calendar event in the copy for the phone's planning summary. Times are ISO 8601 UTC; `tasks` are the ids of the cards
+/// linked to it. A repeating meeting's instances share `series` (an opaque "S-" key) and carry `repeat`, the rule in a few
+/// words ("weekdays 09:00"), so the phone lists the meeting once per block; both are left out for a one-off event.
 public struct BoardEvent: Codable, Equatable {
     public var id: String
     public var title: String
@@ -20,9 +22,13 @@ public struct BoardEvent: Codable, Equatable {
     public var video: String?
     public var color: String
     public var tasks: [Int64]
-    enum CodingKeys: String, CodingKey { case id, title, start, end, allDay = "all_day", video, color, tasks }
-    public init(id: String, title: String, start: String, end: String, allDay: Bool, video: String?, color: String, tasks: [Int64]) {
+    public var series: String?
+    public var repeatLabel: String?
+    enum CodingKeys: String, CodingKey { case id, title, start, end, allDay = "all_day", video, color, tasks, series, repeatLabel = "repeat" }
+    public init(id: String, title: String, start: String, end: String, allDay: Bool, video: String?, color: String, tasks: [Int64],
+                series: String? = nil, repeatLabel: String? = nil) {
         self.id = id; self.title = title; self.start = start; self.end = end; self.allDay = allDay; self.video = video; self.color = color; self.tasks = tasks
+        self.series = series; self.repeatLabel = repeatLabel
     }
 }
 
@@ -267,26 +273,43 @@ public enum PhoneBoard {
         return f.date(from: s)
     }
 
-    public static let maxEvents = 50
+    /// Up to two weeks of meetings: enough for a full working calendar, bounded so one push stays small.
+    public static let maxEvents = 200
     static let maxEventTasks = 20
 
-    /// Today's and tomorrow's meetings (by the app's calendar) for the phone, at most 50: shown calendars of connected
-    /// accounts, not events made from tasks (C6), each with the ids of its linked tasks.
+    /// The meetings for the phone's planning summary (Today, rest of this week, next week), by the app's calendar: from the
+    /// start of today to the end of next week (weeks start on Monday), at most 200, earliest first: shown calendars of
+    /// connected accounts, not events made from tasks (C6), each with the ids of its linked tasks and, for a repeating
+    /// meeting, its series and its rule in words (`RecurrenceLabel`; "repeats" while the rule is not read).
     @MainActor
     public static func events(store: Store, now: Date, calendar: Calendar = AppTime.calendar) -> [BoardEvent] {
         let from = calendar.startOfDay(for: now)
-        guard let to = calendar.date(byAdding: .day, value: 2, to: from) else { return [] }
+        let sinceMonday = (calendar.component(.weekday, from: from) + 5) % 7   // weekday: 1 = Sunday
+        guard let monday = calendar.date(byAdding: .day, value: -sinceMonday, to: from),
+              let to = calendar.date(byAdding: .day, value: 14, to: monday) else { return [] }
         let cache = CalendarCache(store: store)
         let colors = Dictionary(cache.calendars().map { ("\($0.account)\u{0}\($0.calendarID)", $0.color) }, uniquingKeysWith: { a, _ in a })
         return cache.meetings(from: from, to: to).prefix(maxEvents).map { e in
             let hex = colors["\(e.account)\u{0}\(e.calendarID)"].flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
             let video = joinLink(e.videoLink)
             let tasks = store.links(of: ShortID(kind: .event, number: e.shortID)).filter { $0.kind == .task }.map(\.number)
+            var series: String?, label: String?
+            if let r = e.recurringID, !r.isEmpty {
+                series = seriesKey(account: e.account, calendarID: e.calendarID, seriesID: r)
+                label = RecurrenceLabel.text(rule: cache.seriesRule(account: e.account, calendarID: e.calendarID, seriesID: r) ?? "",
+                                             start: e.start, allDay: e.allDay)
+            }
             return BoardEvent(id: ShortID(kind: .event, number: e.shortID).text,
                               title: clip(e.title.trimmingCharacters(in: .whitespacesAndNewlines)).trimmingCharacters(in: .whitespacesAndNewlines),
                               start: isoUTC(e.start), end: isoUTC(e.end), allDay: e.allDay, video: video, color: hex,
-                              tasks: Array(tasks.prefix(maxEventTasks)))
+                              tasks: Array(tasks.prefix(maxEventTasks)), series: series, repeatLabel: label)
         }
+    }
+
+    /// The phone's key for a repeating meeting: "S-" and 16 hex digits of a hash, so no Google id leaves the Mac.
+    static func seriesKey(account: String, calendarID: String, seriesID: String) -> String {
+        let d = SHA256.hash(data: Data("\(account)\u{0}\(calendarID)\u{0}\(seriesID)".utf8))
+        return "S-" + d.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
     /// A meeting link the phone can open: https, a host, no spaces, at most 2,000 characters; anything else is left out
