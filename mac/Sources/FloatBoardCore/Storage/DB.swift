@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 12
+    public static let schemaVersion = 15
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -206,8 +206,44 @@ public final class DB {
 
             """ + v12Tables
         }
+        if version < 15 {
+            // 14 -> 15: Decisions (docs/superpowers/specs/2026-11-17-decisions-design.md). Only its own tables.
+            sql += v15Tables
+        }
         return sql
     }
+
+    /// The tables version 15 adds (Decisions; the same text for a new board and an upgraded one).
+    static let v15Tables = """
+    -- Decisions (D-n): recorded from jots by the weekly screening or by hand. recorded = when the source was written (reviews
+    -- count from it); decided = 'YYYY-MM-DD' only when the text says so. expected/confidence are never filled by the screening;
+    -- *_added marks them added later. status: decided/tentative/reversed/superseded/maybe. not_decision: dismissed (also deleted).
+    CREATE TABLE decisions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, quote TEXT NOT NULL DEFAULT '', source_item TEXT NOT NULL DEFAULT '',
+        source_kind TEXT NOT NULL DEFAULT '', recorded REAL NOT NULL, decided TEXT NOT NULL DEFAULT '', why TEXT NOT NULL DEFAULT '',
+        expected TEXT NOT NULL DEFAULT '', expected_added REAL, confidence TEXT NOT NULL DEFAULT '', confidence_added REAL,
+        alternatives TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT 'operational', status TEXT NOT NULL DEFAULT 'decided',
+        found_by TEXT NOT NULL DEFAULT 'you', source TEXT NOT NULL DEFAULT 'typed', review_state TEXT NOT NULL DEFAULT 'scheduled',
+        review_due REAL, review_ask_after REAL, reviewed REAL, not_decision INTEGER NOT NULL DEFAULT 0,
+        added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX decisions_recorded ON decisions(recorded);
+    -- Each jot version (SHA-256 of its text, 16 hex) screened once.
+    CREATE TABLE decision_screened(
+        jot_id INTEGER NOT NULL, version TEXT NOT NULL, screened REAL NOT NULL, found INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(jot_id, version)
+    );
+    -- Suggestions on a card: supersedes D-n, tell / ask P-n (state open/accepted/dismissed; each made once).
+    CREATE TABLE decision_suggestions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, decision_id INTEGER NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
+        text TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'open', created REAL NOT NULL, UNIQUE(decision_id, kind, target)
+    );
+    -- "Not a decision" examples waiting for (or written into) the Decisions rulebook copy.
+    CREATE TABLE decision_examples(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, decision_id INTEGER NOT NULL, text TEXT NOT NULL, created REAL NOT NULL, applied REAL,
+        connector TEXT NOT NULL DEFAULT ''
+    );
+
+    """
 
     /// The tables, indexes and triggers version 12 adds (the same text for a new board and an upgraded one).
     static let v12Tables = """
@@ -410,7 +446,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables
+    """ + v12Tables + v15Tables
 
     func exec(_ sql: String) throws {
         if sqlite3_exec(handle, sql, nil, nil, nil) != SQLITE_OK { throw DBError.sql(lastMessage) }
