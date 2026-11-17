@@ -98,7 +98,26 @@ public struct BoardReminder: Codable, Equatable {
 public struct BoardExtras: Equatable {
     public var modules: Set<Module>
     public var reminders: [BoardReminder]
-    public init(modules: Set<Module>, reminders: [BoardReminder]) { self.modules = modules; self.reminders = reminders }
+    /// This quarter's goals for More › Resolutions (nil while Resolutions is off).
+    public var goals: [BoardGoal]?
+    public init(modules: Set<Module>, reminders: [BoardReminder], goals: [BoardGoal]? = nil) {
+        self.modules = modules; self.reminders = reminders; self.goals = goals
+    }
+}
+
+/// One of this quarter's goals as the phone shows it: id, title, period, its parent ("R-1 · title"), tasks done and open,
+/// and the open tasks' card ids (their titles come from the board copy).
+public struct BoardGoal: Codable, Equatable {
+    public var id: String
+    public var title: String
+    public var period: String
+    public var parent: String?
+    public var done: Int
+    public var open: Int
+    public var tasks: [Int64]
+    public init(id: String, title: String, period: String, parent: String?, done: Int, open: Int, tasks: [Int64]) {
+        self.id = id; self.title = title; self.period = period; self.parent = parent; self.done = done; self.open = open; self.tasks = tasks
+    }
 }
 
 public struct BoardWatch: Codable, Equatable {
@@ -240,7 +259,9 @@ public enum PhoneBoard {
 
     /// The extras for the copy: modules and waiting reminders.
     @MainActor
-    public static func extras(store: Store, now: Date) -> BoardExtras { BoardExtras(modules: store.modules, reminders: reminders(store: store, now: now)) }
+    public static func extras(store: Store, now: Date) -> BoardExtras {
+        BoardExtras(modules: store.modules, reminders: reminders(store: store, now: now), goals: nil)
+    }
 
     public static func card(for c: Card, color: String?, calendar: Calendar) -> BoardCard {
         let hex = color.flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
@@ -385,14 +406,14 @@ public enum PhoneBoard {
                             extras: BoardExtras? = nil) throws -> Data {
         struct Body: Encodable {
             let cards: [BoardCard]; let events: [BoardEvent]?; let timeZone: String?; let sentAt: String?
-            let modules: [String: Bool]?; let reminders: [BoardReminder]?
-            enum CodingKeys: String, CodingKey { case cards, events, timeZone = "time_zone", sentAt = "sent_at", modules, reminders }
+            let modules: [String: Bool]?; let reminders: [BoardReminder]?; let goals: [BoardGoal]?
+            enum CodingKeys: String, CodingKey { case cards, events, timeZone = "time_zone", sentAt = "sent_at", modules, reminders, goals }
         }
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let modules = extras.map { e in Dictionary(uniqueKeysWithValues: Module.allCases.map { ($0.rawValue, e.modules.contains($0)) }) }
         return try enc.encode(Body(cards: cards, events: events, timeZone: timeZone, sentAt: sentAt.map(isoUTC), modules: modules,
-                                   reminders: extras?.reminders))
+                                   reminders: extras?.reminders, goals: extras?.goals))
     }
 
     /// A stable fingerprint of the board for one engine address (a different engine always gets a push). It covers
