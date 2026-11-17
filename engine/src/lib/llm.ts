@@ -15,9 +15,13 @@ export const onDeviceAllowed = (env: Env, job: Job) => env.ON_DEVICE === "1" && 
 /** List prices in US dollars per million tokens (prompts under 100K tokens), for the app's cost estimate. */
 export const PRICES: Record<string, { input: number; output: number }> = { [HAIKU]: { input: 0.10, output: 0.50 }, [SONNET]: { input: 2, output: 10 },
   [ON_DEVICE]: { input: 0, output: 0 } };
-export type Job = "judge" | "recap" | "learn" | "reply" | "compare";
-export const DEFAULT_MODEL: Record<Job, "haiku" | "sonnet"> = { judge: "haiku", recap: "haiku", learn: "haiku", reply: "sonnet", compare: "haiku" };
-const COLUMN: Record<Job, string | null> = { judge: "model_judge", recap: "model_recap", learn: "model_judge", reply: "model_reply", compare: null };
+export type Job = "judge" | "recap" | "learn" | "reply" | "compare"
+  // Decisions (assistant): Haiku only, fixed by the owner's rule (no model setting).
+  | "decisions" | "fill_form" | "supersedes" | "tell_ask";
+export const DEFAULT_MODEL: Record<Job, "haiku" | "sonnet"> = { judge: "haiku", recap: "haiku", learn: "haiku", reply: "sonnet", compare: "haiku",
+  decisions: "haiku", fill_form: "haiku", supersedes: "haiku", tell_ask: "haiku" };
+const COLUMN: Record<Job, string | null> = { judge: "model_judge", recap: "model_recap", learn: "model_judge", reply: "model_reply", compare: null,
+  decisions: null, fill_form: null, supersedes: null, tell_ask: null };
 
 /** The model id the person chose for `job` (or its default). */
 export async function chosenModel(env: Env, userId: string, job: Job): Promise<string> {
