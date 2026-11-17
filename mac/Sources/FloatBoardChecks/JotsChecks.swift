@@ -14,6 +14,11 @@ import SQLite3
     taskNoteChecks(root)
     suggestionChecks(root)
     cleanupGuardChecks()
+    meetingMatchChecks()
+    meetingNotesChecks(root)
+    dailyFileChecks(root)
+    nudgeChecks(root)
+    jotSearchChecks(root)
 }
 
 @MainActor func jotsStore(_ root: URL, _ name: String) -> Store? {
@@ -183,4 +188,151 @@ private func cleanupGuardChecks() {
     check(CleanupGuard.missing(original: original, cleaned: original.replacingOccurrences(of: "re", with: "about")).isEmpty, "cleanup_guard_passes_kept_substance")
     check(CleanupGuard.missing(original: original, cleaned: "Call Ann about the budget, see the doc").sorted()
           == ["#budget", "14:30", "3/12", "4,500", "@sam", "T-12", "https://example.com/doc"].sorted(), "cleanup_guard_lists_dropped_substance")
+}
+
+// MARK: J9 meeting notes
+
+private func calEvent(_ id: Int64, _ start: Date, video: String = "", guests: [String] = [], allDay: Bool = false) -> CalEvent {
+    var e = CalEvent(shortID: id, account: "me@example.com", calendarID: "me@example.com", eventID: "ev\(id)", start: start, end: start + 1800,
+                     allDay: allDay, title: "Meeting \(id)", location: "", videoLink: video, description: "", htmlLink: "", recurringID: nil,
+                     googleUpdated: start, fbCard: nil)
+    e.guests = guests.map { CalGuest(email: $0, status: "accepted") }
+    return e
+}
+
+private func meetingMatchChecks() {
+    let t = Date(timeIntervalSince1970: 1_800_000_000)
+    let events = [calEvent(1, t, video: "https://meet.google.com/abc-defg-hij", guests: ["ann@example.com"]),
+                  calEvent(2, t, video: "https://zoom.us/j/123", guests: ["bob@example.com"]),
+                  calEvent(3, t + 3 * 3600, guests: ["ann@example.com"]),
+                  calEvent(4, t, guests: ["ann@example.com"], allDay: true)]
+    check(MeetingMatch.find(MeetingMeta(recapKey: "k", meetingURL: "meet.google.com/ABC-defg-hij/?authuser=0", scheduledStart: t + 60), events: events)
+          == .link(1), "meeting_notes_match_by_call_link")
+    check(MeetingMatch.find(MeetingMeta(recapKey: "k", scheduledStart: t + 300, invitees: ["BOB@example.com"]), events: events) == .time(2),
+          "meeting_notes_match_by_start_and_invitee")
+    check(MeetingMatch.find(MeetingMeta(recapKey: "k", scheduledStart: t + 300, invitees: ["carol@example.com"]), events: events) == .suggested(1),
+          "meeting_notes_start_only_is_a_suggestion")
+    check(MeetingMatch.find(MeetingMeta(recapKey: "k", scheduledStart: t + 300, invitees: ["ann@example.com", "bob@example.com"]), events: events)
+          == .suggested(1), "meeting_notes_two_candidates_is_a_suggestion")
+    check(MeetingMatch.find(MeetingMeta(recapKey: "k", scheduledStart: t + 7200), events: events) == .none
+          && MeetingMatch.find(MeetingMeta(recapKey: "k", meetingURL: "https://meet.google.com/zzz"), events: events) == .none,
+          "meeting_notes_unmatched_when_nothing_fits")
+    check(MeetingMatch.sameCall("https://www.zoom.us/j/123#x", "http://zoom.us/j/123/") && !MeetingMatch.sameCall("", ""), "same_call_ignores_dressing")
+}
+
+@MainActor private func meetingNotesChecks(_ root: URL) {
+    guard let store = jotsStore(root, "meetings.sqlite") else { return }
+    let cache = CalendarCache(store: store), acct = "me@example.com"
+    cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: acct, name: "Work", color: "#4285f4", owned: true, shown: true, primary: true)])
+    let start = AppTime.calendar.date(bySettingHour: 10, minute: 0, second: 0, of: Date())!
+    cache.apply(account: acct, calendarID: acct, changes: [
+        GoogleEventChange(eventID: "w1", cancelled: false, fields: CalEventFields(start: start, end: start + 3600, title: "Weekly sync",
+                          videoLink: "https://meet.google.com/abc-defg-hij", googleUpdated: Date()), guests: [CalGuest(email: "ann@example.com", status: "accepted")]),
+        GoogleEventChange(eventID: "w2", cancelled: false, fields: CalEventFields(start: start + 7200, end: start + 9000, title: "Board call",
+                          googleUpdated: Date()), guests: [CalGuest(email: "bob@example.com", status: "accepted")])], nextToken: nil)
+    guard let sync = cache.event(account: acct, calendarID: acct, eventID: "w1"), let board = cache.event(account: acct, calendarID: acct, eventID: "w2") else {
+        check(false, "meeting notes setup"); return
+    }
+    store.add(title: "Send the deck", area: "Work", importance: .medium, due: nil)
+    guard let task = store.cards.first else { return }
+    let tid = ShortID(kind: .task, number: task.id)
+    store.setTags(tid, primary: "Work", others: ["Investor"])
+    store.link(tid, sync.id, actor: .user)
+    let js = JotStore(store: store)
+    let text = "## Summary\nAgreed the plan.\n\nAction items:\n- Send the deck (Ann)\n\nhttps://fathom.video/share/abc"
+    guard let j = js.takeMeetingNotes(text, meta: MeetingMeta(recapKey: "fathom:abc", fathomURL: "https://fathom.video/share/abc",
+                                       meetingURL: "https://meet.google.com/abc-defg-hij", title: "Weekly sync", scheduledStart: start),
+                                       origin: "fathom:abc") else { check(false, "meeting_notes_saved_as_jot"); return }
+    check(j.kind == .meetingNotes && j.source == .meeting && j.text == text, "meeting_notes_saved_as_jot")
+    let l = store.itemLinks(of: j.shortID).first { $0.other == sync.id }
+    check(l?.kind == .notesOf && l?.madeBy == .auto && l?.isSubject == true && js.meetingInfo(j.id)?.matchedBy == "link", "meeting_notes_attached_to_event")
+    check(store.itemTags(j.shortID).all == ["Work", "Investor"], "meeting_notes_take_linked_tasks_tags")
+    check(js.meetingNotes(forTask: task.id).map(\.id) == [j.id], "linked_task_shows_meeting_notes")
+    check(js.takeMeetingNotes("again", meta: MeetingMeta(recapKey: "fathom:abc"), origin: "fathom:abc")?.id == j.id
+          && jotsCount(store, "SELECT count(*) FROM jots WHERE kind='meeting_notes'") == 1, "meeting_notes_saved_once_per_meeting")
+    // By time and invitee; and a suggestion that the owner confirms.
+    let byTime = js.takeMeetingNotes("Board notes", meta: MeetingMeta(recapKey: "fathom:b", scheduledStart: board.start + 120, invitees: ["bob@example.com"]),
+                                     origin: "fathom:b")
+    check(byTime.map { js.meetingInfo($0.id)?.matchedBy } == "time" && byTime.map { store.links(of: $0.shortID) } == [board.id], "meeting_notes_by_time_and_invitee")
+    guard let maybe = js.takeMeetingNotes("Who was this?", meta: MeetingMeta(recapKey: "fathom:c", scheduledStart: board.start + 60), origin: "fathom:c") else { return }
+    check(store.itemLinks(of: maybe.shortID).first?.madeBy == .suggested && store.itemTags(maybe.shortID).all.isEmpty, "uncertain_meeting_is_suggested_untagged")
+    js.confirmMeeting(maybe.id, event: board.shortID)
+    check(store.itemLinks(of: maybe.shortID).first?.madeBy == .manual && js.meetingInfo(maybe.id)?.matchedBy == "confirmed", "suggested_meeting_confirmed")
+    // Notes that arrive before their event: attached on a later pass.
+    guard let early = js.takeMeetingNotes("Later", meta: MeetingMeta(recapKey: "fathom:d", meetingURL: "https://zoom.us/j/999", scheduledStart: start + 14400),
+                                          origin: "fathom:d") else { return }
+    check(store.links(of: early.shortID).isEmpty, "unmatched_meeting_notes_wait")
+    cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: "w3", cancelled: false, fields: CalEventFields(start: start + 14400,
+                end: start + 16200, title: "Late", videoLink: "https://zoom.us/j/999", googleUpdated: Date()))], nextToken: nil)
+    js.attachPendingMeetingNotes()
+    check(js.meetingInfo(early.id)?.matchedBy == "link" && store.links(of: early.shortID).count == 1, "meeting_notes_attached_on_a_later_pass")
+}
+
+// MARK: J12 daily files
+
+@MainActor private func dailyFileChecks(_ root: URL) {
+    guard let store = jotsStore(root, "files.sqlite") else { return }
+    let folder = root.appendingPathComponent("daily")
+    let files = DailyFiles(store: store)
+    files.save(DailyFilesSettings(on: true, folder: folder.path))
+    let cal = AppTime.calendar
+    let day1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 16, hour: 9, minute: 5))!
+    let day2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: 23, minute: 50))!
+    let js = JotStore(store: store)
+    guard let a = js.add("First idea", tags: ["Work"], now: day1), let b = js.add("Late thought", now: day2) else { check(false, "files setup"); return }
+    js.add("Second idea", now: day1.addingTimeInterval(600))
+    let written = files.refresh(now: day2.addingTimeInterval(60))
+    let f1 = (try? String(contentsOf: folder.appendingPathComponent("2026-11-16.md"), encoding: .utf8)) ?? "" // try?-ok: empty fails the check
+    check(written == ["2026-11-16", "2026-11-17"] && f1.hasPrefix(DailyFiles.marker) && f1.contains("# Jots · Monday 16 November 2026")
+          && f1.contains("## 09:05 · \(a.shortID.text) · Jot · Work\n\nFirst idea") && f1.range(of: "First idea")!.lowerBound < f1.range(of: "Second idea")!.lowerBound,
+          "daily_file_per_day_oldest_first")
+    check(files.refresh(now: day2.addingTimeInterval(120)).isEmpty, "unchanged_days_not_rewritten")
+    js.update(a.id, text: "First idea, edited", now: day2.addingTimeInterval(180))
+    check(files.refresh(now: day2.addingTimeInterval(240)) == ["2026-11-16"], "edit_rewrites_the_day_it_was_added")
+    js.delete(b.id, now: day2.addingTimeInterval(300))
+    check(files.refresh(now: day2.addingTimeInterval(360)) == ["2026-11-17"] && !FileManager.default.fileExists(atPath: folder.appendingPathComponent("2026-11-17.md").path),
+          "day_with_no_jots_left_loses_its_file")
+    let mine = folder.appendingPathComponent("2026-11-18.md")
+    try? "my own notes".write(to: mine, atomically: true, encoding: .utf8) // try?-ok: a failure fails the check below
+    js.add("x", now: day2.addingTimeInterval(86400))
+    if let x = js.list(JotQuery(text: "x")).first?.jot { js.delete(x.id, now: day2.addingTimeInterval(86400 + 60)) }
+    files.refresh(now: day2.addingTimeInterval(86400 + 120))
+    check((try? String(contentsOf: mine, encoding: .utf8)) == "my own notes", "a_file_floatboard_did_not_write_is_kept") // try?-ok: nil fails the check
+}
+
+// MARK: J11 nudge
+
+@MainActor private func nudgeChecks(_ root: URL) {
+    guard let store = jotsStore(root, "nudge.sqlite") else { return }
+    let n = JotNudge(store: store)
+    let cal = AppTime.calendar
+    let today = cal.startOfDay(for: Date())
+    let early = today.addingTimeInterval(20 * 3600), late = today.addingTimeInterval(21 * 3600 + 60)
+    check(n.due(now: late) == nil, "nudge_off_while_jots_off")
+    store.setModule(.jots, on: true)
+    check(n.due(now: early) == nil, "nudge_waits_for_its_time")
+    store.add(title: "Ship the release", area: "Work", importance: .medium, due: nil)
+    if let c = store.cards.first { store.move(c, to: .done, now: today.addingTimeInterval(10 * 3600)) }
+    let due = n.due(now: late)
+    check(due?.title == "Anything to jot today?" && due?.body == "Done today: Ship the release.", "nudge_shows_finished_tasks")
+    check(n.state(now: late).minutes == 21 * 60 && n.state(now: late).doneToday == ["Ship the release"] && n.state(now: late).jottedDay == nil, "nudge_state_for_the_engine")
+    n.markShown(now: late)
+    check(n.due(now: late.addingTimeInterval(60)) == nil && n.state(now: late).shownDay == DailyFiles.dayKey(late), "nudge_shown_once_a_day")
+    store.performForTest("DELETE FROM meta WHERE key='jot_nudged_day'")
+    JotStore(store: store).add("Wrote something", now: today.addingTimeInterval(12 * 3600))
+    check(n.due(now: late) == nil && n.state(now: late).jottedDay == DailyFiles.dayKey(late), "nudge_skipped_when_already_jotted")
+    n.save(JotNudgeSettings(on: false, minutes: 600))
+    check(n.settings == JotNudgeSettings(on: false, minutes: 600) && n.state(now: late).minutes == nil, "nudge_settings_saved")
+}
+
+// MARK: Search
+
+@MainActor private func jotSearchChecks(_ root: URL) {
+    guard let store = jotsStore(root, "search.sqlite") else { return }
+    JotsArea.register()
+    JotStore(store: store).add("Quarterly budget thoughts\nmore", tags: ["Work"])
+    check(GlobalSearch.run("budget", store: store).isEmpty, "jot_search_off_with_jots_off")
+    store.setModule(.jots, on: true)
+    let hit = GlobalSearch.run("budget", store: store).first { $0.0 == .jot }?.1.first
+    check(hit?.title == "Quarterly budget thoughts" && hit?.detail == "Jot · Work", "jots_in_search_everything")
 }
