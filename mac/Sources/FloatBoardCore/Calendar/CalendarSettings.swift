@@ -10,7 +10,10 @@ public enum CalendarSettings {
     }
 
     /// What the last attempt to read an account's calendar list found.
-    public enum ListOutcome: Equatable { case listed, needsReconnect, failed }
+    public enum ListOutcome: Equatable { case listed, needsReconnect, failed
+        /// The sign-in cannot list calendars (it predates that permission): only the account's main calendar is shown.
+        case mainOnly
+    }
 
     /// What Settings shows for one account.
     public enum AccountState: Equatable {
@@ -18,6 +21,8 @@ public enum CalendarSettings {
         case loading
         /// Google refused the list (permission missing) or one of the account's calendars: ask to sign in again.
         case reconnect
+        /// Only the main calendar is available until the account signs in again for the full list: say so calmly, offer it.
+        case mainOnly
         /// Show the account's calendars with their switches.
         case calendars
     }
@@ -27,6 +32,7 @@ public enum CalendarSettings {
     public static func state(account: String, calendars: [CalCalendar], lastList: ListOutcome?) -> AccountState {
         let mine = calendars.filter { $0.account == account }
         if mine.contains(where: \.needsReconnect) || lastList == .needsReconnect { return .reconnect }
+        if lastList == .mainOnly { return .mainOnly }
         if !mine.isEmpty || lastList == .listed { return .calendars }
         return .loading
     }

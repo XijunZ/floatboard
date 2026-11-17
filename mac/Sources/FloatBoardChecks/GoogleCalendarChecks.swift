@@ -35,10 +35,14 @@ func googleCalendarChecks() async {
 
     // 403 insufficient scope.
     let denied = api { _ in (data(raw("gcal-403-scope.json")), 403) }
-    do { _ = try await denied.listCalendars(); check(false, "calendar_list_403_marks_needs_reconnect") }
-    catch let e as GoogleCalendarError { if case .needsReconnect(let b) = e { check(b.contains("insufficientPermissions"), "calendar_list_403_marks_needs_reconnect") }
-        else { check(false, "calendar_list_403_marks_needs_reconnect") } }
-    catch { check(false, "calendar_list_403_marks_needs_reconnect: \(error)") }
+    do { _ = try await denied.listCalendars(); check(false, "calendar_list_403_marks_missing_list_access") }
+    catch let e as GoogleCalendarError { if case .missingCalendarListAccess(let b) = e { check(b.contains("insufficientPermissions"), "calendar_list_403_marks_missing_list_access") }
+        else { check(false, "calendar_list_403_marks_missing_list_access") } }
+    catch { check(false, "calendar_list_403_marks_missing_list_access: \(error)") }
+    let revoked401 = api { _ in (Data(#"{"error":{"code":401,"status":"UNAUTHENTICATED"}}"#.utf8), 401) }
+    do { _ = try await revoked401.listCalendars(); check(false, "calendar_list_401_is_needs_reconnect") }
+    catch GoogleCalendarError.needsReconnect { check(true, "calendar_list_401_is_needs_reconnect") }
+    catch { check(false, "calendar_list_401_is_needs_reconnect: \(error)") }
     let other403 = api { _ in (Data(#"{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded"}]}}"#.utf8), 403) }
     do { _ = try await other403.listCalendars(); check(false, "other_403_is_http_error_with_body") }
     catch let e as GoogleCalendarError {

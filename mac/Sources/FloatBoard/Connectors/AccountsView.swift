@@ -208,6 +208,19 @@ struct CalendarSettingsView: View {
                 }
                 .padding(.leading, 22)
             }
+            if state == .mainOnly {
+                HStack(spacing: 6) {
+                    Text("Showing your main calendar.").font(.system(size: 12)).foregroundStyle(.secondary)
+                    if snapshot {
+                        Text("Show all calendars…").font(.system(size: 12)).foregroundStyle(Color.accentColor)
+                    } else {
+                        Button("Show all calendars…") { google.connect(loginHint: email) }
+                            .buttonStyle(.link).font(.system(size: 12))
+                            .disabled(!google.isConfigured || google.busy)
+                    }
+                }
+                .padding(.leading, 22)
+            }
             ForEach(mine, id: \.calendarID) { c in
                 HStack(spacing: 8) {
                     Circle().fill(Color(hex: c.color)).frame(width: 9, height: 9)
