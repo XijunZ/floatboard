@@ -112,6 +112,29 @@ import FloatBoardConnectors
                                              second: .patch(eventID: "r9m", title: nil, start: at(14, 0, 0), end: at(15, 0, 0), allDayStart: nil))
         check(report("r9 moves", s, (at(14, 0, 0), at(15, 0, 0))) && o.rows(unsent: true).isEmpty, "r9_lost_answer_retry_counts_as_own_and_the_later_move_goes")
     } catch { check(false, "r9 moves: \(error)") }
+
+    // Round 9b: a retried all-day move whose answer was lost. Google has the row's first day, but its end (length) was then
+    // changed in Google. Only the first day is FloatBoard's own; the end stays Google's newer change, so a later all-day move
+    // queued before that change keeps Google's length.
+    do {
+        func day(_ d: String) -> Date { Due.startOfDay(d)! }
+        let t0 = ago(100), t2 = ago(20), t3 = ago(10)
+        let prior = CalOwnWrite(start: .init(updated: t0, value: day("2030-01-05"), allDay: true), end: .init(updated: t0, value: day("2030-01-06"), allDay: true))
+        let current = CalEventFields(start: day("2030-01-10"), end: day("2030-01-13"), allDay: true, startDay: "2030-01-10", endDay: "2030-01-13",
+                                     title: "Off-site", googleUpdated: t3)
+        let attempted = CalWrite.patch(eventID: "ad", title: nil, start: nil, end: nil, allDayStart: "2030-01-10")   // one day: ends the 11th
+        let known = CalendarOutbox.claimingOwnRetry(CalendarOutbox.observed(prior, base: nil, current: current), attempted: attempted, current: current)
+        let later = CalendarOutbox.withoutNewerGoogleFields(.patch(eventID: "ad", title: nil, start: nil, end: nil, allDayStart: "2030-01-11"),
+                                                            queuedAt: t2, base: nil, own: known, current: current)
+        let want = CalWrite.patch(eventID: "ad", title: nil, start: nil, end: day("2030-01-14"), allDayStart: "2030-01-11")
+        if later != want { print("  r9b: \(String(describing: later)); end record external \(String(describing: known.end?.external))") }
+        check(later == want && known.start?.external == nil && known.end?.external == true, "r9b_all_day_retry_claims_only_the_matching_first_day")
+        // When Google's end is the one this row sent, the end is FloatBoard's too.
+        let same = CalEventFields(start: day("2030-01-10"), end: day("2030-01-11"), allDay: true, startDay: "2030-01-10", endDay: "2030-01-11",
+                                  title: "Off-site", googleUpdated: t3)
+        let both = CalendarOutbox.claimingOwnRetry(CalendarOutbox.observed(prior, base: nil, current: same), attempted: attempted, current: same)
+        check(both.start?.external == nil && both.end?.external == nil, "r9b_all_day_retry_claims_the_end_when_it_matches")
+    }
 }
 
 /// R7-2: each instance's original start (Google's originalStartTime) is kept and sent to the phone; the column is part of
