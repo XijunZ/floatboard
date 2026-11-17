@@ -347,7 +347,8 @@ public final class CalendarOutbox {
     /// start, end), Google changed it when its value differs from what FloatBoard knew Google had (`own`, else `base`, the
     /// event as cached when queued; see `observed`) and from what this change sends. Such a field keeps Google's value when
     /// Google's change is newer than this change (newest wins, C4); an older one is overwritten by this change. Returns the
-    /// patch to send, or nil when nothing is left to send. Anything other than a patch is returned as it is.
+    /// patch to send, or nil when nothing is left to send. A field that already has the value being sent is left out (it
+    /// stays Google's if Google set it). Anything other than a patch is returned as it is.
     public static func withoutNewerGoogleFields(_ w: CalWrite, queuedAt: Date, base: CalPatchBase?, own: CalOwnWrite? = nil,
                                                 current: CalEventFields) -> CalWrite? {
         guard case .patch(let id, var title, var start, var end, var day) = w else { return w }
@@ -377,6 +378,13 @@ public final class CalendarOutbox {
                 // Google changed only the end: the board's start goes with Google's new length (or nothing about the end).
                 end = start.map { $0.addingTimeInterval(current.end.timeIntervalSince(current.start)) }
             }
+        }
+        // A field that already has the value being sent is not sent: the write would change nothing, and noting it as
+        // FloatBoard's own would erase the record that Google set it (an older queued edit could then overwrite it).
+        if title == current.title { title = nil }
+        if day == nil, !current.allDay {
+            if start == current.start { start = nil }
+            if end == current.end { end = nil }
         }
         if title == nil && start == nil && end == nil && day == nil { return nil }
         return .patch(eventID: id, title: title, start: start, end: end, allDayStart: day)

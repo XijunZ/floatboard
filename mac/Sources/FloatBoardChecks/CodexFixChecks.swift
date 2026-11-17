@@ -544,6 +544,8 @@ final class StatefulEvent: @unchecked Sendable {
     func externalEdit(start: Date) { self.start = start; tick() }
     /// A change made in Google at a given time (its `updated` stamp is that time).
     func externalEdit(start: Date, at: Date) { self.start = start; updated = at; version += 1 }
+    func externalEdit(title: String, at: Date) { self.title = title; updated = at; version += 1 }
+    func externalEdit(start: Date, end: Date, at: Date) { self.start = start; self.end = end; updated = at; version += 1 }
     func api() -> GoogleCalendarAPI {
         GoogleCalendarAPI(token: { _ in "tok" }, http: { [self] req in
             var status = 200
