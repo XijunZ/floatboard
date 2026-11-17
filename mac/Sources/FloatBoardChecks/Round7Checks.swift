@@ -56,6 +56,33 @@ import FloatBoardConnectors
     } catch { check(false, "r7 end-only 2: \(error)") }
 
     await round7OriginalStartChecks()
+
+    // Round 8: Google independently sets the value the first of two queued edits sends (after both were queued). That first
+    // edit must not turn Google's newer change into FloatBoard's own: the second, older edit must not overwrite it.
+    do {
+        let (store, cache, outbox) = try setup("r8-renames")
+        cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: "r8t", cancelled: false,
+            fields: CalEventFields(start: at(10, 0, 0), end: at(11, 0, 0), title: "A", googleUpdated: old))], nextToken: nil)
+        let server = StatefulEvent(id: "r8t", title: "A", start: at(10, 0, 0), end: at(11, 0, 0), updated: old)
+        _ = outbox.enqueue(.patch(eventID: "r8t", title: "B", start: nil, end: nil, allDayStart: nil), account: acct, calendarID: acct, now: ago(30))
+        _ = outbox.enqueue(.patch(eventID: "r8t", title: "C", start: nil, end: nil, allDayStart: nil), account: acct, calendarID: acct, now: ago(20))
+        server.externalEdit(title: "B", at: ago(10))
+        await CalendarSender(store: store, apiFor: { _ in server.api() }, isOnline: { true }).drain()
+        if server.title != "B" { print("  r8 renames: server title \(server.title)") }
+        check(server.title == "B" && outbox.rows(unsent: true).isEmpty, "r8_google_setting_the_first_queued_title_keeps_it_over_the_second")
+    } catch { check(false, "r8 renames: \(error)") }
+    do {
+        let (store, cache, outbox) = try setup("r8-moves")
+        cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: "r8m", cancelled: false,
+            fields: CalEventFields(start: at(10, 0, 0), end: at(11, 0, 0), title: "Call", googleUpdated: old))], nextToken: nil)
+        let server = StatefulEvent(id: "r8m", title: "Call", start: at(10, 0, 0), end: at(11, 0, 0), updated: old)
+        _ = outbox.enqueue(.patch(eventID: "r8m", title: nil, start: at(12, 0, 0), end: at(13, 0, 0), allDayStart: nil), account: acct, calendarID: acct, now: ago(30))
+        _ = outbox.enqueue(.patch(eventID: "r8m", title: nil, start: at(14, 0, 0), end: at(15, 0, 0), allDayStart: nil), account: acct, calendarID: acct, now: ago(20))
+        server.externalEdit(start: at(12, 0, 0), end: at(13, 0, 0), at: ago(10))
+        await CalendarSender(store: store, apiFor: { _ in server.api() }, isOnline: { true }).drain()
+        check(report("r8 moves", server, (at(12, 0, 0), at(13, 0, 0))) && outbox.rows(unsent: true).isEmpty,
+              "r8_google_setting_the_first_queued_time_keeps_it_over_the_second")
+    } catch { check(false, "r8 moves: \(error)") }
 }
 
 /// R7-2: each instance's original start (Google's originalStartTime) is kept and sent to the phone; the column is part of
