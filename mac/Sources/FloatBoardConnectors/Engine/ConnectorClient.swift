@@ -195,7 +195,8 @@ public struct ConnectorClient {
     /// `account` and `gmail_id` name the inbox and message of an email the user linked to a task.
     public static let payloadKeys = ["source_mid", "source_sent", "item_id", "verdict", "detail", "at", "notes", "request_id", "account", "gmail_id"]
 
-    private func call(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil) async throws -> Data {
+    /// One engine request (internal so area files can add their calls in their own extensions).
+    func call(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil) async throws -> Data {
         var comps = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
         if !query.isEmpty { comps?.queryItems = query }
         guard let url = comps?.url else { throw ConnectorError.badResponse("bad address") }
