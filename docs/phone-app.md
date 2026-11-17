@@ -146,8 +146,8 @@ device, passkey and session were all created; push payloads trimmed to fit 4096 
 ## Sync v2: engine keeps the record, newest change wins (decided)
 
 Scope stays **view + quick actions** on the phone: see the board, alerts, move between To do / Doing / Watch / Done,
-add a task. Editing details (title, notes, due, importance, group, delete) is Mac only; the phone's task sheet says
-"Edit details on your Mac".
+add a task, delete a task (since 17 Nov 2026, below). Editing details (title, notes, due, importance, group) is Mac only;
+the phone's task sheet says "Edit details on your Mac".
 
 1. **Action log on the engine** (`board_log`, kept 1 year): one row per change from any device: `id` (UUID, unique:
    a repeat is ignored), `user_id`, `device` ("mac" or the phone's device id), `card_id`, `kind`
@@ -415,3 +415,29 @@ tasks linked to a meeting under it, then the open tasks due in that block. Empty
   plain text is left out (the meeting is then listed like a one-off), never a refused push.
 - The grouping is a pure function (`planBlocks` in the phone's sync logic), tested on its own
   (engine/test/phone/phone-planning.test.ts).
+
+### Built: Delete on the phone, with feedback (17 Nov 2026; Sync v2 scope now includes delete)
+
+The task sheet has **Delete**. For a task the email sorting made (the board copy marks it `teach_on_delete: true`) it
+offers the Mac's choices: Not an action (teach), Wrong details (teach), Duplicate (teach), Just delete; the same reason
+values (`not_action`, `wrong_details`, `duplicate`) reach the same learning as on the Mac. Other tasks are deleted at
+once. After a delete the phone shows "Deleted · Undo" for the same 8 seconds as a move, and gives a short vibration
+(`navigator.vibrate(30)` where the phone has one; also on Done).
+
+- Wire: phone action `delete` `{ id, made_at, card_id, teach? }` (a teach value outside the three is refused as
+  invalid) and `restore` `{ id, made_at, card_id }` in `POST /app/api/action`; `GET /v2/phone-actions` carries them, with
+  `teach`. Logged in `board_log` as kind `delete` (value: the teach reason) or `restore`.
+- Newest change wins, as for moves: a delete made before the card's last step change on the Mac (`status_at`) is stored
+  as superseded on the engine and skipped as "superseded" by the Mac. The board overlay hides a card with a delete and
+  shows it again after a later restore.
+- The Mac applies `delete` exactly as its own delete (`Store.deleteCardRow`: the connector is told, the teach lesson is
+  recorded, the task's calendar event goes after the Undo window, D8/R19), once per phone id. The Mac shows no Undo bar
+  for it (Edit, Undo Delete still works). `restore` is the Mac's Undo Delete for that task (`restoreCardRow`): the same
+  links come back, an unsent connector delete is taken back with its lesson, the calendar event is kept or made again.
+- Undo on the phone (design chosen: simplest correct with Sync v2's append-only queue): a delete still waiting on the
+  phone and not being sent is taken out of the queue, so nothing is sent; once sent (or while a send is in progress) Undo
+  queues a `restore` made after the delete. The engine accepts a `restore` for a card the Mac already removed from its
+  copy, as long as the board ever had it. Until the Mac has restored and pushed, a card the Mac had already deleted does
+  not show on the phone.
+- Tests: engine `test/phone/phone-delete.test.ts`; Mac `PhoneDeleteChecks.swift`.
+

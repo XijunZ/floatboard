@@ -10,7 +10,11 @@
     var addsShown = {};
     cards.forEach(function (c) { if (c.action_id) addsShown[c.action_id] = true; });
     var temp = 0;
+    var hidden = {};
     (actions || []).forEach(function (a) {
+      // Delete hides the card until the Mac has deleted it; a later restore (Undo after it was sent) shows it again.
+      if (a.action === "delete") { hidden[a.card_id] = true; return; }
+      if (a.action === "restore") { delete hidden[a.card_id]; return; }
       if (a.action === "add") {
         if (addsShown[a.id]) return;
         temp += 1;
@@ -36,6 +40,7 @@
         }
       }
     });
+    cards = cards.filter(function (c) { return !hidden[c.id]; });
     return Object.assign({}, board || {}, { cards: cards });
   }
 
@@ -56,6 +61,7 @@
       var item = { id: a.id, made_at: a.made_at, action: a.action };
       if (a.action === "add") { item.title = a.title; if (a.group) item.group = a.group; } else item.card_id = a.card_id;
       if (a.action === "link_email") { item.message_id = a.message_id; item.gmail_id = a.gmail_id; item.account = a.account; item.sent_at = a.sent_at || null; }
+      if (a.action === "delete" && a.teach) item.teach = a.teach;
       var n = byteLength(JSON.stringify(item)) + 1;
       if (out.length && size + n > BATCH_BYTES) break;
       size += n;
@@ -151,7 +157,24 @@
   }
 
   function undoText(u) {
-    return "Moved to " + (STEP_NAMES[u.to] || u.to);
+    return u.deleted ? "Deleted" : "Moved to " + (STEP_NAMES[u.to] || u.to);
+  }
+
+  // Undo for a delete: "Deleted · Undo" for the same 8 seconds.
+  function deleteUndoFor(card, del, nowMs) {
+    if (!card || card.pending || !del || del.action !== "delete" || card.id !== del.card_id) return null;
+    return { deleted: true, card_id: card.id, del_id: del.id, made_at: del.made_at, at: nowMs };
+  }
+
+  // Undo of a delete: still waiting on this phone (not sent, not being sent): it is taken out of the queue and nothing is
+  // sent. Already sent (or on its way): a `restore` of its own, made after the delete, brings the task back on the Mac.
+  function undoDeleteStep(u, actions, inFlight, id, nowIso) {
+    var list = actions || [];
+    var waiting = list.some(function (a) { return a.id === u.del_id; });
+    if (waiting && !inFlight) return { actions: list.filter(function (a) { return a.id !== u.del_id; }), restore: null };
+    var after = Date.parse(u.made_at) + 1;
+    var made = Date.parse(nowIso) >= after ? nowIso : new Date(after).toISOString();
+    return { actions: list, restore: { id: id, made_at: made, card_id: u.card_id, action: "restore" } };
   }
 
   // The move back: a new action of its own, made after the move it undoes (even if the phone's clock went back).

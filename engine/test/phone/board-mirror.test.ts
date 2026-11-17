@@ -154,7 +154,7 @@ describe("board mirror", () => {
     const u = await setup();
     await put(u.key, { cards: [card(1)] });
     const bad: unknown[] = [
-      {}, { action: "delete", card_id: 1 }, { action: "done" }, { action: "done", card_id: "1" }, { action: "done", card_id: 1.5 },
+      {}, { action: "archive", card_id: 1 }, { action: "delete" }, { action: "delete", card_id: 1, teach: "because" }, { action: "done" }, { action: "done", card_id: "1" }, { action: "done", card_id: 1.5 },
       { action: "add" }, { action: "add", title: "" }, { action: "add", title: "   " }, { action: "add", title: 5 },
       { action: "add", title: "x".repeat(201) }, { action: "add", title: "ok", group: 5 }, { action: "add", title: "ok", group: "g".repeat(201) },
     ];

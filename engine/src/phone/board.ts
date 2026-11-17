@@ -50,6 +50,8 @@ const ACTION_ID = /^[A-Za-z0-9-]{8,64}$/;
 const STATUSES = ["todo", "doing", "watch", "done"] as const;
 /** Link a task to an email (or remove that link) from the phone: the Mac applies it; it never changes the task's step. */
 const LINKS = ["link_email", "unlink_email"] as const;
+/** The "teach" reasons a delete of an email-sorting task can carry, as the Mac offers them. */
+const TEACH = ["not_action", "wrong_details", "duplicate"] as const;
 const EMAIL_KINDS = ["sorting", "user"] as const;
 const MAX_MESSAGE_ID = 998;
 const MAX_ACCOUNT = 320;
@@ -63,6 +65,8 @@ export type Card = {
   id: number; title: string; group: string; color: string; importance: 0 | 1 | 2; due: string | null; has_time: boolean;
   status: Status; link: string | null; links?: CardLink[]; email?: (typeof EMAIL_KINDS)[number]; done_at: string | null; status_at?: string | null;
   pending?: true; action_id?: string | null;
+  /** True for a task the email sorting made: the phone's Delete offers the Mac's "teach" choices. */
+  teach_on_delete?: true;
   /** Watch only: whom it waits on, how to recognise their reply ("email:<address>", "wa:<chat id>" or ""), and since when. */
   watch?: CardWatch;
 };
@@ -77,8 +81,10 @@ export type CardWatch = { person: string; contact: string; since: string };
 /** The email a `link_email` action attaches (sent_at as the search gave it). */
 export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
 export type PhoneAction = {
-  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number] | "watch_reply"; title: string | null; group: string | null;
-  created: string; made_at: string; email?: LinkedEmail;
+  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number] | "watch_reply" | "delete" | "restore";
+  title: string | null; group: string | null; created: string; made_at: string; email?: LinkedEmail;
+  /** delete only: the "teach" reason chosen on the phone (not_action | wrong_details | duplicate). */
+  teach?: string;
   /** watch_reply only: the watched person wrote again ("Anna replied by email"); the Mac moves the task back to To do. */
   reason?: string;
 };
@@ -87,6 +93,8 @@ type ActionRow = {
   created: string; made_at: string; taken: number; payload: string | null;
 };
 const isMove = (action: string): action is Status => (STATUSES as readonly string[]).includes(action);
+/** Actions decided by "newest change wins" against the card's last step change on the Mac: moves and delete. */
+const newestWins = (action: string) => isMove(action) || action === "delete";
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const isIso = (v: unknown): v is string => typeof v === "string" && v.length <= 40 && !Number.isNaN(Date.parse(v));
@@ -157,6 +165,7 @@ export function parseCards(body: any): Card[] {
       const links = cardLinks(c.links);
       if (links) out.links = links;
       if (c.watch !== undefined && c.watch !== null) out.watch = cardWatch(c.watch);
+      if (c.teach_on_delete === true) out.teach_on_delete = true;   // anything else: a plain delete (never a refused push)
       if (c.email !== undefined && c.email !== null) {
         if (!EMAIL_KINDS.includes(c.email)) throw new Error("email must be sorting or user when given");
         out.email = c.email;
@@ -255,6 +264,7 @@ const statusAt = (c: Card, snapUpdated: string | null) => c.status_at ?? snapUpd
 export function overlay(cards: Card[], actions: ActionRow[], snapUpdated: string | null = null): Card[] {
   const out = cards.map((c) => ({ ...c }));
   const base = new Map(cards.map((c) => [c.id, statusAt(c, snapUpdated)]));
+  const hidden = new Set<number>();
   for (const a of actions) {
     if (a.action === "add") {
       if (a.taken) continue;
@@ -264,9 +274,13 @@ export function overlay(cards: Card[], actions: ActionRow[], snapUpdated: string
     } else if (isMove(a.action)) {
       const c = out.find((x) => x.id === a.card_id);
       if (c && a.made_at >= base.get(c.id)!) applyMove(c, a.action, a.made_at);
+    } else if (a.action === "delete" && a.card_id !== null && base.has(a.card_id) && a.made_at >= base.get(a.card_id)!) {
+      hidden.add(a.card_id);
+    } else if (a.action === "restore" && a.card_id !== null) {
+      hidden.delete(a.card_id);
     }
   }
-  return out;
+  return hidden.size ? out.filter((c) => !hidden.has(c.id)) : out;
 }
 
 function applyMove(c: Card, status: Status, at: string) {
@@ -363,7 +377,8 @@ route("GET", "/v2/phone-actions", async (_req, env, user) => {
   const actions: PhoneAction[] = (await untaken(env, user.id)).map((a) => ({ id: a.id, client_id: a.client_id, card_id: a.card_id,
     action: a.action as PhoneAction["action"], title: a.title, group: a.group_name, created: a.created, made_at: a.made_at,
     ...(a.action === "link_email" && a.payload ? { email: JSON.parse(a.payload) as LinkedEmail } : {}),
-    ...(a.action === "watch_reply" && a.payload ? { reason: String(JSON.parse(a.payload).reason ?? "") } : {}) }));
+    ...(a.action === "watch_reply" && a.payload ? { reason: String(JSON.parse(a.payload).reason ?? "") } : {}),
+    ...(a.action === "delete" && a.payload ? { teach: String(JSON.parse(a.payload).teach ?? "") } : {}) }));
   return json({ server_time: nowISO(), actions });
 });
 
@@ -433,7 +448,7 @@ export async function handleBoard(req: Request, env: Env): Promise<Response | nu
   return null;
 }
 
-type Parsed = { card_id: number | null; action: PhoneAction["action"]; title: string | null; group: string | null; email?: LinkedEmail };
+type Parsed = { card_id: number | null; action: PhoneAction["action"]; title: string | null; group: string | null; email?: LinkedEmail; teach?: string };
 type Outcome = { accepted: string[]; dropped: { id: string | null; reason: string }[] } | { error: string; status: number };
 
 /** Validate one action's content (not its id or times); a message on anything off. */
@@ -462,7 +477,13 @@ function parseAction(body: any): Parsed | string {
     if (sent_at !== undefined && sent_at !== null && !isIso(sent_at)) return "sent_at must be an ISO date or null";
     return { card_id: body.card_id, action, title: null, group: null, email: { message_id, gmail_id, account, sent_at: sent_at ?? null } };
   }
-  return "action must be todo, doing, watch, done, add, link_email or unlink_email";
+  if (action === "delete" || action === "restore") {
+    if (!Number.isSafeInteger(body.card_id)) return "card_id must be an integer";
+    if (action === "restore" || body.teach === undefined || body.teach === null) return { card_id: body.card_id, action, title: null, group: null };
+    if (!(TEACH as readonly unknown[]).includes(body.teach)) return `teach must be one of ${TEACH.join(", ")}`;
+    return { card_id: body.card_id, action, title: null, group: null, teach: body.teach };
+  }
+  return "action must be todo, doing, watch, done, add, link_email, unlink_email, delete or restore";
 }
 
 type NewAction = Parsed & { clientId: string; madeAt: string; superseded: boolean };
@@ -478,10 +499,10 @@ async function store(env: Env, userId: string, deviceId: string, list: NewAction
     const id = crypto.randomUUID();
     stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO phone_actions(id,user_id,card_id,action,title,group_name,created,taken,client_id,device_id,made_at,sent_at,payload)
         VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?)`).bind(id, userId, a.card_id, a.action, a.title, a.group, now, a.clientId, deviceId, a.madeAt, sentAt,
-      a.email ? JSON.stringify(a.email) : null));
+      a.email ? JSON.stringify(a.email) : a.teach ? JSON.stringify({ teach: a.teach }) : null));
     // The log says a link was made or removed, never which email.
-    stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : isMove(a.action) ? "status" : "link",
-      value: a.action === "add" ? await encrypt(env, a.title!) : a.action, madeAt: a.madeAt, receivedAt: now, clientId: a.clientId }));
+    stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : isMove(a.action) ? "status" : a.action === "delete" || a.action === "restore" ? a.action : "link",
+      value: a.action === "add" ? await encrypt(env, a.title!) : a.action === "delete" ? (a.teach ?? null) : a.action, madeAt: a.madeAt, receivedAt: now, clientId: a.clientId }));
     if (a.superseded) stmts.push(...supersedeStmts(env, userId, { id, client_id: a.clientId, card_id: a.card_id }, deviceId, now));
   }
   if (stmts.length) await env.DB.batch(stmts);
@@ -525,7 +546,7 @@ async function doSingle(env: Env, userId: string, deviceId: string, body: any, r
   const clientId = crypto.randomUUID();
   const madeAt = iso(receivedMs);
   if (p.email && !(await ownGmail(env, userId, p.email.account))) return { error: "account must be one of your Gmail inboxes", status: 400 };
-  const err = await store(env, userId, deviceId, [{ ...p, clientId, madeAt, superseded: !!c && isMove(p.action) && madeAt < statusAt(c, snap!.updated) }], null, receivedMs);
+  const err = await store(env, userId, deviceId, [{ ...p, clientId, madeAt, superseded: !!c && newestWins(p.action) && madeAt < statusAt(c, snap!.updated) }], null, receivedMs);
   return err ? { error: err, status: 429 } : { accepted: [clientId], dropped: [] };
 }
 
@@ -557,11 +578,14 @@ async function doBatch(env: Env, userId: string, deviceId: string, body: any, re
     if (typeof p === "string" || (p.email && !mine.has(p.email.account))) { dropped.push({ id: typeof a?.id === "string" ? a.id.slice(0, 64) : null, reason: "invalid" }); return; }
     if (already.has(a.id) || inBatch.has(a.id)) { accepted.push(a.id); return; }
     const c = p.card_id === null ? undefined : cards.get(p.card_id);
-    if (p.card_id !== null && !c) { dropped.push({ id: a.id, reason: gone.has(p.card_id) ? "card gone" : "unknown card" }); return; }
+    // A restore is for a card the Mac already deleted (gone from its copy): accepted when the board ever had it.
+    if (p.card_id !== null && !c && !(p.action === "restore" && gone.has(p.card_id))) {
+      dropped.push({ id: a.id, reason: gone.has(p.card_id) ? "card gone" : "unknown card" }); return;
+    }
     const madeAt = corrected(a.made_at, skew, receivedMs) ?? iso(receivedMs);
     inBatch.add(a.id);
     accepted.push(a.id);
-    fresh.push({ ...p, clientId: a.id, madeAt, superseded: !!c && isMove(p.action) && madeAt < statusAt(c, snap!.updated) });
+    fresh.push({ ...p, clientId: a.id, madeAt, superseded: !!c && newestWins(p.action) && madeAt < statusAt(c, snap!.updated) });
   });
   const err = await store(env, userId, deviceId, fresh, sentAt, receivedMs);
   return err ? { error: err, status: 429 } : { accepted, dropped };
