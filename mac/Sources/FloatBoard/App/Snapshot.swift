@@ -138,6 +138,15 @@ enum Snapshot {
                 saveLive(SettingsView().environment(\.groupsSnapshotDeleting, work).padding(.horizontal, 12).padding(.vertical, 10),
                          "ui-settings-groups-800.png", CGSize(width: 800, height: 520), inWindow: true)
             }
+            // The same with very long group names (about 80 characters each), the source of the delete and its destination.
+            if store.areas.count >= 2 {
+                let long1 = "Client onboarding and contract renewals for the northern region accounts team"
+                let long2 = "Personal errands, family admin, school paperwork and household maintenance list"
+                _ = store.renameArea(store.areas[0], to: long1)
+                _ = store.renameArea(store.areas[1], to: long2)
+                saveLive(SettingsView().environment(\.groupsSnapshotDeleting, long1).padding(.horizontal, 12).padding(.vertical, 10),
+                         "ui-settings-groups-800-long.png", CGSize(width: 800, height: 520), inWindow: true)
+            }
             // Settings › Bar in full (tall, in a window so its lists draw their rows).
             ui.settingsSection = .bar
             saveLive(ScrollView { BarSettingsView().padding(12) }, "ui-settings-bar-full.png", CGSize(width: 1000, height: 1100), inWindow: true)

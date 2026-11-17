@@ -100,19 +100,27 @@ struct GroupRow: View {
                 .disabled(store.areas.count <= 1 || deleting)
             }
             if deleting {
-                HStack(spacing: 8) {
+                // Long names are cut short here (the full names are in the field above and in the menu), and when the
+                // line still does not fit, the buttons go on a line of their own.
+                let move = HStack(spacing: 8) {
                     if count > 0 {
                         Text("Move its \(count) task\(count == 1 ? "" : "s") to").font(.system(size: 11)).fixedSize()
                         Dropdown(options: store.areas.filter { $0.id != area.id }.map(\.name), selection: $target,
-                                 dot: store.color)
-                            .fixedSize()
+                                 dot: store.color, labelLimit: 28)
                     }
-                    Button("Delete \(area.name)") {
+                }
+                let buttons = HStack(spacing: 8) {
+                    Button("Delete \(Dropdown<String>.clipped(area.name, 24))") {
                         store.deleteArea(area, moveTasksTo: target)
                         deleting = false
                     }
-                    Button("Cancel") { deleting = false }
-                    Spacer(minLength: 0)
+                    .help("Delete \(area.name)")
+                    .fixedSize()
+                    Button("Cancel") { deleting = false }.fixedSize()
+                }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { move; buttons; Spacer(minLength: 0) }
+                    VStack(alignment: .leading, spacing: 6) { move; buttons }
                 }
                 .padding(.leading, 20)
             }
