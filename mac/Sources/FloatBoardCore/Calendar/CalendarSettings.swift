@@ -43,6 +43,13 @@ public enum CalendarSettings {
         calendarID.lowercased().hasSuffix("@group.v.calendar.google.com")
     }
 
+    /// Whether a calendar seen for the first time starts shown: the account's main calendar always; another only when it is
+    /// ticked in Google Calendar (`selected`), not hidden there, and not one Google generates. Colleagues', rooms and other
+    /// calendars left unticked in Google start off; the user can switch any on in Settings.
+    public static func startsShown(primary: Bool, selected: Bool, hidden: Bool, calendarID: String) -> Bool {
+        primary || (selected && !hidden && !isGoogleGenerated(calendarID))
+    }
+
     /// One account's calendars, the ones the user owns first, then by name.
     public static func calendars(of account: String, in all: [CalCalendar]) -> [CalCalendar] {
         all.filter { $0.account == account }.sorted {

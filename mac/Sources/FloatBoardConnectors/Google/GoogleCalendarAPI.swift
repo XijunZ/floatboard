@@ -28,9 +28,14 @@ public struct CalCalendarInfo: Equatable {
     /// True when `accessRole == "owner"`.
     public var owned: Bool
     public var primary: Bool
+    /// Ticked in Google Calendar's own list (Google's `selected`).
+    public var selected: Bool
+    /// Hidden from Google Calendar's own list (Google's `hidden`).
+    public var hidden: Bool
 
-    public init(id: String, name: String, color: String, owned: Bool, primary: Bool) {
+    public init(id: String, name: String, color: String, owned: Bool, primary: Bool, selected: Bool = false, hidden: Bool = false) {
         self.id = id; self.name = name; self.color = color; self.owned = owned; self.primary = primary
+        self.selected = selected; self.hidden = hidden
     }
 }
 
@@ -74,7 +79,8 @@ public struct GoogleCalendarAPI: Sendable {
                 guard let id = item["id"] as? String else { continue }
                 out.append(CalCalendarInfo(id: id, name: (item["summaryOverride"] as? String) ?? (item["summary"] as? String) ?? id,
                                            color: item["backgroundColor"] as? String ?? "", owned: item["accessRole"] as? String == "owner",
-                                           primary: item["primary"] as? Bool ?? false))
+                                           primary: item["primary"] as? Bool ?? false, selected: item["selected"] as? Bool ?? false,
+                                           hidden: item["hidden"] as? Bool ?? false))
             }
             pageToken = obj["nextPageToken"] as? String
         } while pageToken != nil
