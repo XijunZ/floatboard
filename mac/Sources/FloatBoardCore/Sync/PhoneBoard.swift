@@ -59,10 +59,13 @@ public struct BoardCard: Codable, Equatable {
     public var watch: BoardWatch?
     /// True for a task the email sorting made: deleting it on the phone offers the same "teach" choices as on the Mac.
     public var teachOnDelete: Bool? = nil
+    /// Every tag, primary (its group) first; and when its other tags last changed on this Mac (ISO UTC), so newest wins.
+    public var tags: [String]? = nil
+    public var tagsAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, title, group, color, importance, due, hasTime = "has_time", status, link, links, email, doneAt = "done_at", statusAt = "status_at", watch
-        case teachOnDelete = "teach_on_delete"
+        case teachOnDelete = "teach_on_delete", tags, tagsAt = "tags_at"
     }
 
 
@@ -77,7 +80,25 @@ public struct BoardCard: Codable, Equatable {
         try c.encode(doneAt, forKey: .doneAt); try c.encode(statusAt, forKey: .statusAt)
         try c.encodeIfPresent(watch, forKey: .watch)
         if teachOnDelete == true { try c.encode(true, forKey: .teachOnDelete) }
+        try c.encodeIfPresent(tags, forKey: .tags); try c.encodeIfPresent(tagsAt, forKey: .tagsAt)
     }
+}
+
+/// A reminder from the shared budget, in the copy for the phone: the engine sends it by push only when the Mac has not
+/// shown it (it is still in the Mac's latest copy `phoneGrace` after its time).
+public struct BoardReminder: Codable, Equatable {
+    public var id: String
+    public var title: String
+    public var text: String
+    public var fireAt: String
+    enum CodingKeys: String, CodingKey { case id, title, text, fireAt = "fire_at" }
+}
+
+/// What else the board copy carries for the phone: which areas are on, and the budget reminders waiting to be shown.
+public struct BoardExtras: Equatable {
+    public var modules: Set<Module>
+    public var reminders: [BoardReminder]
+    public init(modules: Set<Module>, reminders: [BoardReminder]) { self.modules = modules; self.reminders = reminders }
 }
 
 public struct BoardWatch: Codable, Equatable {
@@ -119,17 +140,19 @@ public struct PhoneAction: Codable, Equatable {
     public var reason: String?
     /// delete only: the "teach" choice made on the phone (not_action | wrong_details | duplicate), as on the Mac.
     public var teach: String?
+    /// set_tags only: the task's tags, primary (its group) first.
+    public var tags: [String]?
 
     public init(id: String, clientID: String? = nil, cardID: Int64?, action: String, title: String? = nil, group: String? = nil,
-                madeAt: Date? = nil, email: PhoneEmail? = nil, reason: String? = nil, teach: String? = nil) {
+                madeAt: Date? = nil, email: PhoneEmail? = nil, reason: String? = nil, teach: String? = nil, tags: [String]? = nil) {
         self.id = id; self.clientID = clientID; self.cardID = cardID; self.action = action; self.title = title; self.group = group
-        self.madeAt = madeAt; self.email = email; self.reason = reason; self.teach = teach
+        self.madeAt = madeAt; self.email = email; self.reason = reason; self.teach = teach; self.tags = tags
     }
 
     /// The key that makes an action apply once: the phone's id when there is one, else the engine's.
     public var onceKey: String { clientID.flatMap { $0.isEmpty ? nil : $0 } ?? id }
 
-    enum CodingKeys: String, CodingKey { case id, clientID = "client_id", cardID = "card_id", action, title, group, madeAt = "made_at", email, reason, teach }
+    enum CodingKeys: String, CodingKey { case id, clientID = "client_id", cardID = "card_id", action, title, group, madeAt = "made_at", email, reason, teach, tags }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -141,6 +164,7 @@ public struct PhoneAction: Codable, Equatable {
         group = try c.decodeIfPresent(String.self, forKey: .group)
         reason = (try? c.decodeIfPresent(String.self, forKey: .reason)).flatMap { $0 } // try?-ok: only shown in the task's history
         teach = (try? c.decodeIfPresent(String.self, forKey: .teach)).flatMap { $0 } // try?-ok: an unreadable reason is a plain delete
+        tags = (try? c.decodeIfPresent([String].self, forKey: .tags)).flatMap { $0 } // try?-ok: unreadable tags are skipped as invalid when applied
         // An unreadable time counts as unknown (applied without the newest-change test), not as a broken action.
         madeAt = (try? c.decodeIfPresent(String.self, forKey: .madeAt)).flatMap { $0 }.flatMap(PhoneBoard.parseISO) // try?-ok: unreadable time is treated as unknown
         // An unreadable email leaves it nil: the link is then skipped as invalid, never a broken batch.
@@ -154,6 +178,7 @@ public struct PhoneAction: Codable, Equatable {
         try c.encodeIfPresent(madeAt.map(PhoneBoard.isoUTC), forKey: .madeAt)
         try c.encodeIfPresent(email, forKey: .email)
         try c.encodeIfPresent(teach, forKey: .teach)
+        try c.encodeIfPresent(tags, forKey: .tags)
     }
 }
 
@@ -196,9 +221,26 @@ public enum PhoneBoard {
         return chosen.map { c in
             var b = card(for: c, color: colors[c.area], calendar: calendar)
             b.statusAt = isoUTC(steps[c.id] ?? c.created)
+            b.tags = store.itemTags(ShortID(kind: .task, number: c.id)).all.map { clipTo($0, maxTag) }
+            b.tagsAt = isoUTC(store.tagsChangedAt(c.id) ?? c.created)
             return b
         }
     }
+
+    static let maxTag = 60
+
+    /// The budget reminders waiting to be shown (at most 20), for the engine to send to the phone when the Mac does not.
+    @MainActor
+    public static func reminders(store: Store, now: Date) -> [BoardReminder] {
+        ReminderBudget(store: store).pending().prefix(20).map {
+            BoardReminder(id: $0.id, title: clip(store.item(ShortID.parse($0.item) ?? ShortID(kind: .task, number: 0))?.title ?? "FloatBoard"),
+                          text: clip($0.text), fireAt: isoUTC($0.fireAt))
+        }
+    }
+
+    /// The extras for the copy: modules and waiting reminders.
+    @MainActor
+    public static func extras(store: Store, now: Date) -> BoardExtras { BoardExtras(modules: store.modules, reminders: reminders(store: store, now: now)) }
 
     public static func card(for c: Card, color: String?, calendar: Calendar) -> BoardCard {
         let hex = color.flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
@@ -339,22 +381,27 @@ public enum PhoneBoard {
     /// The body sent to the engine: `{"cards":[...], "events":[...], "time_zone": ..., "sent_at": ...}` with sorted keys.
     /// `events` and `time_zone` are left out when nil (older engines and checks). Without `sentAt` (as for the hash),
     /// equal boards give equal bytes.
-    public static func body(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, sentAt: Date? = nil) throws -> Data {
+    public static func body(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, sentAt: Date? = nil,
+                            extras: BoardExtras? = nil) throws -> Data {
         struct Body: Encodable {
             let cards: [BoardCard]; let events: [BoardEvent]?; let timeZone: String?; let sentAt: String?
-            enum CodingKeys: String, CodingKey { case cards, events, timeZone = "time_zone", sentAt = "sent_at" }
+            let modules: [String: Bool]?; let reminders: [BoardReminder]?
+            enum CodingKeys: String, CodingKey { case cards, events, timeZone = "time_zone", sentAt = "sent_at", modules, reminders }
         }
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return try enc.encode(Body(cards: cards, events: events, timeZone: timeZone, sentAt: sentAt.map(isoUTC)))
+        let modules = extras.map { e in Dictionary(uniqueKeysWithValues: Module.allCases.map { ($0.rawValue, e.modules.contains($0)) }) }
+        return try enc.encode(Body(cards: cards, events: events, timeZone: timeZone, sentAt: sentAt.map(isoUTC), modules: modules,
+                                   reminders: extras?.reminders))
     }
 
     /// A stable fingerprint of the board for one engine address (a different engine always gets a push). It covers
     /// each card's `status_at`, so a step change is sent even when the card ends on the same step, and the events.
-    public static func hash(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, engine: String) throws -> String {
+    public static func hash(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, extras: BoardExtras? = nil,
+                            engine: String) throws -> String {
         var data = Data(engine.utf8)
         data.append(0)
-        data.append(try body(cards, events: events, timeZone: timeZone))
+        data.append(try body(cards, events: events, timeZone: timeZone, extras: extras))
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
@@ -459,7 +506,7 @@ extension Store {
                         if title.isEmpty { outcome = "bad"; return }
                         let group = areas.contains { $0.name == a.group } ? a.group! : (areas.first?.name ?? "Personal")
                         let id = try db.run(
-                            "INSERT INTO cards(title,area,importance,due,status,created,updated) VALUES(?,?,?,?,?,?,?)",
+                            "INSERT INTO cards(title,area,importance,due,status,created,updated,item_source) VALUES(?,?,?,?,?,?,?,'phone')",
                             [PhoneBoard.clip(title), group, Importance.medium.rawValue, nil, Status.todo.rawValue, now, now])
                         try insertEvent(id, "created (from the phone)", to: .todo, actor: .user, at: now)
                         outcome = "added"
@@ -517,6 +564,18 @@ extension Store {
                         if try restoreCardRow(cardID, memo: deleteMemos[cardID], now: now) { back = cardID }
                         try db.run("DELETE FROM meta WHERE key=?", [Self.phoneDeleteKey(cardID)])
                         outcome = "restored"
+                    } else if a.action == "set_tags", let cardID = a.cardID {
+                        // Several tags per task: the first is its group. Newest wins against the last tag change here.
+                        let row = try db.query("SELECT deleted, withdrawn, area FROM cards WHERE id=?", [cardID]) { (DB.int($0, 0), DB.int($0, 1), DB.text($0, 2)) }.first
+                        guard let row, row.0 == 0, row.1 == 0 else { outcome = "unknown"; return }
+                        let names = (a.tags ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+                        guard let first = names.first, areas.contains(where: { $0.name.caseInsensitiveCompare(first) == .orderedSame }),
+                              names.allSatisfy({ n in tags.contains { $0.name.caseInsensitiveCompare(n) == .orderedSame } }) else { outcome = "bad"; return }
+                        let last = tagsChangedAt(cardID)
+                        if let made = madeHere, let last, made < last.addingTimeInterval(-Self.sameTime) { outcome = "superseded"; return }
+                        try setTagsRow(ShortID(kind: .task, number: cardID), primary: first, others: Array(names.dropFirst()),
+                                       now: madeHere.map { min($0, now) } ?? now)
+                        outcome = "moved"
                     } else if let status = Status(rawValue: a.action), let cardID = a.cardID {
                         let row = try db.query("SELECT deleted, withdrawn, status FROM cards WHERE id=?", [cardID]) {
                             (DB.int($0, 0), DB.int($0, 1), DB.text($0, 2)) }.first

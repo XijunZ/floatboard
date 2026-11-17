@@ -205,7 +205,7 @@ public struct GoogleCalendarAPI: Sendable {
 
     /// One Google event as a change. All-day events keep Google's `date` values in `startDay`/`endDay`; Google's end date is
     /// EXCLUSIVE (a one-day event on the 23rd ends on the 24th) and it is kept exactly so.
-    static func change(from item: [String: Any]) throws -> GoogleEventChange? {
+    public static func change(from item: [String: Any]) throws -> GoogleEventChange? {
         guard let id = item["id"] as? String else { return nil }
         if item["status"] as? String == "cancelled" { return GoogleEventChange(eventID: id, cancelled: true, fields: nil) }
         guard let s = item["start"] as? [String: Any], let en = item["end"] as? [String: Any] else {
@@ -231,7 +231,12 @@ public struct GoogleCalendarAPI: Sendable {
         let card = ((item["extendedProperties"] as? [String: Any])?["private"] as? [String: Any])?["floatboard_card"] as? String
         f.fbCard = card.flatMap { Int64($0) }
         f.videoLink = videoLink(item, location: f.location, description: f.description)
-        return GoogleEventChange(eventID: id, cancelled: false, fields: f)
+        // Guests and their replies (addresses lower-cased); an event with no list has none.
+        let guests = (item["attendees"] as? [[String: Any]] ?? []).compactMap { a -> CalGuest? in
+            guard let email = (a["email"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased(), !email.isEmpty else { return nil }
+            return CalGuest(email: email, status: a["responseStatus"] as? String ?? "needsAction")
+        }
+        return GoogleEventChange(eventID: id, cancelled: false, fields: f, guests: guests)
     }
 
     private static func videoLink(_ item: [String: Any], location: String, description: String) -> String {

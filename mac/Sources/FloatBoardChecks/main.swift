@@ -758,6 +758,7 @@ await codexFixChecks()
 await planningChecks()
 phoneDeleteChecks()
 foundationChecks()
+foundationCoreChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)
