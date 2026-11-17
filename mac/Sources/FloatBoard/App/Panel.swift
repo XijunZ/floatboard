@@ -7,13 +7,11 @@ import SwiftUI
 final class UIState: ObservableObject {
     enum Mode { case banner, expanded, minimized, hidden }
     enum Tab: Hashable, CaseIterable {
-        case board, calendar, bar, groups, settings
+        case board, calendar, settings
         var title: String {
             switch self {
             case .board: "Board"
             case .calendar: "Calendar"
-            case .bar: "Bar"
-            case .groups: "Groups"
             case .settings: "Settings"
             }
         }
@@ -24,11 +22,13 @@ final class UIState: ObservableObject {
     /// The open section of the Settings tab.
     @Published var settingsSection: SettingsSection = .mode
     @Published var hovering = false
+    /// Opens Settings on one section (the menu's "Bar…" and "Groups…", links elsewhere in the app).
+    func openSettings(_ section: SettingsSection) { tab = .settings; settingsSection = section }
     /// Set when the board should open with the "new task" box focused.
     @Published var wantsAddFocus = false
     /// Quick add happens inside the one-line banner, without opening the board.
     @Published var quickAdding = false
-    /// How the one-line bar orders tasks and what it shows (Bar tab).
+    /// How the one-line bar orders tasks and what it shows (Settings › Bar).
     @Published var bar = BarConfig() { didSet { bar.save(store: logStore) } }
     private var logStore: Store?
     /// The meeting the bar shows right now (within 60 minutes of starting, or in progress), if any. Set by `refreshMeeting`.

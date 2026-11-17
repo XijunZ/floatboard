@@ -418,14 +418,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleSplitCount() { ui.bar.splitCount = !(ui.bar.splitCount ?? false) }
     @objc func resetBoard() { panel.resetBoard() }
     @objc func syncConnectors() { connectors.trigger("menu") }
-    @objc func barSettings() { ui.tab = .bar; ui.quickAdding = false; expand() }
+    @objc func barSettings() { ui.openSettings(.bar); ui.quickAdding = false; expand() }
     @objc func showSettings() { ui.tab = .settings; ui.quickAdding = false; expand() }
     @objc func showFeedback() { FeedbackWindow.show(store: store) }
     @objc func checkForUpdates() {
         ui.settingsSection = .mode; showSettings()
         Task { await Updater.shared.check() }
     }
-    @objc func manageGroups() { ui.tab = .groups; ui.quickAdding = false; expand() }
+    @objc func manageGroups() { ui.openSettings(.groups); ui.quickAdding = false; expand() }
 
     private func showError(_ title: String, _ error: Error) {
         let a = NSAlert()

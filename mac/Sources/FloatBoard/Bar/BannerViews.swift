@@ -184,7 +184,7 @@ struct QuickAddField: View {
             Menu {
                 ForEach(store.areas) { a in Button(a.name) { areaRaw = a.name } }
                 Divider()
-                Button("Manage groups…") { ui.tab = .groups; ui.quickAdding = false; ui.mode = .expanded }
+                Button("Manage groups…") { ui.openSettings(.groups); ui.quickAdding = false; ui.mode = .expanded }
             } label: {
                 HStack(spacing: 4) {
                     Circle().fill(store.color(area)).frame(width: 7, height: 7)

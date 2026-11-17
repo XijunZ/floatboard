@@ -140,13 +140,13 @@ struct BarConfig: Codable, Equatable {
 }
 
 extension SortKey {
-    /// How the bar uses this key (shown on the Bar tab).
+    /// How the bar uses this key (shown in Settings › Bar).
     var detail: String {
         switch self {
         case .due: "Soonest first; tasks without a date after"
         case .status: "Doing before To do"
         case .importance: "High, then Medium, then Low"
-        case .group: "In the order set on the Groups tab"
+        case .group: "In the order set in Settings › Groups"
         case .added: "Oldest first"
         }
     }

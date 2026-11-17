@@ -97,6 +97,28 @@ enum Snapshot {
                 }
             }
         }
+        // Drawn by an off-screen hosting view, as the app lays it out (scroll views, real buttons and pickers), which the
+        // image renderer above cannot do.
+        func saveLive<V: View>(_ v: V, _ name: String, _ size: CGSize) {
+            let host = NSHostingView(rootView: v.environmentObject(store).environmentObject(ui).environmentObject(google)
+                .frame(width: size.width, height: size.height).background(Color(white: 0.97)).environment(\.colorScheme, .light))
+            host.frame = CGRect(origin: .zero, size: size)
+            host.layoutSubtreeIfNeeded()
+            guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+            host.cacheDisplay(in: host.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:]) else { return }
+            do { try png.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name)) } catch {
+                store.activity("snapshot", .error, "Could not write the snapshot image \(name)", detail: "\(error)")
+            }
+        }
+        // The window's tab bar and Settings with its sections. Only on a scratch database.
+        if ProcessInfo.processInfo.environment["FLOATBOARD_UISHOTS"] != nil, LocalData.isScratchDatabase {
+            saveLive(TabPicker(tab: .constant(.board)).padding(10), "ui-tabs.png", CGSize(width: 520, height: 44))
+            for s in [SettingsSection.general, .bar, .groups] {
+                ui.settingsSection = s
+                saveLive(SettingsView().padding(12), "ui-settings-\(s.rawValue).png", CGSize(width: 1000, height: 560))
+            }
+        }
         let backdrop = LinearGradient(colors: [.blue, .orange, .green], startPoint: .leading, endPoint: .trailing)
         save(RootView().background(backdrop), "banner.png", CGSize(width: 900, height: 30))
         let wasSplit = ui.bar.splitCount
@@ -145,20 +167,8 @@ enum Snapshot {
             let hours = 8...18
             save(CalendarView(span: .day, snapshotHours: hours).padding(12), "calendar-day.png", CGSize(width: 1100, height: 640))
             save(CalendarView(span: .week, snapshotHours: hours).padding(12), "calendar-week.png", CGSize(width: 1100, height: 640))
-            // The tab as the app lays it out (scrolling grid, real buttons): drawn by an off-screen hosting view, which the
-            // image renderer above cannot do. At a short window height, to see that nothing stretches between the rows.
-            func saveLive<V: View>(_ v: V, _ name: String, _ size: CGSize) {
-                let host = NSHostingView(rootView: v.environmentObject(store).environmentObject(ui).environmentObject(google)
-                    .frame(width: size.width, height: size.height).background(Color(white: 0.97)).environment(\.colorScheme, .light))
-                host.frame = CGRect(origin: .zero, size: size)
-                host.layoutSubtreeIfNeeded()
-                guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
-                host.cacheDisplay(in: host.bounds, to: rep)
-                guard let png = rep.representation(using: .png, properties: [:]) else { return }
-                do { try png.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name)) } catch {
-                    store.activity("snapshot", .error, "Could not write the snapshot image \(name)", detail: "\(error)")
-                }
-            }
+            // The tab as the app lays it out (scrolling grid, real buttons; `saveLive`). At a short window height, to see that
+            // nothing stretches between the rows.
             for (span, name) in [(CalendarView.Span.week, "calendar-week-live.png"), (.day, "calendar-day-live.png")] {
                 saveLive(CalendarView(span: span).padding(.horizontal, 12).padding(.bottom, 12).padding(.top, 10)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading), name, CGSize(width: 1000, height: 530))
@@ -217,6 +227,8 @@ enum Snapshot {
                 Text(s.title).font(.system(size: 15, weight: .semibold))
                 switch s {
                 case .general: GeneralSection()
+                case .bar: BarSettingsView()
+                case .groups: GroupsView()
                 case .mode: ModeSection()
                 case .connections: ConnectionsSection()
                 case .rules: RulesSection()

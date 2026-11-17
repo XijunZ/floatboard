@@ -5,11 +5,13 @@ import SwiftUI
 
 /// The sections of Settings (docs/architecture.md, Edition 2): what the product is, in the order you set it up.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, mode, connections, rules, keys
+    case general, bar, groups, mode, connections, rules, keys
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: "General"
+        case .bar: "Bar"
+        case .groups: "Groups"
         case .mode: "Mode"
         case .connections: "Connections"
         case .rules: "Rules & learning"
@@ -19,6 +21,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: "gearshape"
+        case .bar: "menubar.rectangle"
+        case .groups: "square.stack.3d.up"
         case .mode: "server.rack"
         case .connections: "point.3.connected.trianglepath.dotted"
         case .rules: "text.book.closed"
@@ -28,6 +32,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var blurb: String {
         switch self {
         case .general: "How this Mac shows dates and times."
+        case .bar: "What the one-line bar shows and in which order."
+        case .groups: "The groups your tasks are sorted into."
         case .mode: "Where screening runs."
         case .connections: "Where tasks come from, your phone, and where tasks and alerts go."
         case .rules: "What FloatBoard follows, and what it has learned."
@@ -73,6 +79,8 @@ struct SettingsView: View {
                     }
                     switch ui.settingsSection {
                     case .general: GeneralSection()
+                    case .bar: BarSettingsView()
+                    case .groups: GroupsView()
                     case .mode: ModeSection()
                     case .connections: ConnectionsSection()
                     case .rules: RulesSection()

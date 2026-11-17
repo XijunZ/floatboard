@@ -33,10 +33,6 @@ struct ExpandedView: View {
                 }
             case .calendar:
                 CalendarView()
-            case .bar:
-                BarSettingsView()
-            case .groups:
-                GroupsView()
             case .settings:
                 SettingsView()
             }
@@ -81,12 +77,7 @@ struct ExpandedView: View {
     /// Native toolbar: tabs in the middle, Guide and pin on the right (search is the system search field).
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Picker("View", selection: $ui.tab) {
-                ForEach(UIState.Tab.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
+            TabPicker(tab: $ui.tab)
         }
         // Push search / Guide / Pin to the right edge.
         if #available(macOS 26.0, *) { ToolbarSpacer(.flexible) }
@@ -260,3 +251,16 @@ extension SortKey {
     }
 }
 
+
+/// The window's tabs (in the toolbar).
+struct TabPicker: View {
+    @Binding var tab: UIState.Tab
+    var body: some View {
+        Picker("View", selection: $tab) {
+            ForEach(UIState.Tab.allCases, id: \.self) { Text($0.title).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+    }
+}
