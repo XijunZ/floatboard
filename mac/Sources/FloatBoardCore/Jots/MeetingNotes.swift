@@ -87,9 +87,10 @@ extension JotStore {
 
     /// Fathom's details of a meeting notes jot and how it was attached.
     public func meetingInfo(_ jotID: Int64) -> MeetingNotesInfo? {
-        (try? store.db.query("""
+        let sql = """
             SELECT recap_key, fathom_url, meeting_url, title, scheduled_start, invitees, matched_by, received FROM jot_meetings WHERE jot_id=?
-            """, [jotID]) { s in
+            """
+        return (try? store.db.query(sql, [jotID]) { s in // try?-ok: unreadable = shown as plain notes
             let invitees = (try? JSONSerialization.jsonObject(with: Data(DB.text(s, 5).utf8))) as? [String] ?? [] // try?-ok: unreadable = no invitees, so matching falls back to a suggestion
             return MeetingNotesInfo(meta: MeetingMeta(recapKey: DB.text(s, 0), fathomURL: DB.text(s, 1), meetingURL: DB.text(s, 2), title: DB.text(s, 3),
                                                       scheduledStart: DB.date(s, 4), invitees: invitees, received: DB.date(s, 7) ?? Date()),
@@ -127,7 +128,7 @@ extension JotStore {
     /// Meeting notes not attached yet (or only suggested) that arrived in the last 2 days: tried again (their event may
     /// have synced since).
     public func attachPendingMeetingNotes(now: Date = Date()) {
-        let ids = (try? store.db.query("SELECT jot_id FROM jot_meetings WHERE matched_by IN ('', 'suggested') AND received>?",
+        let ids = (try? store.db.query("SELECT jot_id FROM jot_meetings WHERE matched_by IN ('', 'suggested') AND received>?", // try?-ok: unreadable = tried on the next pass
                                        [now.addingTimeInterval(-2 * 86400)]) { DB.int($0, 0) }) ?? [] // try?-ok: unreadable = tried on the next pass
         for id in ids { attachMeetingNotes(id, now: now) }
     }

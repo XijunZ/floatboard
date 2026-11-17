@@ -99,7 +99,8 @@ private func schemaRows(_ url: URL) -> [String] {
     check(js.list(JotQuery(text: b.shortID.text)).map(\.id) == [b.id], "jot_search_by_id")
     check(js.list(JotQuery(tags: ["health"])).map(\.id) == [a.id], "jot_filter_by_any_tag")
     check(js.list(JotQuery(kinds: [.meetingNotes])).map(\.id) == [c.id], "jot_filter_by_kind")
-    check(js.list(JotQuery()).first { $0.id == b.id }?.untagged == true, "untagged_jot_is_marked")
+    check(js.list(JotQuery()).first { $0.id == b.id }?.untagged == true && js.list(JotQuery(untagged: true)).map(\.id) == [c.id, b.id],
+          "untagged_jot_is_marked_and_filtered")
     js.update(a.id, text: "Budget: send the revised numbers to Ann", now: t0.addingTimeInterval(500))
     check(js.list(JotQuery(sort: .updated)).first?.id == a.id, "jot_sort_by_updated")
     check(js.list(JotQuery(sort: .tag)).map(\.id) == [a.id, c.id, b.id], "jot_sort_by_tag_untagged_last")
@@ -115,6 +116,16 @@ private func schemaRows(_ url: URL) -> [String] {
     check(js.changed(since: t0.addingTimeInterval(650)).map(\.id) == [b.id], "jots_changed_since")
     check(js.setTags(b.id, ["Nope"]) != nil && js.setTags(b.id, ["Health", "Work"]) == nil
           && store.itemTags(b.shortID) == ItemTags(primary: "Health", others: ["Work"]), "jot_tags_set_first_primary")
+    // J1/J8: the capture window's save, about a task: the task's tags and a link to it.
+    store.add(title: "Plan the offsite", area: "Work", importance: .medium, due: nil)
+    if let task = store.cards.last {
+        store.setTags(ShortID(kind: .task, number: task.id), primary: "Work", others: ["Health"])
+        let j = js.capture("Venue ideas for the offsite", aboutTask: task.id, now: t0)
+        check(j?.source == .typed && j.map { store.itemTags($0.shortID).all } == ["Work", "Health"]
+              && j.map { store.itemLinks(of: $0.shortID).first { $0.other == ShortID(kind: .task, number: task.id) }?.kind } == .related,
+              "jot_about_this_takes_task_tags_and_links")
+        check(js.capture("   ") == nil, "empty_capture_saves_nothing")
+    }
     // Own jots today (for the nudge): typed or phone jots only, by the app's day.
     let now = Date()
     check(!js.ownJotAdded(on: now), "no_own_jot_today_yet")

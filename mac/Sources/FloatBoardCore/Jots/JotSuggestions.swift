@@ -7,11 +7,12 @@ import Foundation
 
     /// Jots to ask Claude about: new since the last ask, not deleted, untagged, oldest first, at most `limit`.
     public func toAsk(limit: Int = 20) -> [Jot] {
-        let ids = (try? store.db.query("""
+        let sql = """
             SELECT j.id FROM jots j LEFT JOIN jot_sync s ON s.jot_id=j.id
             WHERE j.deleted=0 AND coalesce(s.tags_asked,0)=0 AND NOT EXISTS (SELECT 1 FROM item_tags t WHERE t.item='J-' || j.id)
             ORDER BY j.id LIMIT ?
-            """, [limit]) { DB.int($0, 0) }) ?? [] // try?-ok: unreadable = nothing asked this time; the next pass asks again
+            """
+        let ids = (try? store.db.query(sql, [limit]) { DB.int($0, 0) }) ?? [] // try?-ok: unreadable = nothing asked this time; the next pass asks again
         return ids.compactMap { JotStore(store: store).jot($0) }
     }
 

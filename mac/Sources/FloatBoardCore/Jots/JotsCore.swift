@@ -13,8 +13,10 @@ public struct JotQuery: Equatable {
     public var kinds: Set<JotKind> = []
     public var sort: JotSort = .added
     public var limit = 500
-    public init(text: String = "", tags: Set<String> = [], kinds: Set<JotKind> = [], sort: JotSort = .added, limit: Int = 500) {
-        self.text = text; self.tags = tags; self.kinds = kinds; self.sort = sort; self.limit = limit
+    /// Only jots with no tags (shown as "untagged").
+    public var untagged = false
+    public init(text: String = "", tags: Set<String> = [], kinds: Set<JotKind> = [], sort: JotSort = .added, limit: Int = 500, untagged: Bool = false) {
+        self.text = text; self.tags = tags; self.kinds = kinds; self.sort = sort; self.limit = limit; self.untagged = untagged
     }
 }
 
@@ -51,6 +53,15 @@ extension JotStore {
         return n
     }
 
+    /// The capture window's save (J1, J8): a typed or dictated jot; "about" a task, it takes the task's tags and is linked to it.
+    @discardableResult
+    public func capture(_ text: String, aboutTask task: Int64? = nil, now: Date = Date()) -> Jot? {
+        let tags = task.map { store.itemTags(ShortID(kind: .task, number: $0)).all } ?? []
+        guard let jot = add(text, tags: tags, now: now) else { return nil }
+        if let t = task { store.link(jot.shortID, ShortID(kind: .task, number: t), kind: .related, madeBy: .manual, actor: .user, now: now) }
+        return jot
+    }
+
     /// The jot that arrived with this engine key, if any (deleted ones too).
     public func jot(origin: String) -> Jot? {
         guard !origin.isEmpty else { return nil }
@@ -85,7 +96,7 @@ extension JotStore {
         for j in rows(sql, args) {
             let tags = store.itemTags(j.shortID)
             if !words.isEmpty && !isID && !GlobalSearch.matches(j.text + " " + tags.all.joined(separator: " "), words) { continue }
-            if !TagFilter.matches(tags, any: q.tags) { continue }
+            if !TagFilter.matches(tags, any: q.tags) || (q.untagged && !tags.all.isEmpty) { continue }
             out.append(JotRow(jot: j, tags: tags))
             if out.count >= q.limit && q.sort != .tag { break }
         }
