@@ -160,6 +160,7 @@ struct CalendarView: View {
         let _ = tick
         VStack(alignment: .leading, spacing: 10) {
             header
+            MainOnlyBanner(tick: tick)
             HStack(alignment: .top, spacing: 12) {
                 if span == .day { DayView(day: anchor, snapshotHours: snapshotHours) }
                 else { WeekView(anchor: anchor, snapshotHours: snapshotHours) }
@@ -259,5 +260,46 @@ struct AccountLegend: View {
         guard email.count > limit else { return email }
         let keep = limit - 1, head = keep / 2
         return String(email.prefix(head)) + "…" + String(email.suffix(keep - head))
+    }
+}
+
+/// Under the Calendar header, one line per account shown with its main calendar only (its sign-in cannot list calendars):
+/// "Showing main calendars only for <email>. Show all calendars…" runs that account's sign-in again, which grants the list;
+/// × closes the line for that account (Settings › Outputs › Calendar still offers the sign-in).
+struct MainOnlyBanner: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var google: Google
+    @Environment(\.calendarSnapshot) private var snapshot
+    var tick = 0
+    @State private var closed = 0
+
+    var body: some View {
+        let _ = (tick, closed)
+        let cache = CalendarCache(store: store)
+        let accounts = CalendarSettings.mainOnlyBanner(connected: cache.connectedAccountList(), calendars: cache.calendars(),
+                                                      outcome: { CalendarListAttempts.outcome($0) }, dismissed: store.dismissedCalendarBanners())
+        let colours = store.accountColors(for: cache.connectedAccountList())
+        if !accounts.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(accounts, id: \.self) { a in
+                    HStack(spacing: 6) {
+                        Circle().fill(Color(hex: colours[a] ?? AccountColors.fallback)).frame(width: 8, height: 8)
+                        Text("Showing main calendars only for \(AccountLegend.short(a, limit: 40)).").font(.system(size: 12)).lineLimit(1)
+                        if snapshot {
+                            Text("Show all calendars…").font(.system(size: 12)).foregroundStyle(Color.accentColor)
+                        } else {
+                            Button("Show all calendars…") { google.connect(loginHint: a) }
+                                .buttonStyle(.link).font(.system(size: 12))
+                                .disabled(!google.isConfigured || google.busy)
+                        }
+                        Spacer(minLength: 0)
+                        Button { store.dismissCalendarBanner(a); closed += 1 } label: { Image(systemName: "xmark").font(.system(size: 10)) }
+                            .buttonStyle(.borderless).help("Hide this line (Settings › Outputs › Calendar still offers it)")
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.08)))
+                }
+            }
+        }
     }
 }
