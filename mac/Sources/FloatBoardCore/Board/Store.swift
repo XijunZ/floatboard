@@ -238,14 +238,16 @@ public final class Store: ObservableObject {
     }
 
     public func setArea(_ card: Card, _ area: String, now: Date = Date()) {
-        perform {
-            let old = try currentCard(card.id)?.card ?? card
-            guard old.area != area else { return }
-            var new = old; new.area = area
-            try db.run("UPDATE cards SET area=?, updated=? WHERE id=?", [area, now, card.id])
-            try insertEvent(card.id, "group: \(old.area) → \(area)", actor: .user, at: now)
-            try queueChange(old: old, new: new, now: now)
-        }
+        perform { try setAreaRow(card.id, area, now: now) }
+    }
+
+    /// The body of `setArea`, for callers inside a transaction.
+    func setAreaRow(_ id: Int64, _ area: String, now: Date) throws {
+        guard let old = try currentCard(id)?.card, old.area != area else { return }
+        var new = old; new.area = area
+        try db.run("UPDATE cards SET area=?, updated=? WHERE id=?", [area, now, id])
+        try insertEvent(id, "group: \(old.area) → \(area)", actor: .user, at: now)
+        try queueChange(old: old, new: new, now: now)
     }
 
     /// How long the board's Undo bar stays up after a delete.

@@ -409,9 +409,10 @@ public struct ConnectorClient {
     /// Replaces the engine's copy of the board shown on the phone. `sent_at` is this Mac's clock at send time, so the
     /// engine can correct each card's `status_at` for a wrong Mac clock.
     /// `events` (meetings from today to the end of next week) and `timeZone` (the zone the Mac shows times in) are for the phone's planning summary.
-    public func putBoard(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, sentAt: Date = Date()) async throws {
+    public func putBoard(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, extras: BoardExtras? = nil,
+                         sentAt: Date = Date()) async throws {
         let body: Data
-        do { body = try PhoneBoard.body(cards, events: events, timeZone: timeZone, sentAt: sentAt) } catch { throw ConnectorError.badResponse("\(error)") }
+        do { body = try PhoneBoard.body(cards, events: events, timeZone: timeZone, sentAt: sentAt, extras: extras) } catch { throw ConnectorError.badResponse("\(error)") }
         _ = try await phoneCall("PUT", "/v2/board", body: body)
     }
 

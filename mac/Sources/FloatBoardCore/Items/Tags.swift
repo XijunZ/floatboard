@@ -98,32 +98,41 @@ extension Store {
             return "There's no tag called \(unknown)."
         }
         if id.kind == .task {
-            guard let p = primary, let card = card(id.number) else { return "A task needs a group." }
-            if card.area != p { setArea(card, tags.first { $0.name.caseInsensitiveCompare(p) == .orderedSame }?.name ?? p, now: now) }
+            guard primary != nil, card(id.number) != nil else { return "A task needs a group." }
         }
+        perform { try setTagsRow(id, primary: primary, others: wanted.others, now: now) }
+        return nil
+    }
+
+    /// The body of `setTags` (names already checked), for callers inside a transaction.
+    func setTagsRow(_ id: ShortID, primary: String?, others: [String], now: Date) throws {
+        let canonical = { (n: String) in self.tags.first { $0.name.caseInsensitiveCompare(n) == .orderedSame }?.name ?? n }
+        if id.kind == .task, let p = primary { try setAreaRow(id.number, canonical(p), now: now) }
+        let wanted = ItemTags(primary: primary, others: others)
         let before = itemTags(id)
-        perform {
+        do {
             try db.run("DELETE FROM item_tags WHERE item=?", [id.text])
             if id.kind != .task, let p = primary, let tid = try tagID(p) {
                 try db.run("INSERT INTO item_tags(item, tag_id, is_primary, added) VALUES(?,?,1,?)", [id.text, tid, now])
             }
-            for name in wanted.others {
+            for name in wanted.others where name.caseInsensitiveCompare(primary ?? "") != .orderedSame {
                 guard let tid = try tagID(name) else { continue }
                 try db.run("INSERT OR IGNORE INTO item_tags(item, tag_id, is_primary, added) VALUES(?,?,0,?)", [id.text, tid, now])
             }
-            if id.kind == .task && Set(before.others) != Set(wanted.others) {
+            if id.kind == .task && Set(before.others.map { $0.lowercased() }) != Set(wanted.others.map { $0.lowercased() }) {
                 try db.run("UPDATE cards SET updated=? WHERE id=?", [now, id.number])
-                try insertEvent(id.number, "tags: " + (wanted.others.isEmpty ? "none" : wanted.others.joined(separator: ", ")), actor: .user, at: now)
+                try insertEvent(id.number, "tags: " + (wanted.others.isEmpty ? "none" : wanted.others.map(canonical).joined(separator: ", ")),
+                                actor: .user, at: now)
                 try db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", ["tags_at:\(id.number)", String(now.timeIntervalSince1970)])
             }
         }
-        return nil
     }
 
-    /// When a task's other tags last changed on this Mac (nil: never), so a phone change older than it loses.
+    /// When a task's tags (its group or its other tags) last changed on this Mac (nil: never), so an older phone change loses.
     public func tagsChangedAt(_ cardID: Int64) -> Date? {
         let v = (try? db.query("SELECT value FROM meta WHERE key=?", ["tags_at:\(cardID)"]) { DB.text($0, 0) })?.first // try?-ok: unknown = never changed
-        return v.flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
+        let group = (try? db.query("SELECT max(at) FROM events WHERE card_id=? AND kind LIKE 'group:%'", [cardID]) { DB.date($0, 0) })?.first ?? nil // try?-ok: unknown = never changed
+        return [v.flatMap(Double.init).map(Date.init(timeIntervalSince1970:)), group].compactMap { $0 }.max()
     }
 
     /// Items carrying any of `tags` (live tasks by group or other tag; other kinds by their rows), each once, by id text.
