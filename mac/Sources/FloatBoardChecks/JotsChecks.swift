@@ -19,6 +19,8 @@ import SQLite3
     dailyFileChecks(root)
     nudgeChecks(root)
     jotSearchChecks(root)
+    dueMentionChecks()
+    await jotsSyncChecks(root)
 }
 
 @MainActor func jotsStore(_ root: URL, _ name: String) -> Store? {
@@ -335,4 +337,143 @@ private func meetingMatchChecks() {
     store.setModule(.jots, on: true)
     let hit = GlobalSearch.run("budget", store: store).first { $0.0 == .jot }?.1.first
     check(hit?.title == "Quarterly budget thoughts" && hit?.detail == "Jot · Work", "jots_in_search_everything")
+}
+
+// MARK: J7 due date from a selection (Foundation extension)
+
+private func dueMentionChecks() {
+    let cal = AppTime.calendar
+    let d = MakeTask.dueMentioned(in: "Send the deck to Ann by 21 November 2099 please")
+    let c = d.map { cal.dateComponents([.year, .month, .day, .hour, .minute], from: $0.date) }
+    check(d?.hasTime == false && c?.year == 2099 && c?.month == 11 && c?.day == 21 && c?.hour == 0, "due_date_only_mention_is_that_day")
+    let t = MakeTask.dueMentioned(in: "Call Ann tomorrow at 3pm")
+    let tc = t.map { cal.dateComponents([.hour, .minute], from: $0.date) }
+    check(t?.hasTime == true && tc?.hour == 15 && tc?.minute == 0, "due_with_time_keeps_the_time")
+    check(MakeTask.dueMentioned(in: "Call Ann about the budget") == nil, "no_due_when_none_mentioned")
+}
+
+// MARK: J3, J13 sync with the engine (a stand-in engine; no network)
+
+/// A minimal stand-in for the engine's Jots routes: what waits, what was acked and pushed, and Claude's tags.
+@MainActor private final class FakeJotsEngine {
+    var waiting: [[String: Any]] = []
+    var acked: [[String: Any]] = []
+    var pushed: [[String: Any]] = []
+    var nudges: [[String: Any]] = []
+    var tagsStatus = 200
+    var tagAnswer: [[String: Any]] = []
+    var tagCalls = 0
+    func handle(_ req: URLRequest) -> (Data, HTTPURLResponse) {
+        let path = req.url!.path
+        let body = req.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:] // try?-ok: test stand-in
+        var status = 200
+        var out: Any = [:]
+        switch (req.httpMethod ?? "GET", path) {
+        case ("GET", "/v2/jots/waiting"): out = ["jots": waiting]
+        case ("POST", "/v2/jots/ack"):
+            let items = body["items"] as? [[String: Any]] ?? []
+            acked += items
+            let keys = Set(items.compactMap { $0["key"] as? String })
+            waiting.removeAll { keys.contains($0["key"] as? String ?? "") }
+            out = ["acked": items.count]
+        case ("PUT", "/v2/jots"):
+            let jots = body["jots"] as? [[String: Any]] ?? []
+            pushed += jots
+            if let n = body["nudge"] as? [String: Any] { nudges.append(n) }
+            out = ["accepted": jots.compactMap { $0["id"] }]
+        case ("POST", "/v2/jots/tags"):
+            tagCalls += 1
+            status = tagsStatus
+            out = status == 200 ? ["suggestions": tagAnswer] : ["error": "no_claude_key"]
+        default: status = 404
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: out)) ?? Data() // try?-ok: test stand-in
+        return (data, HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+@MainActor private func jotsSyncChecks(_ root: URL) async {
+    guard let store = jotsStore(root, "sync.sqlite") else { return }
+    store.setModule(.jots, on: true)
+    let engine = FakeJotsEngine()
+    let client = ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k") { req in await MainActor.run { engine.handle(req) } }
+    let js = JotStore(store: store)
+    let iso = { (d: Date) -> String in let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f.string(from: d) }
+    let t0 = Date().addingTimeInterval(-3600)
+    guard let mine = js.add("Budget notes on the Mac", tags: ["Work"], now: t0) else { check(false, "sync setup"); return }
+    engine.waiting = [
+        ["key": "phone:cap-1", "mac_id": NSNull(), "text": "Idea on the bus", "kind": "jot", "source": "phone", "tags": [], "added": iso(t0 + 60),
+         "updated": iso(t0 + 60), "deleted": false, "rev": 1],
+        ["key": "J-\(mine.id)", "mac_id": mine.id, "text": "Stale phone edit", "kind": "jot", "source": "typed", "tags": [], "added": iso(t0),
+         "updated": iso(t0 - 10), "deleted": false, "rev": 2],
+        ["key": "fathom:abc", "mac_id": NSNull(), "text": "## Summary\nAgreed.", "kind": "meeting_notes", "source": "meeting", "tags": [], "added": iso(t0 + 120),
+         "updated": iso(t0 + 120), "deleted": false, "rev": 1, "meeting": ["recap_key": "fathom:abc", "fathom_url": "https://fathom.video/share/abc",
+         "meeting_url": "", "title": "Weekly", "scheduled_start": NSNull(), "invitees": []]],
+        ["key": "action:mk-1", "mac_id": NSNull(), "text": "Send Ann the budget by 21 November 2099", "kind": "action:make_task", "source": "phone", "tags": [],
+         "added": iso(t0 + 180), "updated": iso(t0 + 180), "deleted": false, "rev": 1, "ref": "J-\(mine.id)"],
+        ["key": "action:md-1", "mac_id": NSNull(), "text": "We go with plan B", "kind": "action:make_decision", "source": "phone", "tags": [],
+         "added": iso(t0 + 190), "updated": iso(t0 + 190), "deleted": false, "rev": 1, "ref": "J-\(mine.id)"]]
+    engine.tagAnswer = []
+    let r = await JotsSync.tick(connector: "jt", store: store, client: client)
+    let cap = js.jot(origin: "phone:cap-1")
+    check(cap?.text == "Idea on the bus" && cap?.source == .phone && cap?.added == ISO8601DateFormatter.fb(iso(t0 + 60)), "phone_capture_becomes_a_mac_jot")
+    check(js.jot(mine.id)?.text == "Budget notes on the Mac", "older_phone_edit_is_not_applied")
+    let notes = js.jot(origin: "fathom:abc")
+    check(notes?.kind == .meetingNotes && js.meetingInfo(notes?.id ?? 0)?.meta.fathomURL == "https://fathom.video/share/abc", "meeting_notes_taken_in_with_details")
+    let task = store.cards.first { $0.title == "Send Ann the budget by 21 November 2099" }
+    check(task?.itemSource == .phone && task?.due != nil && store.itemLinks(of: ShortID(kind: .task, number: task?.id ?? 0)).first?.other == mine.shortID
+          && store.itemTags(ShortID(kind: .task, number: task?.id ?? 0)).primary == "Work", "phone_make_task_links_back_with_due_and_tags")
+    let ackedKeys = engine.acked.compactMap { $0["key"] as? String }
+    check(ackedKeys == ["phone:cap-1", "J-\(mine.id)", "fathom:abc", "action:mk-1"] && engine.acked.first?["mac_id"] as? Int64 == cap?.id
+          && r.taken == 4, "taken_rows_are_acked_with_their_numbers")
+    check(engine.waiting.map { $0["key"] as? String } == ["action:md-1"], "make_decision_waits_until_decisions_takes_it")
+    let pushedIDs = Set(engine.pushed.compactMap { ($0["id"] as? NSNumber)?.int64Value })
+    check(pushedIDs.isSuperset(of: [mine.id, cap?.id ?? -1, notes?.id ?? -1]) && engine.nudges.count == 1, "changed_jots_and_nudge_pushed")
+    engine.pushed = []
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(engine.pushed.isEmpty && engine.nudges.count == 1, "nothing_pushed_when_nothing_changed")
+    // Decisions registers its hook: the waiting decision is taken.
+    var decided: [(String, ShortID)] = []
+    JotActions.makeDecision = { _, text, src in decided.append((text, src)); return true }
+    defer { JotActions.makeDecision = nil }
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(decided.first?.0 == "We go with plan B" && decided.first?.1 == mine.shortID && engine.waiting.isEmpty, "make_decision_handed_to_decisions")
+    // A newer phone edit is applied; then a phone delete.
+    engine.waiting = [["key": "J-\(mine.id)", "mac_id": mine.id, "text": "Budget notes, edited on the phone", "kind": "jot", "source": "typed", "tags": [],
+                       "added": iso(t0), "updated": iso(Date()), "deleted": false, "rev": 3]]
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(js.jot(mine.id)?.text == "Budget notes, edited on the phone" && js.history(mine.id).first?.text == "Budget notes on the Mac", "newer_phone_edit_applied_with_history")
+    engine.waiting = [["key": "J-\(mine.id)", "mac_id": mine.id, "text": "Budget notes, edited on the phone", "kind": "jot", "source": "typed", "tags": [],
+                       "added": iso(t0), "updated": iso(Date().addingTimeInterval(1)), "deleted": true, "rev": 4]]
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(js.jot(mine.id)?.deleted == true, "phone_delete_applied")
+    // Tags: asked once, in one call; a 409 (no Claude key) stops asking on that engine.
+    let tagStore = jotsStore(root, "synctags.sqlite")!
+    tagStore.setModule(.jots, on: true)
+    let te = FakeJotsEngine()
+    let tc = ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k") { req in await MainActor.run { te.handle(req) } }
+    let a = JotStore(store: tagStore).add("Gym three times")!, b = JotStore(store: tagStore).add("Quarter plan")!
+    te.tagAnswer = [["id": a.id, "tags": ["Personal"]], ["id": b.id, "tags": []]]
+    await JotsSync.tick(connector: "tg", store: tagStore, client: tc)
+    await JotsSync.tick(connector: "tg", store: tagStore, client: tc)
+    check(te.tagCalls == 1 && JotSuggestions(store: tagStore).open(a.id) == ["Personal"], "tags_asked_once_in_one_call")
+    JotStore(store: tagStore).add("Another one")
+    te.tagsStatus = 409
+    await JotsSync.tick(connector: "tg", store: tagStore, client: tc)
+    JotStore(store: tagStore).add("And another")
+    await JotsSync.tick(connector: "tg", store: tagStore, client: tc)
+    check(te.tagCalls == 2, "no_claude_key_stops_asking")
+    // Jots off: nothing is read or sent.
+    tagStore.setModule(.jots, on: false)
+    te.pushed = []
+    JotStore(store: tagStore).add("While off")
+    await JotsSync.tick(connector: "tg", store: tagStore, client: tc)
+    check(te.pushed.isEmpty, "jots_off_syncs_nothing")
+}
+
+extension ISO8601DateFormatter {
+    static func fb(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: s)
+    }
 }

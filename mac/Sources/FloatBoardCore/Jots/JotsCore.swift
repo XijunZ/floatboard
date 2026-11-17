@@ -58,11 +58,15 @@ extension JotStore {
         return id.flatMap { jot($0) }
     }
 
-    /// Replaces a jot's tags: the first is primary. Unknown names are refused (the reason comes back).
+    /// Replaces a jot's tags: the first is primary. Unknown names are refused (the reason comes back). A change counts as an
+    /// update of the jot (its date updated moves, and the online copy gets the new tags).
     @discardableResult
     public func setTags(_ id: Int64, _ tags: [String], now: Date = Date()) -> String? {
         let me = ShortID(kind: .jot, number: id)
-        return store.setTags(me, primary: tags.first, others: Array(tags.dropFirst()), now: now)
+        let before = store.itemTags(me).all
+        if let why = store.setTags(me, primary: tags.first, others: Array(tags.dropFirst()), now: now) { return why }
+        if store.itemTags(me).all != before { store.perform { try store.db.run("UPDATE jots SET updated=? WHERE id=?", [now, id]) } }
+        return nil
     }
 
     /// Jots for the list: not deleted, matching the query, in its order.

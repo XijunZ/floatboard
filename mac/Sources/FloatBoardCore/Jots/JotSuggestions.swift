@@ -38,7 +38,7 @@ import Foundation
         let me = ShortID(kind: .jot, number: jotID)
         var t = store.itemTags(me)
         if t.primary == nil { t.primary = tag } else if !t.all.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) { t.others.append(tag) }
-        if let why = store.setTags(me, primary: t.primary, others: t.others, now: now) {
+        if let why = JotStore(store: store).setTags(jotID, t.all, now: now) {
             store.activity("jots", .warning, "Could not add the suggested tag", detail: why)
             return
         }

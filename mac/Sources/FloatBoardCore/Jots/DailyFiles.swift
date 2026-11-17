@@ -32,7 +32,7 @@ public struct DailyFilesSettings: Codable, Equatable {
     }
 
     /// "2026-11-17" for a moment, in the app's zone.
-    public static func dayKey(_ d: Date) -> String {
+    nonisolated public static func dayKey(_ d: Date) -> String {
         let c = AppTime.calendar.dateComponents([.year, .month, .day], from: d)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
