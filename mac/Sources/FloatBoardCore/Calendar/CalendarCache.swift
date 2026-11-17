@@ -53,9 +53,15 @@ public final class CalendarCache {
     }
 
     /// Moves everything kept under the "primary" stand-in for `account` to the main calendar's real id. An event already
-    /// kept under the real id stays as it is and its stand-in copy goes, so nothing is there twice. Runs inside `write`.
+    /// kept under the real id stays as it is and its stand-in copy goes, so nothing is there twice; links to the copy's E-n
+    /// move to the one that stays first. Runs inside `write`.
     private func rekeyPrimary(account: String, to id: String) throws {
         let alias = Self.primaryAlias
+        let pairs = try db.query("""
+            SELECT a.short_id, r.short_id FROM cal_events a JOIN cal_events r ON r.account=a.account AND r.event_id=a.event_id
+            WHERE a.account=? AND a.calendar_id=? AND r.calendar_id=?
+            """, [account, alias, id]) { (DB.int($0, 0), DB.int($0, 1)) }
+        for (gone, kept) in pairs { try moveLinks(from: gone, to: kept) }
         try db.run("""
             UPDATE cal_events SET calendar_id=? WHERE account=? AND calendar_id=?
             AND event_id NOT IN (SELECT event_id FROM cal_events WHERE account=? AND calendar_id=?)
@@ -68,6 +74,28 @@ public final class CalendarCache {
             AND NOT EXISTS (SELECT 1 FROM cal_calendars WHERE account=? AND calendar_id=?)
             """, [id, account, alias, account, id])
         try db.run("DELETE FROM cal_calendars WHERE account=? AND calendar_id=?", [account, alias])
+    }
+
+    /// Every link to event E-`gone` now points at E-`kept` (stored the way `Store.link` stores a pair: smaller text first). A link
+    /// that would join the event to itself is dropped; one that already exists is not doubled.
+    private func moveLinks(from gone: Int64, to kept: Int64) throws {
+        let g = String(gone), event = ItemKind.event.rawValue
+        let rows = try db.query("""
+            SELECT from_type, from_id, to_type, to_id, created, actor FROM links WHERE (from_type=? AND from_id=?) OR (to_type=? AND to_id=?)
+            """, [event, g, event, g]) { s in
+            (DB.text(s, 0), DB.text(s, 1), DB.text(s, 2), DB.text(s, 3), DB.date(s, 4) ?? Date(), DB.text(s, 5))
+        }
+        try db.run("DELETE FROM links WHERE (from_type=? AND from_id=?) OR (to_type=? AND to_id=?)", [event, g, event, g])
+        let keptID = ShortID(kind: .event, number: kept)
+        for r in rows {
+            let other = r.0 == event && r.1 == g ? (r.2, r.3) : (r.0, r.1)
+            guard let kind = ItemKind(rawValue: other.0), let n = Int64(other.1) else { continue }
+            let o = ShortID(kind: kind, number: n)
+            guard o != keptID else { continue }
+            let (a, b) = keptID.text <= o.text ? (keptID, o) : (o, keptID)
+            try db.run("INSERT OR IGNORE INTO links(from_type, from_id, to_type, to_id, created, actor) VALUES(?,?,?,?,?,?)",
+                       [a.kind.rawValue, String(a.number), b.kind.rawValue, String(b.number), r.4, r.5])
+        }
     }
 
     public func calendars() -> [CalCalendar] {
