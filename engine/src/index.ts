@@ -14,6 +14,10 @@ import "./routes/keys";
 import "./routes/models";
 import "./routes/handover";
 import "./routes/meetings";
+import { purgeCircle } from "./routes/circle";
+import { runCircleGmail } from "./circle/gmail";
+import { runCircleUpdates } from "./circle/updates";
+import { handleCircleApp } from "./phone/circle";
 import "./sources/chat-ingest";
 import { handleEmailSearch } from "./email/search";
 import { handleSetup, purgeExpiredSetup } from "./setup/routes";
@@ -85,7 +89,7 @@ export default {
     }
     if (url.pathname.startsWith("/app/api/")) {
       // Phone app: signed in by the fb_session cookie only (never the user key).
-      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handlePush(req, env)) ?? (await handleEmailSearch(req, env)) ?? appJSON({ error: "not found" }, 404);
+      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handleCircleApp(req, env)) ?? (await handlePush(req, env)) ?? (await handleEmailSearch(req, env)) ?? appJSON({ error: "not found" }, 404);
     }
     // Phone app page, script, service worker, manifest and icons (no sign-in needed).
     const appFile = handleAppStatic(req);
@@ -150,6 +154,7 @@ export async function runAllUsers(
     await purgePhoneActions(env);
     await purgeBoardLog(env);
     await purgeDueAlerts(env);
+    await purgeCircle(env);
   } catch (e) {
     const msg = `Could not purge expired setup sessions: ${(e as Error)?.message ?? e}`.slice(0, 500);
     log("setup_purge_failed", { error: msg });
@@ -184,6 +189,9 @@ export async function runAllUsers(
     }
     if (watch) await checkWatchReplies(env, user_id, share); // never throws
     if (hourly) await catchUpFathom(env, user_id, share); // never throws; problems show in needs attention
+    // Circle (only while it is on): Gmail metadata every 15 minutes, What's new hourly (each person at most weekly). Never throw.
+    if (watch) await runCircleGmail(env, user_id, share);
+    if (hourly) await runCircleUpdates(env, user_id, share);
     calls.used += share.used;
   }
 }
