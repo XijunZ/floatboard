@@ -56,14 +56,15 @@ import FloatBoardConnectors
         let fake = FakeGoogle()
         fake.handler = { r in
             if r.url?.path.hasSuffix("/users/me/calendarList") == true {
-                return (##"{"items":[{"id":"a@example.com","summary":"Me","accessRole":"owner","primary":true,"backgroundColor":"#111111"},{"id":"family#x","summary":"Family","accessRole":"reader","backgroundColor":"#16a765"},{"id":"team#y","summary":"Team","accessRole":"writer","backgroundColor":"#4986e7"}]}"##, 200)
+                return (##"{"items":[{"id":"a@example.com","summary":"Me","accessRole":"owner","primary":true,"backgroundColor":"#111111"},{"id":"family#x","summary":"Family","accessRole":"reader","backgroundColor":"#16a765"},{"id":"team#y","summary":"Team","accessRole":"writer","backgroundColor":"#4986e7"},{"id":"en.uk#holiday@group.v.calendar.google.com","summary":"Holidays in the UK","accessRole":"reader","backgroundColor":"#16a765"},{"id":"addressbook#contacts@group.v.calendar.google.com","summary":"Birthdays","accessRole":"reader","backgroundColor":"#92e1c0"},{"id":"e_2_en#weeknum@group.v.calendar.google.com","summary":"Week Numbers","accessRole":"reader","backgroundColor":"#9fc6e7"}]}"##, 200)
             }
             return (#"{"items":[],"nextSyncToken":"T"}"#, 200)
         }
         await CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [a] }).refreshCalendars()
-        let shown = cache.calendars().filter { $0.account == a }.map(\.shown)
-        if shown != [true, true, true] { print("  cal2 shown: \(cache.calendars().map { "\($0.name)=\($0.shown)" })") }
-        check(shown == [true, true, true], "cal2_all_listed_calendars_start_shown")
+        let mine = cache.calendars().filter { $0.account == a }
+        let on = Set(mine.filter(\.shown).map(\.name))
+        if on != ["Me", "Family", "Team"] { print("  cal2 shown: \(mine.map { "\($0.name)=\($0.shown)" })") }
+        check(mine.count == 6 && on == ["Me", "Family", "Team"], "cal2_all_listed_calendars_start_shown_except_google_generated_ones")
         _ = cache.setShown(account: a, calendarID: "team#y", false)
         await CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [a] }).refreshCalendars()
         check(cache.calendars().first { $0.calendarID == "team#y" }?.shown == false, "cal2_a_calendar_switched_off_stays_off")

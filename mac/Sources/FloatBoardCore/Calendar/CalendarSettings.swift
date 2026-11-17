@@ -37,6 +37,12 @@ public enum CalendarSettings {
         return .loading
     }
 
+    /// A calendar Google makes for everyone (holidays, birthdays from contacts, week numbers, other generated ones): its id
+    /// ends in "@group.v.calendar.google.com". These start hidden; the user can switch them on.
+    public static func isGoogleGenerated(_ calendarID: String) -> Bool {
+        calendarID.lowercased().hasSuffix("@group.v.calendar.google.com")
+    }
+
     /// One account's calendars, the ones the user owns first, then by name.
     public static func calendars(of account: String, in all: [CalCalendar]) -> [CalCalendar] {
         all.filter { $0.account == account }.sorted {
