@@ -138,12 +138,21 @@ public struct GoogleCalendarAPI: Sendable {
 
     /// Reads one event.
     public func get(calendarID: String, eventID: String) async throws -> (eventID: String, fields: CalEventFields) {
-        try await eventResult(try await send("GET", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(eventID))"))
+        let r = try await getForUpdate(calendarID: calendarID, eventID: eventID)
+        return (r.eventID, r.fields)
+    }
+
+    /// Reads one event with its ETag (Google's version stamp), to change it only if it is still as read (`patch(ifMatch:)`).
+    public func getForUpdate(calendarID: String, eventID: String) async throws -> (eventID: String, fields: CalEventFields, etag: String?) {
+        let obj = try await json(try await send("GET", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(eventID))"))
+        guard let c = try Self.change(from: obj), let f = c.fields else { throw GoogleCalendarError.badResponse("event answer had no usable event") }
+        return (c.eventID, f, obj["etag"] as? String)
     }
 
     /// Changes only the fields given. `allDayStart` ("yyyy-MM-dd") makes it an all-day event starting that day; it ends the
-    /// day of `end` (exclusive, as Google counts) when `end` is given, else the next day.
-    public func patch(calendarID: String, eventID: String, title: String?, start: Date?, end: Date?, allDayStart: String?)
+    /// day of `end` (exclusive, as Google counts) when `end` is given, else the next day. With `ifMatch` (an ETag from
+    /// `getForUpdate`) Google applies it only if the event has not changed since; otherwise it answers 412.
+    public func patch(calendarID: String, eventID: String, title: String?, start: Date?, end: Date?, allDayStart: String?, ifMatch: String? = nil)
         async throws -> (eventID: String, fields: CalEventFields) {
         var body: [String: Any] = [:]
         if let title { body["summary"] = title }
@@ -156,7 +165,8 @@ public struct GoogleCalendarAPI: Sendable {
             if let start { body["start"] = Self.timedJSON(start).merging(["date": NSNull()]) { a, _ in a } }
             if let end { body["end"] = Self.timedJSON(end).merging(["date": NSNull()]) { a, _ in a } }
         }
-        return try await eventResult(try await send("PATCH", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(eventID))", body: body))
+        return try await eventResult(try await send("PATCH", "/calendars/\(Self.pathID(calendarID))/events/\(Self.pathID(eventID))", body: body,
+                                                    headers: ifMatch.map { ["If-Match": $0] } ?? [:]))
     }
 
     /// Deletes an event. Already gone (404 or 410) counts as success.
@@ -249,7 +259,8 @@ public struct GoogleCalendarAPI: Sendable {
         s.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~@")) ?? s
     }
 
-    private func raw(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil) async throws -> (Data, Int) {
+    private func raw(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil,
+                     headers: [String: String] = [:]) async throws -> (Data, Int) {
         // `path` already has its ids escaped (pathID); `percentEncodedPath` keeps that escaping as it is.
         var comps = URLComponents()
         comps.scheme = "https"; comps.host = "www.googleapis.com"
@@ -258,6 +269,7 @@ public struct GoogleCalendarAPI: Sendable {
         guard let url = comps.url else { throw GoogleCalendarError.badResponse("bad URL \(path)") }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         req.setValue("Bearer \(try await token(false))", forHTTPHeaderField: "Authorization")
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -274,8 +286,9 @@ public struct GoogleCalendarAPI: Sendable {
     }
 
     /// `mapGone` is true only for an events list, where 410 means the sync bookmark is too old; elsewhere 410 is the event's own state.
-    private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil, mapGone: Bool = false) async throws -> Data {
-        let (data, status) = try await raw(method, path, query: query, body: body)
+    private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil, mapGone: Bool = false,
+                      headers: [String: String] = [:]) async throws -> Data {
+        let (data, status) = try await raw(method, path, query: query, body: body, headers: headers)
         return try Self.accept(data, status, mapGone: mapGone)
     }
 

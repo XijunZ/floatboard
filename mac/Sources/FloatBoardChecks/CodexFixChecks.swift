@@ -146,6 +146,63 @@ import FloatBoardConnectors
         if case .patch(_, _, let s?, _, _)? = outbox.rows(unsent: true).first?.write { moved = s == at(14) }
         check(moved, "f3_later_board_change_wins")
     } catch { check(false, "f3 legacy: \(error)") }
+
+    // F4. A change queued offline does not overwrite a newer change made in Google meanwhile: the event is read first, Google's
+    //     newer fields are kept (dropped from the change), the rest is sent only if the event is still as read (If-Match).
+    do {
+        let (store, cache, outbox) = try setup("f4-offline")
+        let long = Date().addingTimeInterval(-86400), t1 = Date().addingTimeInterval(-600), t2 = Date().addingTimeInterval(-60)
+        let id = newTask(store, "Plan", due: at(9))
+        linkTask(store, id, event: "f4a")
+        cacheEvent(cache, "f4a", "Plan", at(9), at(10), updated: long, fb: id)
+        if var c = store.card(id) { c.title = "Plan (mine)"; store.update(c, now: t1) }   // edited offline at t1
+        let fake = FakeGoogle()
+        fake.handler = { r in
+            if r.httpMethod == "GET" {   // Google renamed it at t2, after the board's edit
+                return (eventJSON(id: "f4a", title: "Plan (theirs)", start: GoogleTimes.rfc(at(9)), end: GoogleTimes.rfc(at(10)),
+                                  updated: GoogleTimes.rfc(t2), etag: "\"e2\""), 200)
+            }
+            return (eventJSON(id: "f4a", title: "Plan (mine)", start: GoogleTimes.rfc(at(9)), end: GoogleTimes.rfc(at(10)), updated: GoogleTimes.rfc(Date())), 200)
+        }
+        let sender = CalendarSender(store: store, apiFor: { _ in fake.api() }, isOnline: { true })
+        await sender.drain()
+        TaskEventRules.reconcile(store: store, cache: cache, now: Date())
+        check(!fake.requests.contains { $0.httpMethod == "PATCH" } && outbox.rows(unsent: true).isEmpty
+              && cache.event(account: acct, calendarID: acct, eventID: "f4a")?.title == "Plan (theirs)" && store.card(id)?.title == "Plan (theirs)",
+              "f4_newer_google_title_beats_an_older_offline_rename")
+
+        // Title and time queued; Google changed only the title: the time goes, without the title, on condition of the read ETag.
+        cacheEvent(cache, "f4b", "Sync", at(11), at(12), updated: long)
+        outbox.enqueue(.patch(eventID: "f4b", title: "Sync (mine)", start: at(13), end: at(14), allDayStart: nil), account: acct, calendarID: acct, now: t1)
+        let fake2 = FakeGoogle()
+        fake2.handler = { r in
+            if r.httpMethod == "GET" {
+                return (eventJSON(id: "f4b", title: "Sync (theirs)", start: GoogleTimes.rfc(at(11)), end: GoogleTimes.rfc(at(12)),
+                                  updated: GoogleTimes.rfc(t2), etag: "\"e7\""), 200)
+            }
+            return (eventJSON(id: "f4b", title: "Sync (theirs)", start: GoogleTimes.rfc(at(13)), end: GoogleTimes.rfc(at(14)), updated: GoogleTimes.rfc(Date())), 200)
+        }
+        await CalendarSender(store: store, apiFor: { _ in fake2.api() }, isOnline: { true }).drain()
+        let patch = fake2.requests.first { $0.httpMethod == "PATCH" }
+        let body = (patch?.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:] // try?-ok: empty fails the check
+        check(patch != nil && body["summary"] == nil && body["start"] != nil && body["end"] != nil
+              && patch?.value(forHTTPHeaderField: "If-Match") == "\"e7\"" && outbox.rows(unsent: true).isEmpty, "f4_patch_drops_googles_newer_fields_and_sends_if_match")
+
+        // Changed in Google between the read and the send (412): read again next run, not an error.
+        cacheEvent(cache, "f4c", "Lunch", at(12), at(13), updated: long)
+        outbox.enqueue(.patch(eventID: "f4c", title: "Lunch (mine)", start: nil, end: nil, allDayStart: nil), account: acct, calendarID: acct, now: t1)
+        let fake3 = FakeGoogle()
+        fake3.handler = { r in
+            if r.httpMethod == "PATCH" { return (#"{"error":{"code":412,"message":"Precondition Failed"}}"#, 412) }
+            return (eventJSON(id: "f4c", title: "Lunch", start: GoogleTimes.rfc(at(12)), end: GoogleTimes.rfc(at(13)), updated: GoogleTimes.rfc(long)), 200)
+        }
+        let before = store.recentActivity(limit: 200).filter { $0.level != .info }.count
+        await CalendarSender(store: store, apiFor: { _ in fake3.api() }, isOnline: { true }).drain()
+        let row = outbox.rows(unsent: true).first
+        check(fake3.requests.contains { $0.httpMethod == "PATCH" } && row?.failedAt == nil && row?.attempts == 0
+              && outbox.due(now: Date().addingTimeInterval(1)).count == 1
+              && store.recentActivity(limit: 200).filter { $0.level != .info }.count == before, "f4_precondition_failed_is_retried_quietly")
+    } catch { check(false, "f4 offline: \(error)") }
 }
 
 /// A Google event as the API returns it.

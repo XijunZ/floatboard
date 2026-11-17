@@ -18,6 +18,17 @@ public enum CalWrite: Equatable {
     }
 }
 
+/// An event's title and time as the board last saw them from Google when a change to it was queued: what tells, at sending
+/// time, which fields Google changed since (C4).
+public struct CalPatchBase: Equatable {
+    public var title: String
+    public var start: Date
+    public var end: Date
+    public var allDay: Bool
+    public init(title: String, start: Date, end: Date, allDay: Bool) { self.title = title; self.start = start; self.end = end; self.allDay = allDay }
+    public init(_ e: CalEvent) { self.init(title: e.title, start: e.start, end: e.end, allDay: e.allDay) }
+}
+
 /// A change waiting in the outbox.
 public struct CalOutboxRow: Equatable {
     public var uuid: String
@@ -31,6 +42,8 @@ public struct CalOutboxRow: Equatable {
     public var lastError: String
     /// Set when Google refused the change for good: it is not sent again (`lastError` says why).
     public var failedAt: Date?
+    /// For a patch: the event as cached when it was queued (nil when it was not cached, or for older saved rows).
+    public var base: CalPatchBase? = nil
 }
 
 /// Changes to Google Calendar are written here first, in the same database as the board, so they survive being offline,
@@ -59,7 +72,9 @@ public final class CalendarOutbox {
     public func enqueue(_ w: CalWrite, account: String, calendarID: String, now: Date = Date(), delay: TimeInterval = 0) -> String {
         let uuid = UUID().uuidString
         do {
-            let json = try Self.encode(w)
+            var base: CalPatchBase?
+            if case .patch(let id, _, _, _, _) = w { base = cache.event(account: account, calendarID: calendarID, eventID: id).map(CalPatchBase.init) }
+            let json = try Self.encode(w, base: base)
             try db.run("""
                 INSERT INTO cal_outbox(uuid, kind, account, calendar_id, event_id, card_id, payload_json, created, attempts, next_try, last_error)
                 VALUES(?,?,?,?,?,?,?,?,0,?,'')
@@ -218,6 +233,20 @@ public final class CalendarOutbox {
         }
     }
 
+    /// A queued patch, about to be sent, against the event as Google has it now (`current`, just read). When Google changed
+    /// the event after the change was queued, the fields Google changed since (compared with `base`, the event as seen when
+    /// queued; without one, every field counts as changed) keep Google's newer value: they are dropped from the patch (C4,
+    /// newer change wins). Returns the patch to send, or nil when nothing is left to send. Anything other than a patch is returned as it is.
+    public static func withoutNewerGoogleFields(_ w: CalWrite, queuedAt: Date, base: CalPatchBase?, current: CalEventFields) -> CalWrite? {
+        guard case .patch(let id, var title, var start, var end, var day) = w, current.googleUpdated > queuedAt else { return w }
+        let titleChanged = base.map { $0.title != current.title } ?? true
+        let timeChanged = base.map { $0.start != current.start || $0.end != current.end || $0.allDay != current.allDay } ?? true
+        if titleChanged { title = nil }
+        if timeChanged { start = nil; end = nil; day = nil }
+        if title == nil && start == nil && end == nil && day == nil { return nil }
+        return .patch(eventID: id, title: title, start: start, end: end, allDayStart: day)
+    }
+
     /// Seconds to wait after the nth failure: 60, 120, 240 ... capped at 3600.
     static func backoff(afterAttempts n: Int) -> TimeInterval {
         min(3600, 60 * pow(2, Double(max(0, min(n, 12) - 1))))
@@ -230,14 +259,14 @@ public final class CalendarOutbox {
             return try db.query("""
                 SELECT uuid, account, calendar_id, payload_json, created, attempts, next_try, last_error, failed_at FROM cal_outbox \(tail)
                 """, args) { s in
-                var write: CalWrite?
+                var write: CalWrite?, base: CalPatchBase?
                 var err = DB.text(s, 7)
-                do { write = try Self.decode(DB.text(s, 3)) } catch {
+                do { (write, base) = try Self.decode(DB.text(s, 3)) } catch {
                     err = "Unreadable saved change: \(error)"
                 }
                 return CalOutboxRow(uuid: DB.text(s, 0), account: DB.text(s, 1), calendarID: DB.text(s, 2), write: write,
                                     created: DB.date(s, 4) ?? Date(), attempts: Int(DB.int(s, 5)), nextTry: DB.date(s, 6) ?? Date(),
-                                    lastError: err, failedAt: DB.date(s, 8))
+                                    lastError: err, failedAt: DB.date(s, 8), base: base)
             }
         } catch {
             store.activity("calendar", .error, "Could not read the calendar outbox", detail: "\(error)")
@@ -260,10 +289,14 @@ public final class CalendarOutbox {
         var googleUpdated: Double?
         var fbCard: Int64?
         var allDayStart: String?
+        var baseTitle: String?, baseStart: Double?, baseEnd: Double?, baseAllDay: Bool?
     }
 
-    private static func encode(_ w: CalWrite) throws -> String {
+    private static func encode(_ w: CalWrite, base: CalPatchBase? = nil) throws -> String {
         var p = Payload(kind: w.kind)
+        if let base {
+            p.baseTitle = base.title; p.baseStart = base.start.timeIntervalSince1970; p.baseEnd = base.end.timeIntervalSince1970; p.baseAllDay = base.allDay
+        }
         switch w {
         case .create(let f, let cardID, let meet):
             p.cardID = cardID; p.addMeet = meet; p.title = f.title; p.start = f.start.timeIntervalSince1970
@@ -279,9 +312,15 @@ public final class CalendarOutbox {
         return String(decoding: try JSONEncoder().encode(p), as: UTF8.self)
     }
 
-    private static func decode(_ json: String) throws -> CalWrite {
+    private static func decode(_ json: String) throws -> (CalWrite, CalPatchBase?) {
         let p = try JSONDecoder().decode(Payload.self, from: Data(json.utf8))
         func date(_ v: Double?) -> Date? { v.map { Date(timeIntervalSince1970: $0) } }
+        var base: CalPatchBase?
+        if let t = p.baseTitle, let s = date(p.baseStart), let e = date(p.baseEnd) { base = CalPatchBase(title: t, start: s, end: e, allDay: p.baseAllDay ?? false) }
+        return (try decodeWrite(p, date), base)
+    }
+
+    private static func decodeWrite(_ p: Payload, _ date: (Double?) -> Date?) throws -> CalWrite {
         switch p.kind {
         case "create":
             guard let title = p.title, let start = date(p.start), let end = date(p.end) else { throw DBError.sql("create is missing fields") }
