@@ -368,3 +368,27 @@ private func fakeWhatsAppForCircle(_ folder: URL, now: Date) -> Bool {
               "companies_house_key_removed_on_the_engine_too")
     } catch { check(false, "ch key: \(error)") }
 }
+
+/// Codex C2: a phone action whose local write fails is not acknowledged (it stays queued on the engine and is retried),
+/// with one Activity error.
+@MainActor func circlePhoneWriteFailChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-circle-pwf-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = circleStore(root, "pwf.sqlite") else { return }
+    let c = CircleStore(store: s)
+    guard let p = c.add(name: "Vic Example", tier: .close, tags: ItemTags(primary: nil, others: []), details: CircleDetails(), handles: []).person else { return }
+    let iso = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-60))
+    s.performForTest("CREATE TRIGGER fail_x BEFORE INSERT ON circle_exchanges BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+    s.performForTest("CREATE TRIGGER fail_p BEFORE INSERT ON circle_people BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+    let errorsBefore = s.recentActivity(limit: 200).filter { $0.level == .error }.count
+    let r = c.applyPhoneActions([CirclePhoneAction(id: "pw-00001", person: p.shortID.text, action: "contacted", madeAt: iso),
+                                 CirclePhoneAction(id: "pw-00002", person: p.shortID.text, action: "snooze", madeAt: iso)])
+    let newErrors = s.recentActivity(limit: 200).filter { $0.level == .error }.count - errorsBefore
+    check(r.applied.isEmpty && r.skipped.isEmpty && r.failed == ["pw-00001", "pw-00002"]
+          && s.recentActivity(limit: 200).filter { $0.level == .error && $0.message.contains("phone's Circle") }.count == 1 && newErrors >= 1,
+          "failed_phone_write_is_not_acknowledged")
+    s.performForTest("DROP TRIGGER fail_x"); s.performForTest("DROP TRIGGER fail_p")
+    let again = c.applyPhoneActions([CirclePhoneAction(id: "pw-00001", person: p.shortID.text, action: "contacted", madeAt: iso)])
+    check(again.applied == ["pw-00001"] && c.exchanges(of: p.id).contains { $0.channel == .manual }, "failed_phone_write_applies_on_retry")
+}
