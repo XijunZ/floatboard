@@ -426,9 +426,15 @@
       var byId = {};
       shown.forEach(function (c) { byId[c.id] = c; });
       planBlocks(board && Array.isArray(board.events) ? board.events : [], shown, Date.now(), tz).forEach(function (b) {
-        if (!b.meetings.length && !b.tasks.length) return;
+        if (!b.meetings.length && !b.tasks.length && !b.overdue.length) return;
         any = true;
         box.appendChild(el("h2", null, b.title));
+        b.overdue.forEach(function (c) {
+          var btn = cardButton(c);
+          btn.classList.add("overdue");
+          btn.querySelector(".meta").prepend(el("span", "late", "Overdue"));
+          box.appendChild(btn);
+        });
         b.meetings.forEach(function (m) { box.appendChild(meetingRow(m, byId)); });
         b.tasks.forEach(function (c) { box.appendChild(cardButton(c)); });
       });

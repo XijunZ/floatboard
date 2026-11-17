@@ -52,6 +52,14 @@ describe("phone planning summary", () => {
     expect(blocks[1].meetings[0].when).toBe("Mon");
   });
 
+  it("overdue_tasks_lead_the_today_block_oldest_first", () => {
+    const blocks = L.planBlocks([], [card(1, "2026-11-18"), card(2, "2026-11-16"), card(3, "2026-11-17T23:30:00Z"), card(4, "2026-11-10", { status: "done" }),
+      card(5, "2026-11-01T09:00:00Z"), card(6, "2026-11-18T07:00:00Z")], NOW, Z);
+    expect(blocks[0].overdue.map((c: any) => c.id)).toEqual([5, 2, 3]);
+    expect(blocks[0].tasks.map((c: any) => c.id)).toEqual([1, 6]);
+    expect(blocks.slice(1).every((b: any) => b.overdue.length === 0)).toBe(true);
+  });
+
   it("bad_entries_are_skipped_not_fatal", () => {
     const blocks = L.planBlocks([{ id: "E-1", start: "nope" }, null, ev("Fine", "2026-11-18T12:00:00Z", { series: 5, repeat: {} })], [null, { id: 9 }], NOW, Z);
     expect(blocks[0].meetings.map((m: any) => [m.title, m.label])).toEqual([["Fine", null]]);

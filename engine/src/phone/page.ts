@@ -66,6 +66,7 @@ min-height:56px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .card .t{font-size:17px;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .card .meta{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px;font-size:14px;color:var(--muted)}
 .card .due.late{color:var(--danger);font-weight:600}
+.card.overdue .t,.card .meta .late{color:var(--danger);font-weight:600}
 .card .wait-fresh{color:#1e9e4a}.card .wait-chase{color:#e8830c}.card .wait-late{color:var(--danger)}
 .today{margin-bottom:14px}
 .today h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:10px 4px 6px}
