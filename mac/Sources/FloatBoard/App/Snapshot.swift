@@ -280,6 +280,8 @@ enum Snapshot {
             saveLive(GlobalSearchView(initialQuery: "budget"), "foundation-search.png", CGSize(width: 440, height: 300))
             saveLive(VStack(alignment: .leading, spacing: 14) { AreasSection() }.padding(12), "foundation-settings-areas.png", CGSize(width: 700, height: 420))
         }
+        // Decisions (its own file): FLOATBOARD_DECISIONSHOTS=1, scratch database only.
+        if ProcessInfo.processInfo.environment["FLOATBOARD_DECISIONSHOTS"] != nil { DecisionsShots.run(dir: dir, store: store, ui: ui, google: google) }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so each Settings section is drawn directly.
         for s in SettingsSection.allCases {
