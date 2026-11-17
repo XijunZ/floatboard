@@ -123,9 +123,20 @@ extension Store {
                 try db.run("UPDATE cards SET updated=? WHERE id=?", [now, id.number])
                 try insertEvent(id.number, "tags: " + (wanted.others.isEmpty ? "none" : wanted.others.map(canonical).joined(separator: ", ")),
                                 actor: .user, at: now)
-                try db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", ["tags_at:\(id.number)", String(now.timeIntervalSince1970)])
+                try stampTagsRow([id.number], now: now)
             }
         }
+    }
+
+    /// Notes that these tasks' tags (group or others) changed here at `now`, so an older phone tag edit loses. Every Mac path
+    /// that changes a task's group or tags calls this (editor, board, tag editor, group rename, group delete).
+    func stampTagsRow(_ cardIDs: [Int64], now: Date) throws {
+        for id in cardIDs { try db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", ["tags_at:\(id)", String(now.timeIntervalSince1970)]) }
+    }
+
+    /// The same for every task (deleted ones too) in the group `name`.
+    func stampTagsOfGroupRow(_ name: String, now: Date) throws {
+        try db.run("INSERT OR REPLACE INTO meta(key, value) SELECT 'tags_at:' || id, ? FROM cards WHERE area=?", [String(now.timeIntervalSince1970), name])
     }
 
     /// When a task's tags (its group or its other tags) last changed on this Mac (nil: never), so an older phone change loses.
@@ -154,7 +165,9 @@ extension Store {
     }
 
     /// A deleted group's `item_tags` rows go; an item whose primary it was gets its first other tag as primary.
-    func dropTagRows(_ tagID: Int64) throws {
+    func dropTagRows(_ tagID: Int64, now: Date = Date()) throws {
+        let tasks = try db.query("SELECT item FROM item_tags WHERE tag_id=? AND item LIKE 'T-%'", [tagID]) { ShortID.parse(DB.text($0, 0)) }
+        try stampTagsRow(tasks.compactMap { $0?.number }, now: now)
         let items = try db.query("SELECT item FROM item_tags WHERE tag_id=? AND is_primary=1", [tagID]) { DB.text($0, 0) }
         try db.run("DELETE FROM item_tags WHERE tag_id=?", [tagID])
         for item in items {
