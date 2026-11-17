@@ -45,7 +45,7 @@ input[type=text]:focus,select:focus{outline:2px solid var(--accent);outline-offs
 .bar{position:sticky;top:0;z-index:5;background:var(--bg);padding-top:env(safe-area-inset-top);margin:0 -16px;padding-left:16px;
 padding-right:16px}
 header.top{display:flex;align-items:center;gap:4px;padding:8px 0 4px}
-#settings header.top{position:sticky;top:0;z-index:5;background:var(--bg);padding-top:calc(8px + env(safe-area-inset-top))}
+#settings header.top,#goals header.top{position:sticky;top:0;z-index:5;background:var(--bg);padding-top:calc(8px + env(safe-area-inset-top))}
 header.top .title{flex:1;min-width:0}
 header.top h1{font-size:24px}
 .updated{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -100,6 +100,14 @@ height:60px;border-radius:30px;background:var(--accent);color:var(--accent-text)
 box-shadow:var(--shadow)}
 .fab svg.i{width:28px;height:28px;stroke-width:2.4}
 .group{background:var(--surface);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+/* Resolutions: this quarter's goals (More › Resolutions). */
+.goals{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+.goal{background:var(--surface);border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.goal .gid{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.goal .gtitle{font-size:17px;font-weight:600;overflow-wrap:anywhere}
+.goal .gmeta{font-size:14px;color:var(--muted);overflow-wrap:anywhere}
+.goal ul{margin:4px 0 0;padding-left:20px;font-size:15px;display:flex;flex-direction:column;gap:2px}
+.goal li{overflow-wrap:anywhere}
 .group p{font-size:15px}
 .group ol{margin:0;padding-left:22px;font-size:15px;display:flex;flex-direction:column;gap:4px}
 .scrim{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center}
@@ -195,11 +203,18 @@ const BODY = `${ICONS}
 <section id="circle" class="area" role="tabpanel" hidden><div class="placeholder">Circle arrives here with the Circle area: who is due, and each person's card.</div></section>
 <section id="more" class="area" role="tabpanel" hidden>
 <button id="more-decisions" class="btn row-btn" type="button">Decisions<span class="sub">Coming with the Decisions area</span></button>
-<button id="more-resolutions" class="btn row-btn" type="button">Resolutions<span class="sub">Coming with the Resolutions area</span></button>
+<button id="more-resolutions" class="btn row-btn" type="button">Resolutions<span id="more-resolutions-sub" class="sub">This quarter's goals</span></button>
 <button id="more-settings" class="btn row-btn" type="button">${icon("gear")}Settings</button>
 </section>
 <button id="add" class="fab" aria-label="Add a task">${icon("plus")}</button>
 <nav class="views" role="tablist" aria-label="Screens">${view("board", "Board", "board", true)}${view("plan", "Plan", "calendar")}${view("jots", "Jots", "jot")}${view("circle", "Circle", "people")}${view("more", "More", "more")}</nav>
+</main>
+
+<main id="goals" class="screen" hidden>
+<header class="top"><button id="close-goals" class="icon-btn" aria-label="Back">${icon("back")}</button><div class="title"><h1>Resolutions</h1><div id="goals-period" class="updated"></div></div></header>
+<div id="goals-list" class="goals"></div>
+<p id="goals-empty" class="empty" hidden>No goals for this quarter yet. Set up to three in the Resolutions tab on your Mac.</p>
+<p class="muted small">Goals are set and reviewed on the Mac; here you see this quarter's and the tasks still open for each.</p>
 </main>
 
 <main id="settings" class="screen" hidden>

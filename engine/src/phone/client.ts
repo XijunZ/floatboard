@@ -28,6 +28,7 @@
  * the @SYNC_JS@ marker.
  */
 import { SYNC_JS } from "./sync-logic";
+import { RESOLUTIONS_JS } from "./resolutions-logic";
 import APP_SRC from "./files/app.client.js";
 
-export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS);
+export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS).replace("/*@RESOLUTIONS_JS@*/", () => RESOLUTIONS_JS);
