@@ -534,6 +534,8 @@ final class StatefulEvent: @unchecked Sendable {
     let id: String
     var title: String, start: Date, end: Date, updated: Date
     var location = ""
+    /// The next PATCH is applied but its answer is lost (the client sees a 503).
+    var loseNextPatchAnswer = false
     private var version = 1
     init(id: String, title: String, start: Date, end: Date, updated: Date) {
         self.id = id; self.title = title; self.start = start; self.end = end; self.updated = updated
@@ -556,9 +558,10 @@ final class StatefulEvent: @unchecked Sendable {
                     if let s = (body["start"] as? [String: Any])?["dateTime"] as? String, let d = ISO8601DateFormatter().date(from: s) { start = d }
                     if let e = (body["end"] as? [String: Any])?["dateTime"] as? String, let d = ISO8601DateFormatter().date(from: e) { end = d }
                     tick()
+                    if loseNextPatchAnswer { loseNextPatchAnswer = false; status = 503 }
                 }
             }
-            let json = status == 412 ? #"{"error":{"code":412}}"# : eventJSON(id: id, title: title, start: GoogleTimes.rfc(start), end: GoogleTimes.rfc(end),
+            let json = status == 412 ? #"{"error":{"code":412}}"# : status == 503 ? #"{"error":{"code":503}}"# : eventJSON(id: id, title: title, start: GoogleTimes.rfc(start), end: GoogleTimes.rfc(end),
                                                                             updated: GoogleTimes.rfc(updated), etag: "\"v\(version)\"")
             return (Data(json.utf8), HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
         })

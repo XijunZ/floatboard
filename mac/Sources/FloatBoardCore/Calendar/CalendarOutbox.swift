@@ -75,6 +75,9 @@ public struct CalOutboxRow: Equatable {
     public var failedAt: Date?
     /// For a patch: the event as cached when it was queued (nil when it was not cached, or for older saved rows).
     public var base: CalPatchBase? = nil
+    /// For a patch: what was last sent to Google for it (saved before the request), nil when it was never sent. A retry
+    /// that finds Google already has these values knows they are FloatBoard's own write whose answer was lost.
+    public var attempted: CalWrite? = nil
 }
 
 /// Changes to Google Calendar are written here first, in the same database as the board, so they survive being offline,
@@ -288,6 +291,43 @@ public final class CalendarOutbox {
         return k
     }
 
+    /// Saves on the row the patch about to be sent (before the request goes), so a retry after a lost answer can tell
+    /// FloatBoard's own write from a change made in Google. Returns false (logged) when it could not be saved: then it is
+    /// not sent this time.
+    public func markAttempted(uuid: String, _ w: CalWrite) -> Bool {
+        guard case .patch(_, let t, let st, let en, let d) = w else { return true }
+        do {
+            guard let json = try db.query("SELECT payload_json FROM cal_outbox WHERE uuid=?", [uuid], { DB.text($0, 0) }).first else { return false }
+            var p = try JSONDecoder().decode(Payload.self, from: Data(json.utf8))
+            p.tried = true; p.triedTitle = t; p.triedStart = st?.timeIntervalSince1970; p.triedEnd = en?.timeIntervalSince1970; p.triedDay = d
+            try db.run("UPDATE cal_outbox SET payload_json=? WHERE uuid=?", [String(decoding: try JSONEncoder().encode(p), as: UTF8.self), uuid])
+            return true
+        } catch {
+            store.activity("calendar", .error, "Could not note a calendar change as being sent; it waits", detail: "\(error)", trace: uuid)
+            return false
+        }
+    }
+
+    /// A retry of a patch already sent once (`attempted`): each field for which Google now has exactly the value that was
+    /// sent is FloatBoard's own write whose answer was lost, recorded as such (not as a change made in Google). If Google
+    /// set that same value itself while the request was on its way, it is taken as FloatBoard's too (accepted ambiguity).
+    public static func claimingOwnRetry(_ known: CalOwnWrite, attempted: CalWrite?, current: CalEventFields) -> CalOwnWrite {
+        guard case .patch(_, let t, let st, let en, let d)? = attempted else { return known }
+        var k = known
+        let u = current.googleUpdated
+        if let t, t == current.title { k.title = .init(updated: u, title: current.title) }
+        if let d {
+            if current.allDay, current.startDay == d {
+                k.start = .init(updated: u, value: current.start, allDay: true)
+                k.end = .init(updated: u, value: current.end, allDay: true)
+            }
+        } else if !current.allDay {
+            if let st, st == current.start { k.start = .init(updated: u, value: current.start, allDay: false) }
+            if let en, en == current.end { k.end = .init(updated: u, value: current.end, allDay: false) }
+        }
+        return k
+    }
+
     /// FloatBoard's own last accepted write to this event, if one is known.
     public func ownWrite(account: String, calendarID: String, eventID: String) -> CalOwnWrite? {
         do {
@@ -402,14 +442,14 @@ public final class CalendarOutbox {
             return try db.query("""
                 SELECT uuid, account, calendar_id, payload_json, created, attempts, next_try, last_error, failed_at FROM cal_outbox \(tail)
                 """, args) { s in
-                var write: CalWrite?, base: CalPatchBase?
+                var write: CalWrite?, base: CalPatchBase?, attempted: CalWrite?
                 var err = DB.text(s, 7)
-                do { (write, base) = try Self.decode(DB.text(s, 3)) } catch {
+                do { (write, base, attempted) = try Self.decode(DB.text(s, 3)) } catch {
                     err = "Unreadable saved change: \(error)"
                 }
                 return CalOutboxRow(uuid: DB.text(s, 0), account: DB.text(s, 1), calendarID: DB.text(s, 2), write: write,
                                     created: DB.date(s, 4) ?? Date(), attempts: Int(DB.int(s, 5)), nextTry: DB.date(s, 6) ?? Date(),
-                                    lastError: err, failedAt: DB.date(s, 8), base: base)
+                                    lastError: err, failedAt: DB.date(s, 8), base: base, attempted: attempted)
             }
         } catch {
             store.activity("calendar", .error, "Could not read the calendar outbox", detail: "\(error)")
@@ -433,6 +473,8 @@ public final class CalendarOutbox {
         var fbCard: Int64?
         var allDayStart: String?
         var baseTitle: String?, baseStart: Double?, baseEnd: Double?, baseAllDay: Bool?
+        /// The patch as last sent (only the fields sent): set just before each send.
+        var triedTitle: String?, triedStart: Double?, triedEnd: Double?, triedDay: String?, tried: Bool?
     }
 
     private static func encode(_ w: CalWrite, base: CalPatchBase? = nil) throws -> String {
@@ -455,12 +497,17 @@ public final class CalendarOutbox {
         return String(decoding: try JSONEncoder().encode(p), as: UTF8.self)
     }
 
-    private static func decode(_ json: String) throws -> (CalWrite, CalPatchBase?) {
+    private static func decode(_ json: String) throws -> (CalWrite, CalPatchBase?, CalWrite?) {
         let p = try JSONDecoder().decode(Payload.self, from: Data(json.utf8))
         func date(_ v: Double?) -> Date? { v.map { Date(timeIntervalSince1970: $0) } }
         var base: CalPatchBase?
         if let t = p.baseTitle, let s = date(p.baseStart), let e = date(p.baseEnd) { base = CalPatchBase(title: t, start: s, end: e, allDay: p.baseAllDay ?? false) }
-        return (try decodeWrite(p, date), base)
+        let write = try decodeWrite(p, date)
+        var tried: CalWrite?
+        if p.tried == true, let id = write.eventID {
+            tried = .patch(eventID: id, title: p.triedTitle, start: date(p.triedStart), end: date(p.triedEnd), allDayStart: p.triedDay)
+        }
+        return (write, base, tried)
     }
 
     private static func decodeWrite(_ p: Payload, _ date: (Double?) -> Date?) throws -> CalWrite {
