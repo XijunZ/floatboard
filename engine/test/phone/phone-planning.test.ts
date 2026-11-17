@@ -37,11 +37,33 @@ describe("phone planning summary", () => {
     all.push(ev("No rule yet", "2026-11-19T11:00:00Z", { series: "S-def" }));
     const blocks = L.planBlocks(all, [], NOW, Z);
     const titles = (b: any) => b.meetings.map((m: any) => `${m.when}|${m.title}${m.label ? " · " + m.label : ""}`);
-    expect(titles(blocks[0])).toEqual(["|Standup · weekdays 09:00"]);
+    expect(titles(blocks[0])).toEqual(["09:00|Standup · weekdays 09:00"]);   // Today shows the occurrence's time (Round 6)
     expect(blocks[0].meetings[0].video).toBe("https://meet.example.com/today");
     expect(titles(blocks[1])).toEqual(["|Standup · weekdays 09:00", "|No rule yet · repeats"]);
     expect(blocks[1].meetings[0].tasks).toEqual([7]);
     expect(titles(blocks[2])).toEqual(["|Standup · weekdays 09:00"]);
+  });
+
+  // Round 6 (C3): grouping a series never hides an instance moved to another time.
+  it("a_moved_instance_of_a_series_gets_its_own_row_with_its_time_and_join", () => {
+    const standup = (start: string, video: string) => ev(start, start, { title: "Standup", series: "S-abc", repeat: "weekdays 09:00", video });
+    const blocks = L.planBlocks([standup("2026-11-19T09:00:00Z", "https://meet.example.com/thu"), standup("2026-11-20T14:00:00Z", "https://meet.example.com/moved")], [], NOW, Z);
+    expect(blocks[1].meetings.map((m: any) => [m.when, m.title, m.label, m.video])).toEqual([
+      ["", "Standup", "weekdays 09:00", "https://meet.example.com/thu"],
+      ["Fri 14:00", "Standup", null, "https://meet.example.com/moved"]]);
+    // Without a time in the label, the time most instances share is the usual one.
+    const sync = (start: string) => ev(start, start, { title: "Sync", series: "S-def" });
+    const b2 = L.planBlocks(["2026-11-23T11:00:00Z", "2026-11-24T15:00:00Z", "2026-11-25T11:00:00Z", "2026-11-26T11:00:00Z"].map(sync), [], NOW, Z);
+    expect(b2[2].meetings.map((m: any) => [m.when, m.label])).toEqual([["", "repeats"], ["Tue 15:00", null]]);
+  });
+
+  it("today_rows_of_a_series_show_the_actual_time", () => {
+    const blocks = L.planBlocks([
+      ev("Board", "2026-11-18T10:30:00Z", { series: "S-m", repeat: "monthly" }),
+      ev("Check-in", "2026-11-18T16:00:00Z", { series: "S-x" }),
+      ev("Standup", "2026-11-18T11:00:00Z", { series: "S-w", repeat: "weekdays 09:00" }),
+    ], [], NOW, Z);
+    expect(blocks[0].meetings.map((m: any) => [m.when, m.title])).toEqual([["10:30", "Board"], ["11:00", "Standup"], ["16:00", "Check-in"]]);
   });
 
   it("sunday_has_no_rest_of_week_and_all_day_events_show_as_such", () => {
