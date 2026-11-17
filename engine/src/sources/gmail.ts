@@ -77,6 +77,24 @@ export class GmailSource implements Source {
     return out;
   }
 
+  /** One page of message ids for a Gmail query, newest first (one call). For Circle's metadata reader. */
+  async listIds(q: string, max: number, pageToken?: string): Promise<{ ids: string[]; next?: string }> {
+    const params = new URLSearchParams({ q, maxResults: String(max) });
+    if (pageToken) params.set("pageToken", pageToken);
+    const list = await this.api<{ messages?: { id: string }[]; nextPageToken?: string }>(`${API}/messages?${params}`);
+    return { ids: (list.messages ?? []).map((m) => m.id), ...(list.nextPageToken ? { next: list.nextPageToken } : {}) };
+  }
+
+  /** One message's labels, internal date and the named headers only, never its body (one call, format=metadata). */
+  async headersOf(gmailId: string, names: string[]): Promise<{ labels: string[]; internalDate?: string; headers: Record<string, string> }> {
+    const h = new URLSearchParams({ format: "metadata" });
+    for (const n of names) h.append("metadataHeaders", n);
+    const m = await this.api<any>(`${API}/messages/${encodeURIComponent(gmailId)}?${h}`);
+    const headers: Record<string, string> = {};
+    for (const x of m.payload?.headers ?? []) headers[String(x.name).toLowerCase()] = String(x.value);
+    return { labels: m.labelIds ?? [], ...(m.internalDate != null ? { internalDate: String(m.internalDate) } : {}), headers };
+  }
+
   /** One message in full (one read). */
   async fetchFull(gmailId: string): Promise<Message> {
     return this.parse(await this.api(`${API}/messages/${gmailId}?format=full`));
