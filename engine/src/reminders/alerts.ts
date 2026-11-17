@@ -39,11 +39,17 @@ export async function sendNtfy(topic: string, item: AlertItem, appOrigin?: strin
   if (!r.ok) throw new Error(`ntfy failed (${r.status})`);
 }
 
+/** The person a Circle due reminder is about ("rb-circle_due-P-12-<day>" → "P-12"), for the notification's buttons. */
+export function circleOf(id: string): string | undefined {
+  return /^rb-circle_due-(P-\d{1,12})-\d{4}-\d{2}-\d{2}$/.exec(id)?.[1];
+}
+
 /** Add new channels (Web Push, ...) here; each is tried for every alert. */
 export const CHANNELS: AlertChannel[] = [
   {
     name: "webpush",
-    send: (env, userId, item) => pushToUser(env, userId, { title: item.title, body: alertBody(item), url: item.link || "/app/" }),
+    send: (env, userId, item) => pushToUser(env, userId, { title: item.title, body: alertBody(item), url: item.link || "/app/",
+      ...(circleOf(item.id) ? { circle: circleOf(item.id) } : {}) }),
   },
   {
     name: "ntfy",
