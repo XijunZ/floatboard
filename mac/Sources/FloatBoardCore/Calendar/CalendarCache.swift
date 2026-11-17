@@ -28,29 +28,58 @@ public final class CalendarCache {
 
     // MARK: Calendars
 
-    /// Adds new calendars and refreshes name, colour and ownership of known ones. What the user chose (shown),
-    /// the sync token and reconnect state of a known calendar are kept.
+    /// The id Google accepts for "the account's main calendar" in place of its real id. Used (and cached under) until the
+    /// calendar list, which gives the real id, can be read.
+    public static let primaryAlias = "primary"
+
+    /// Adds new calendars and refreshes name, colour, ownership and the main-calendar flag of known ones. What the user chose
+    /// (shown), the sync token and reconnect state of a known calendar are kept. When the list names the account's main
+    /// calendar, whatever was kept under the "primary" stand-in moves to its real id, in the same step: the calendar row (with
+    /// its choice and sync token), its events (same E-n), tasks linked to them and changes waiting to be sent.
     @discardableResult
     public func upsertCalendars(account: String, _ calendars: [CalCalendar]) -> Bool {
         write("Could not save the calendar list") {
+            if let main = calendars.first(where: { $0.primary && $0.calendarID != Self.primaryAlias }) {
+                try rekeyPrimary(account: account, to: main.calendarID)
+            }
             for c in calendars {
                 try db.run("""
-                    INSERT INTO cal_calendars(account, calendar_id, name, color, owned, shown) VALUES(?,?,?,?,?,?)
-                    ON CONFLICT(account, calendar_id) DO UPDATE SET name=excluded.name, color=excluded.color, owned=excluded.owned
-                    """, [account, c.calendarID, c.name, c.color, c.owned ? 1 : 0, c.shown ? 1 : 0])
+                    INSERT INTO cal_calendars(account, calendar_id, name, color, owned, shown, is_primary) VALUES(?,?,?,?,?,?,?)
+                    ON CONFLICT(account, calendar_id) DO UPDATE SET name=excluded.name, color=excluded.color, owned=excluded.owned,
+                        is_primary=excluded.is_primary
+                    """, [account, c.calendarID, c.name, c.color, c.owned ? 1 : 0, c.shown ? 1 : 0, c.primary ? 1 : 0])
             }
         }
+    }
+
+    /// Moves everything kept under the "primary" stand-in for `account` to the main calendar's real id. An event already
+    /// kept under the real id stays as it is and its stand-in copy goes, so nothing is there twice. Runs inside `write`.
+    private func rekeyPrimary(account: String, to id: String) throws {
+        let alias = Self.primaryAlias
+        try db.run("""
+            UPDATE cal_events SET calendar_id=? WHERE account=? AND calendar_id=?
+            AND event_id NOT IN (SELECT event_id FROM cal_events WHERE account=? AND calendar_id=?)
+            """, [id, account, alias, account, id])
+        try db.run("DELETE FROM cal_events WHERE account=? AND calendar_id=?", [account, alias])
+        try db.run("UPDATE cards SET gcal_calendar=? WHERE gcal_account=? AND gcal_calendar=?", [id, account, alias])
+        try db.run("UPDATE cal_outbox SET calendar_id=? WHERE account=? AND calendar_id=?", [id, account, alias])
+        try db.run("""
+            UPDATE cal_calendars SET calendar_id=? WHERE account=? AND calendar_id=?
+            AND NOT EXISTS (SELECT 1 FROM cal_calendars WHERE account=? AND calendar_id=?)
+            """, [id, account, alias, account, id])
+        try db.run("DELETE FROM cal_calendars WHERE account=? AND calendar_id=?", [account, alias])
     }
 
     public func calendars() -> [CalCalendar] {
         read("Could not read calendars") {
             try db.query("""
-                SELECT account, calendar_id, name, color, owned, shown, needs_reconnect, sync_token, synced_at, full_read_at
+                SELECT account, calendar_id, name, color, owned, shown, needs_reconnect, sync_token, synced_at, full_read_at, is_primary
                 FROM cal_calendars ORDER BY account, name, calendar_id
                 """) { s in
                 CalCalendar(account: DB.text(s, 0), calendarID: DB.text(s, 1), name: DB.text(s, 2), color: DB.text(s, 3),
                             owned: DB.int(s, 4) != 0, shown: DB.int(s, 5) != 0, needsReconnect: DB.int(s, 6) != 0,
-                            syncToken: DB.isNull(s, 7) ? nil : DB.text(s, 7), syncedAt: DB.date(s, 8), fullReadAt: DB.date(s, 9))
+                            syncToken: DB.isNull(s, 7) ? nil : DB.text(s, 7), syncedAt: DB.date(s, 8), fullReadAt: DB.date(s, 9),
+                            primary: DB.int(s, 10) != 0)
             }
         } ?? []
     }

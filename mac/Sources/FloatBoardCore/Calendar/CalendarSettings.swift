@@ -61,9 +61,10 @@ extension Store {
 
     /// Where a new event goes, the one rule for tasks (drag, Add to calendar) and the New event sheet: `account` when given,
     /// else the default account from Settings while it is connected, else the first connected one (never a removed account);
-    /// on it, its main calendar (Google names it with the account's address), else its first owned one. With `among` (the
-    /// sheet's choices) only those calendars count and nil means none fits; without it an account whose calendars are not
-    /// read yet still gets its main calendar by address. Nil when no account is connected.
+    /// on it, the calendar Google flags as its main one. Without that flag (the list not read yet) the main calendar is
+    /// addressed as "primary", which Google accepts; another owned calendar is never picked in its place. With `among` (the
+    /// sheet's choices, shown to the user in its picker) only those count: the main one if it is there, else the first, and
+    /// nil means none fits. Nil when no account is connected.
     public func newEventCalendar(account: String? = nil, among: [CalCalendar]? = nil) -> (account: String, calendarID: String)? {
         let cache = CalendarCache(store: self)
         let cals = among ?? cache.connectedCalendars()
@@ -75,12 +76,12 @@ extension Store {
         }
         guard let acct = chosen else { return nil }
         let mine = cals.filter { $0.account == acct }
-        let main = mine.first { $0.calendarID.lowercased() == acct.lowercased() } ?? mine.first { $0.owned }
+        let main = mine.first { $0.primary }
         if among != nil {
             guard let pick = main ?? mine.first else { return nil }
             return (acct, pick.calendarID)
         }
-        return (acct, main?.calendarID ?? acct)
+        return (acct, main?.calendarID ?? CalendarCache.primaryAlias)
     }
 
     @discardableResult

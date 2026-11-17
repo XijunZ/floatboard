@@ -61,16 +61,18 @@ public final class CalendarSync {
             do {
                 let found = try await apiFor(account).listCalendars()
                 cache.upsertCalendars(account: account, found.map {
-                    CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned, shown: $0.owned || $0.primary)
+                    CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned, shown: $0.owned || $0.primary,
+                                primary: $0.primary)
                 })
                 lastProblem[key] = nil
                 CalendarListAttempts.record(account, .listed)
             } catch GoogleCalendarError.missingCalendarListAccess {
-                // An older sign-in (events only): an account's main calendar id is its address, and events of a known calendar can
-                // be read, so show that one. Asked again after the normal list interval or a new sign-in, not every pass.
+                // An older sign-in (events only): Google accepts "primary" for the account's main calendar (its real id is usually,
+                // not always, the address), so show that one under it; the list, once it can be read, gives the real id and the
+                // cache moves everything there. Asked again after the normal list interval or a new sign-in, not every pass.
                 if !cache.calendars().contains(where: { $0.account == account }) {
-                    cache.upsertCalendars(account: account, [CalCalendar(account: account, calendarID: account, name: "Main calendar",
-                                                                          color: "#9aa0a6", owned: true, shown: true)])
+                    cache.upsertCalendars(account: account, [CalCalendar(account: account, calendarID: CalendarCache.primaryAlias, name: "Main calendar",
+                                                                          color: "#9aa0a6", owned: true, shown: true, primary: true)])
                 }
                 lastProblem[key] = nil
                 CalendarListAttempts.record(account, .mainOnly)
