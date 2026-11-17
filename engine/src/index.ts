@@ -14,6 +14,8 @@ import "./routes/keys";
 import "./routes/models";
 import "./routes/handover";
 import "./routes/meetings";
+import "./routes/decisions";   // Decisions: Claude jobs the Mac asks for
+import "./phone/decisions";    // Decisions: the phone's copy and actions (Mac side)
 import "./sources/chat-ingest";
 import { handleEmailSearch } from "./email/search";
 import { handleSetup, purgeExpiredSetup } from "./setup/routes";
@@ -27,6 +29,7 @@ import { appJSON, handleAppAuth, purgeExpiredApp } from "./phone/auth";
 import { handleBoard, purgeBoardLog, purgePhoneActions } from "./phone/board";
 import { handlePush } from "./phone/webpush";
 import { handleAppStatic } from "./phone/static";
+import { handleDecisions } from "./phone/decisions";
 
 async function createUser(req: Request, env: Env): Promise<Response> {
   const rb = await readJSON(req);
@@ -85,7 +88,7 @@ export default {
     }
     if (url.pathname.startsWith("/app/api/")) {
       // Phone app: signed in by the fb_session cookie only (never the user key).
-      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handlePush(req, env)) ?? (await handleEmailSearch(req, env)) ?? appJSON({ error: "not found" }, 404);
+      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handleDecisions(req, env)) ?? (await handlePush(req, env)) ?? (await handleEmailSearch(req, env)) ?? appJSON({ error: "not found" }, 404);
     }
     // Phone app page, script, service worker, manifest and icons (no sign-in needed).
     const appFile = handleAppStatic(req);
