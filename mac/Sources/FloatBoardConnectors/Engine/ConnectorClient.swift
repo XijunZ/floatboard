@@ -118,15 +118,18 @@ public struct EngineKeys: Codable, Equatable, Sendable {
     public var claude: Bool
     public var googleClientID: String?
     public var fathom: Bool
-    public init(claude: Bool, googleClientID: String?, fathom: Bool = false) {
-        self.claude = claude; self.googleClientID = googleClientID; self.fathom = fathom
+    /// Circle's Companies House key (engines before Circle don't say: false).
+    public var companiesHouse: Bool
+    public init(claude: Bool, googleClientID: String?, fathom: Bool = false, companiesHouse: Bool = false) {
+        self.claude = claude; self.googleClientID = googleClientID; self.fathom = fathom; self.companiesHouse = companiesHouse
     }
-    enum CodingKeys: String, CodingKey { case claude, googleClientID = "google_client_id", fathom }
+    enum CodingKeys: String, CodingKey { case claude, googleClientID = "google_client_id", fathom, companiesHouse = "companies_house" }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         claude = try c.decode(Bool.self, forKey: .claude)
         googleClientID = try c.decodeIfPresent(String.self, forKey: .googleClientID)
         fathom = try c.decodeIfPresent(Bool.self, forKey: .fathom) ?? false
+        companiesHouse = try c.decodeIfPresent(Bool.self, forKey: .companiesHouse) ?? false
     }
 }
 
@@ -302,9 +305,10 @@ public struct ConnectorClient {
     /// Sends keys to the engine. `claudeKey`: nil leaves it, "" removes it. `googleClient`: nil leaves it; an empty id
     /// removes it. Returns what the engine now holds.
     @discardableResult
-    public func setKeys(claudeKey: String? = nil, googleClient: (id: String, secret: String)? = nil) async throws -> EngineKeys {
+    public func setKeys(claudeKey: String? = nil, googleClient: (id: String, secret: String)? = nil, companiesHouseKey: String? = nil) async throws -> EngineKeys {
         var body: [String: Any] = [:]
         if let claudeKey { body["claude_key"] = claudeKey }
+        if let companiesHouseKey { body["companies_house_key"] = companiesHouseKey }
         if let g = googleClient { body["google_client"] = g.id.isEmpty ? NSNull() : ["client_id": g.id, "client_secret": g.secret] }
         let data = try await call("PUT", "/v2/keys", body: try JSONSerialization.data(withJSONObject: body))
         struct Out: Decodable { let keys: EngineKeys }

@@ -763,6 +763,7 @@ CircleDue.register()
 circleChecks()
 circleMoreChecks()
 await circleSyncChecks()
+await circleKeyChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)
