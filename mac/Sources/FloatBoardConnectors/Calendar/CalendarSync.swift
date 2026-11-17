@@ -49,8 +49,8 @@ public final class CalendarSync {
     }
 
     /// Reads each connected account's calendar list. Every new calendar, owned or subscribed (shared, family, team), starts
-    /// shown, merged into the same day and week in its account's colour; the user switches any off in Settings. A known
-    /// calendar keeps its choice.
+    /// shown, merged into the same day and week in its account's colour; Google's generated ones (holidays, birthdays, week
+    /// numbers) start hidden. The user switches any on or off in Settings. A known calendar keeps its choice.
     public func refreshCalendars() async {
         lastListed = now()
         await refreshCalendars(only: accounts())
@@ -62,7 +62,7 @@ public final class CalendarSync {
             do {
                 let found = try await apiFor(account).listCalendars()
                 cache.upsertCalendars(account: account, found.map {
-                    CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned, shown: true,
+                    CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned, shown: !CalendarSettings.isGoogleGenerated($0.id),
                                 primary: $0.primary)
                 })
                 lastProblem[key] = nil
