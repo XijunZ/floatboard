@@ -275,6 +275,13 @@ public final class DB {
     );
     -- What the engine holds of each jot (the `updated` it last accepted) and whether Claude was asked for its tags.
     CREATE TABLE jot_sync(jot_id INTEGER PRIMARY KEY, pushed REAL, tags_asked INTEGER NOT NULL DEFAULT 0);
+    -- A task note is the task's notes: its edits, delete and restore reach cards.notes (every write path, so none can miss it).
+    CREATE TRIGGER jots_task_note_text AFTER UPDATE OF text ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted=0 BEGIN
+        UPDATE cards SET notes=NEW.text, updated=NEW.updated WHERE id=NEW.task_id AND notes<>NEW.text;
+    END;
+    CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN
+        UPDATE cards SET notes=CASE WHEN NEW.deleted=1 THEN '' ELSE NEW.text END, updated=NEW.updated WHERE id=NEW.task_id;
+    END;
 
     """
 

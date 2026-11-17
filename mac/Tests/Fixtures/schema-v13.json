@@ -337,6 +337,18 @@
   ],
   [
     "trigger",
+    "jots_task_note_deleted",
+    "jots",
+    "CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN\n    UPDATE cards SET notes=CASE WHEN NEW.deleted=1 THEN '' ELSE NEW.text END, updated=NEW.updated WHERE id=NEW.task_id;\nEND"
+  ],
+  [
+    "trigger",
+    "jots_task_note_text",
+    "jots",
+    "CREATE TRIGGER jots_task_note_text AFTER UPDATE OF text ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted=0 BEGIN\n    UPDATE cards SET notes=NEW.text, updated=NEW.updated WHERE id=NEW.task_id AND notes<>NEW.text;\nEND"
+  ],
+  [
+    "trigger",
     "links_keep_event",
     "links",
     "CREATE TRIGGER links_keep_event AFTER INSERT ON links BEGIN\n    INSERT OR REPLACE INTO cal_kept(short_id, title, start, \"end\", all_day, video_link, kept_at)\n    SELECT short_id, title, start, \"end\", all_day, video_link, CAST(strftime('%s','now') AS REAL) FROM cal_events\n    WHERE (NEW.from_type='E' AND short_id=CAST(NEW.from_id AS INTEGER)) OR (NEW.to_type='E' AND short_id=CAST(NEW.to_id AS INTEGER));\nEND"
