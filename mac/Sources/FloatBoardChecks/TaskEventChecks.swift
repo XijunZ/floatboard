@@ -20,7 +20,7 @@ import FloatBoardConnectors
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let store = Store(db: try DB(url: root.appendingPathComponent("\(name).sqlite")))
         let cache = CalendarCache(store: store)
-        cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: cal, name: "Me", color: "#112233", owned: true, shown: true)])
+        cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: cal, name: "Me", color: "#112233", owned: true, shown: true, primary: true)])
         return (store, cache, CalendarOutbox(store: store))
     }
     func newCard(_ store: Store, _ title: String, due: Date? = nil, hasTime: Bool = false) -> Int64 {
@@ -86,7 +86,7 @@ import FloatBoardConnectors
     do {
         // Default account: unset means the first connected account; a chosen one wins.
         let (store, cache, outbox) = try setup("acct")
-        cache.upsertCalendars(account: "other@example.com", [CalCalendar(account: "other@example.com", calendarID: "other@example.com", name: "O", color: "#000000", owned: true, shown: true)])
+        cache.upsertCalendars(account: "other@example.com", [CalCalendar(account: "other@example.com", calendarID: "other@example.com", name: "O", color: "#000000", owned: true, shown: true, primary: true)])
         let id = newCard(store, "A"), id2 = newCard(store, "B")
         store.placeOnCalendar(cardID: id, start: at(d1, 9), account: nil)
         store.placeOnCalendar(cardID: id2, start: at(d1, 10), account: "other@example.com")

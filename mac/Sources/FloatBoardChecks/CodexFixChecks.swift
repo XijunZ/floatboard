@@ -11,7 +11,7 @@ import FloatBoardConnectors
     func setup(_ name: String) throws -> (Store, CalendarCache, CalendarOutbox) {
         let store = Store(db: try DB(url: root.appendingPathComponent("\(name).sqlite")))
         let cache = CalendarCache(store: store)
-        cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: acct, name: "Me", color: "#112233", owned: true, shown: true)])
+        cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: acct, name: "Me", color: "#112233", owned: true, shown: true, primary: true)])
         return (store, cache, CalendarOutbox(store: store))
     }
     let cal = AppTime.calendar
@@ -261,6 +261,61 @@ import FloatBoardConnectors
         let c2 = EventPanelEdit.changes(event: moved, opened: opened, now: startOnly)
         check(c2.move?.start == at(9, plusDays: 1) && c2.move?.end == at(10, plusDays: 1), "f6_clock_only_edit_keeps_googles_new_day")
     } catch { check(false, "f6 panel: \(error)") }
+
+    // F7. New events go to the calendar Google flags as the account's main one, never to another owned calendar; without the
+    //     calendar list the main calendar is addressed as "primary", and is renamed to its real id once the list comes.
+    do {
+        let (store, cache, outbox) = try setup("f7-primary")
+        let who = "person@example.com"
+        let listed = FakeGoogle()
+        listed.handler = { r in
+            if r.url?.path.hasSuffix("/users/me/calendarList") == true {
+                return (##"{"items":[{"id":"alpha-team-id","summary":"Alpha team","accessRole":"owner","backgroundColor":"#111111"},{"id":"main-id-123","summary":"Me","accessRole":"owner","primary":true,"backgroundColor":"#222222"}]}"##, 200)
+            }
+            return (#"{"items":[],"nextSyncToken":"T"}"#, 200)
+        }
+        await CalendarSync(store: store, apiFor: { _ in listed.api() }, accounts: { [who] }).tick()
+        let id = newTask(store, "Write report", due: at(10))
+        if let c = store.card(id) { store.addToCalendar(c, account: who, addMeet: false) }
+        let target = outbox.rows(unsent: true).first { $0.account == who }?.calendarID
+        check(store.newEventCalendar(account: who)?.calendarID == "main-id-123" && target == "main-id-123", "f7_new_events_use_googles_flagged_primary")
+        _ = cache
+        CalendarListAttempts.forget(who)
+    } catch { check(false, "f7 primary: \(error)") }
+    do {
+        let (store, cache, outbox) = try setup("f7-alias")
+        let who = "fallback@example.com"
+        let fake = FakeGoogle()
+        var listOK = false
+        fake.handler = { r in
+            if r.url?.path.hasSuffix("/users/me/calendarList") == true {
+                return listOK ? (##"{"items":[{"id":"real-main-id","summary":"Main","accessRole":"owner","primary":true,"backgroundColor":"#333333"}]}"##, 200)
+                              : (##"{"error":{"code":403,"errors":[{"reason":"insufficientPermissions"}]}}"##, 403)
+            }
+            return (#"{"items":[{"id":"ev9","status":"confirmed","summary":"Check-in","start":{"dateTime":"2030-01-01T10:00:00Z"},"end":{"dateTime":"2030-01-01T10:30:00Z"},"updated":"2026-11-16T10:00:00Z"}],"nextSyncToken":"T"}"#, 200)
+        }
+        let sync = CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [who] })
+        await sync.tick()
+        let before = cache.calendars().filter { $0.account == who }.map(\.calendarID)
+        let readPrimary = fake.requests.contains { $0.url?.path.contains("/calendars/primary/events") == true }
+        let shortID = cache.event(account: who, calendarID: "primary", eventID: "ev9")?.shortID
+        let id = newTask(store, "Check-in", due: at(10))
+        store.performForTest("UPDATE cards SET gcal_account='\(who)', gcal_calendar='primary', gcal_event='ev9' WHERE id=\(id)")
+        outbox.enqueue(.patch(eventID: "ev9", title: "Check-in (moved)", start: nil, end: nil, allDayStart: nil), account: who, calendarID: "primary")
+        check(before == ["primary"] && readPrimary && shortID != nil && store.newEventCalendar(account: who)?.calendarID == "primary",
+              "f7_without_the_list_the_main_calendar_is_addressed_as_primary")
+        CalendarListAttempts.forget(who)   // a new sign-in with the list permission
+        listOK = true
+        await sync.tick()
+        let after = cache.calendars().filter { $0.account == who }
+        let cardCal = ((try? store.db.query("SELECT gcal_calendar FROM cards WHERE id=?", [id]) { DB.text($0, 0) }) ?? []).first // try?-ok: nil fails the check
+        let evs = (try? store.db.query("SELECT calendar_id, short_id FROM cal_events WHERE account=? AND event_id='ev9'", [who]) { (DB.text($0, 0), DB.int($0, 1)) }) ?? [] // try?-ok: empty fails the check
+        check(after.map(\.calendarID) == ["real-main-id"] && after.first?.primary == true && after.first?.syncToken != nil
+              && evs.count == 1 && evs.first?.0 == "real-main-id" && evs.first?.1 == shortID && cardCal == "real-main-id"
+              && outbox.rows(unsent: true).first { $0.account == who }?.calendarID == "real-main-id"
+              && store.newEventCalendar(account: who)?.calendarID == "real-main-id", "f7_primary_alias_rekeyed_to_the_real_id_without_duplicates")
+        CalendarListAttempts.forget(who)
+    } catch { check(false, "f7 alias: \(error)") }
 }
 
 /// A Google event as the API returns it.

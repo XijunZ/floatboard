@@ -18,12 +18,15 @@ public struct CalCalendar: Equatable {
     public var syncedAt: Date?
     /// When the whole window was last read (a daily full read finds events that were beyond the window earlier).
     public var fullReadAt: Date?
+    /// True for the account's main calendar, as Google flags it in the calendar list (or the "primary" stand-in used until
+    /// the list can be read). Its id is usually, not always, the account's address.
+    public var primary: Bool
 
     public init(account: String, calendarID: String, name: String, color: String, owned: Bool, shown: Bool,
-                needsReconnect: Bool = false, syncToken: String? = nil, syncedAt: Date? = nil, fullReadAt: Date? = nil) {
+                needsReconnect: Bool = false, syncToken: String? = nil, syncedAt: Date? = nil, fullReadAt: Date? = nil, primary: Bool = false) {
         self.account = account; self.calendarID = calendarID; self.name = name; self.color = color
         self.owned = owned; self.shown = shown; self.needsReconnect = needsReconnect
-        self.syncToken = syncToken; self.syncedAt = syncedAt; self.fullReadAt = fullReadAt
+        self.syncToken = syncToken; self.syncedAt = syncedAt; self.fullReadAt = fullReadAt; self.primary = primary
     }
 }
 

@@ -129,7 +129,7 @@
   "table",
   "cal_calendars",
   "cal_calendars",
-  "CREATE TABLE cal_calendars(\n    account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,\n    owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,\n    needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL,\n    PRIMARY KEY(account, calendar_id)\n)"
+  "CREATE TABLE cal_calendars(\n    account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,\n    owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,\n    needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL, is_primary INTEGER NOT NULL DEFAULT 0,\n    PRIMARY KEY(account, calendar_id)\n)"
  ],
  [
   "table",

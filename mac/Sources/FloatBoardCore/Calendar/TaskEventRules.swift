@@ -275,8 +275,8 @@ extension Store {
     }
 
     /// The calendar of an event added by the first version of "Add to calendar", which always used the account's main calendar
-    /// ("primary"). Google names that calendar with the account's address, which is how the cache keys it: the cached event with
-    /// this account and id tells exactly; failing that, the account's main calendar as chosen for new events.
+    /// ("primary"): the cached event with this account and id tells exactly which calendar that is; failing that, the account's
+    /// main calendar as chosen for new events (the one Google flags as main, else the "primary" stand-in).
     private func oldLinkCalendar(account: String, event: String) throws -> String? {
         guard !account.isEmpty else { return nil }
         if let c = try db.query("SELECT calendar_id FROM cal_events WHERE account=? AND event_id=? ORDER BY gone, short_id LIMIT 1",

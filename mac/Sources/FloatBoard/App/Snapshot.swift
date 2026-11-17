@@ -216,7 +216,7 @@ enum Snapshot {
         let cache = CalendarCache(store: store)
         let account = "me@example.com"
         cache.upsertCalendars(account: account, [
-            CalCalendar(account: account, calendarID: account, name: "Work", color: "#4285f4", owned: true, shown: true),
+            CalCalendar(account: account, calendarID: account, name: "Work", color: "#4285f4", owned: true, shown: true, primary: true),
             CalCalendar(account: account, calendarID: "home", name: "Home", color: "#33b679", owned: true, shown: true),
             CalCalendar(account: account, calendarID: "hol", name: "Holidays", color: "#f4511e", owned: false, shown: true)])
         let monday = CalendarLayout.weekStart(containing: Date())

@@ -11,7 +11,7 @@ import FloatBoardConnectors
     func setup(_ name: String) throws -> (Store, CalendarCache, CalendarOutbox) {
         let store = Store(db: try DB(url: root.appendingPathComponent("\(name).sqlite")))
         let cache = CalendarCache(store: store)
-        cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: acct, name: "Me", color: "#112233", owned: true, shown: true)])
+        cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: acct, name: "Me", color: "#112233", owned: true, shown: true, primary: true)])
         return (store, cache, CalendarOutbox(store: store))
     }
     let cal = AppTime.calendar
@@ -103,7 +103,7 @@ import FloatBoardConnectors
         func eventReads() -> Int { fake.requests.filter { $0.url?.path.hasSuffix("/events") == true }.count }
         await sync.tick()
         let mine = cache.calendars().filter { $0.account == who }
-        check(mine.count == 1 && mine[0].calendarID == who && mine[0].name == "Main calendar" && mine[0].owned && mine[0].shown
+        check(mine.count == 1 && mine[0].calendarID == CalendarCache.primaryAlias && mine[0].primary && mine[0].name == "Main calendar" && mine[0].owned && mine[0].shown
               && !mine[0].needsReconnect && eventReads() == 1 && mine[0].syncToken != nil, "scope_403_adds_main_calendar_and_syncs_it")
         check(CalendarListAttempts.outcome(who) == .mainOnly
               && CalendarSettings.state(account: who, calendars: mine, lastList: .mainOnly) == .mainOnly, "scope_403_is_main_only_not_reconnect")
@@ -229,7 +229,7 @@ import FloatBoardConnectors
         let (store, cache, outbox) = try setup("default")
         let gone = "gone@example.com", other = "other@example.com"
         for a in [gone, other] {
-            cache.upsertCalendars(account: a, [CalCalendar(account: a, calendarID: a, name: a, color: "#123456", owned: true, shown: true)])
+            cache.upsertCalendars(account: a, [CalCalendar(account: a, calendarID: a, name: a, color: "#123456", owned: true, shown: true, primary: true)])
         }
         CalendarCache.connectedAccounts = { [other, acct] }   // gone@ was removed in Settings; its calendars stay saved
         defer { CalendarCache.connectedAccounts = nil }

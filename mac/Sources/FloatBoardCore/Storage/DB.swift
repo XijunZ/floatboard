@@ -136,7 +136,7 @@ public final class DB {
             CREATE TABLE cal_calendars(
                 account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,
                 owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,
-                needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL,
+                needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL, is_primary INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(account, calendar_id)
             );
             CREATE TABLE cal_events(
@@ -270,7 +270,7 @@ public final class DB {
     CREATE TABLE cal_calendars(
         account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,
         owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,
-        needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL,
+        needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL, is_primary INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY(account, calendar_id)
     );
     CREATE TABLE cal_events(
