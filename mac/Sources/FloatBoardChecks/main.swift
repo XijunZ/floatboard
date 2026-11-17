@@ -756,6 +756,7 @@ await archiveChecks()
 await finalFixChecks()
 await codexFixChecks()
 await calColourChecks()
+cal3Checks()
 await planningChecks()
 phoneDeleteChecks()
 

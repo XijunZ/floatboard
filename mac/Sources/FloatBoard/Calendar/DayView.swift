@@ -72,8 +72,12 @@ struct TimeGrid: View {
                     Text("all-day").font(.system(size: 9)).foregroundStyle(.tertiary)
                         .frame(width: gutter, alignment: .trailing).padding(.trailing, 6).padding(.top, 2)
                     ForEach(Array(days.enumerated()), id: \.offset) { i, _ in
+                        // Up to three items stacked; with more, two and "+N more", which lists them all.
+                        let strip = placed[i].filter(\.inStrip)
+                        let split = CalendarLayout.stripSplit(count: strip.count)
                         VStack(spacing: 2) {
-                            ForEach(placed[i].filter(\.inStrip)) { StripChip(item: $0, calendars: calendars, compact: days.count > 1) }
+                            ForEach(strip.prefix(split.shown)) { StripChip(item: $0, calendars: calendars, compact: days.count > 1) }
+                            if split.more > 0 { StripMore(items: strip, more: split.more, calendars: calendars) }
                         }
                         .frame(maxWidth: .infinity, alignment: .top).padding(.horizontal, 1)
                     }
@@ -280,12 +284,14 @@ private struct EventBlock: View {
     var body: some View {
         let narrow = columnWidth / CGFloat(item.columns) < 110
         let h = max(height + grow, hourHeight / 4)
+        // Titles wrap onto as many lines as the block's height allows; the time line goes first when space is short.
+        let text = CalendarLayout.blockText(height: h)
         ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
                 Rectangle().fill(colour).frame(width: 3)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 3) {
-                        Text(event.title.isEmpty ? "(no title)" : event.title).font(.system(size: 11, weight: .semibold)).lineLimit(h < 40 || narrow ? 1 : 2)
+                        Text(event.title.isEmpty ? "(no title)" : event.title).font(.system(size: 11, weight: .semibold)).lineLimit(text.titleLines)
                         if let mark = tint?.mark {
                             Circle().fill(Color(hex: mark)).frame(width: 6, height: 6).help(calendar?.name ?? "Calendar")
                         }
@@ -297,11 +303,11 @@ private struct EventBlock: View {
                                 .help("Waiting to send to Google")
                         }
                     }
-                    if h >= 30 { Text("\(Fmt.clock(event.start))–\(Fmt.clock(event.end))").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
-                    if !narrow && h >= 44 && !placeholder { IDChip(id: event.id).font(.system(size: 9)).foregroundStyle(.tertiary) }
+                    if text.showTime { Text("\(Fmt.clock(event.start))–\(Fmt.clock(event.end))").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
+                    if !narrow && text.showID && !placeholder { IDChip(id: event.id).font(.system(size: 9)).foregroundStyle(.tertiary) }
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 5).padding(.vertical, 3)
+                .padding(.horizontal, 5).padding(.vertical, 2)
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -335,6 +341,7 @@ private struct EventBlock: View {
         .frame(height: h, alignment: .top)
         .offset(drag)
         .opacity(drag == .zero ? 1 : 0.8)
+        .modifier(HoverDetail(suppressed: open || showRefusal) { CalendarItemDetail(content: .event(event), calendar: calendar) })
         .popover(isPresented: $open, arrowEdge: .trailing) { EventPanel(event: event, calendar: calendar, waiting: waiting) }
         .popover(isPresented: $showRefusal, arrowEdge: .trailing) {
             if let refused {
@@ -362,22 +369,24 @@ private struct TaskBlock: View {
     @EnvironmentObject var edits: CalendarEdits
     @EnvironmentObject var store: Store
     @State private var drag: CGSize = .zero
+    @State private var editing = false
 
     var body: some View {
         let done = task.status == .done
         let narrow = columnWidth / CGFloat(item.columns) < 110
+        let text = CalendarLayout.blockText(height: height)
         HStack(alignment: .top, spacing: 4) {
             TaskCheck(task: task)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(task.title).font(.system(size: 11, weight: .medium)).lineLimit(2)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(task.title).font(.system(size: 11, weight: .medium)).lineLimit(text.titleLines)
                     .strikethrough(done, color: .secondary).foregroundStyle(done ? .secondary : .primary)
-                if height >= 30 { Text(Fmt.clock(item.start)).font(.system(size: 10)).foregroundStyle(.secondary) }
-                if !narrow && height >= 44 { IDChip(id: ShortID(kind: .task, number: task.id)).font(.system(size: 9)).foregroundStyle(.tertiary) }
+                if text.showTime { Text(Fmt.clock(item.start)).font(.system(size: 10)).foregroundStyle(.secondary) }
+                if !narrow && text.showID { IDChip(id: ShortID(kind: .task, number: task.id)).font(.system(size: 9)).foregroundStyle(.tertiary) }
                 Spacer(minLength: 0)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 5).padding(.vertical, 3)
+        .padding(.horizontal, 5).padding(.vertical, 2)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: height, alignment: .top)
         .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .controlBackgroundColor)))
@@ -393,7 +402,10 @@ private struct TaskBlock: View {
                 let s = dragged(due, by: v.translation, columnWidth: columnWidth)
                 if s != due { edits.place(taskID: task.id, at: s) }
             })
-        .help("Task: drag to another time")
+        // A click opens the task exactly as on the board: the board's task editor.
+        .onTapGesture { editing = true }
+        .modifier(HoverDetail(suppressed: editing) { CalendarItemDetail(content: .task(task), calendar: nil) })
+        .popover(isPresented: $editing, arrowEdge: .trailing) { EditCardView(draft: store.card(task.id) ?? task) { editing = false } }
     }
 }
 
@@ -404,8 +416,24 @@ private struct StripChip: View {
     let compact: Bool
     @EnvironmentObject var store: Store
     @Environment(\.eventColours) private var tints
+    @State private var editing = false
 
     var body: some View {
+        chip
+            .contentShape(Rectangle())
+            .onTapGesture { if case .task = item.content { editing = true } }
+            .modifier(HoverDetail(suppressed: editing) {
+                CalendarItemDetail(content: item.content, calendar: {
+                    if case .event(let e) = item.content { return calendars[TaskEventRules.key(e.account, e.calendarID)] }
+                    return nil
+                }())
+            })
+            .popover(isPresented: $editing, arrowEdge: .trailing) {
+                if case .task(let t) = item.content { EditCardView(draft: store.card(t.id) ?? t) { editing = false } }
+            }
+    }
+
+    @ViewBuilder private var chip: some View {
         switch item.content {
         case .event(let e):
             let tint = tints[TaskEventRules.key(e.account, e.calendarID)]
@@ -433,5 +461,92 @@ private struct StripChip: View {
             .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .controlBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(store.color(t.area), lineWidth: 1.5))
         }
+    }
+}
+
+/// "+N more" in the all-day row: a click lists every item of that day.
+private struct StripMore: View {
+    let items: [PlacedItem]
+    let more: Int
+    let calendars: [String: CalCalendar]
+    @State private var open = false
+    var body: some View {
+        Text("+\(more) more").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).frame(height: 16)
+            .contentShape(Rectangle())
+            .onTapGesture { open = true }
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(spacing: 3) {
+                    ForEach(items) { StripChip(item: $0, calendars: calendars, compact: false) }
+                }
+                .padding(10).frame(width: 260)
+            }
+    }
+}
+
+/// After the pointer rests on a calendar item for 0.4 s: a small popover with its full details (`CalendarItemDetail`).
+/// It closes when the pointer leaves; a click still opens the item's panel or editor (then this stays closed).
+struct HoverDetail<Detail: View>: ViewModifier {
+    var suppressed: Bool
+    @ViewBuilder var detail: () -> Detail
+    @State private var shown = false
+    @State private var wait: Task<Void, Never>?
+    @Environment(\.calendarSnapshot) private var snapshot
+
+    func body(content: Content) -> some View {
+        if snapshot { content } else {
+            content
+                .onHover { inside in
+                    wait?.cancel()
+                    guard inside, !suppressed else { shown = false; return }
+                    wait = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 400_000_000) // try?-ok: a cancelled wait just means the pointer left
+                        if !Task.isCancelled && !suppressed { shown = true }
+                    }
+                }
+                .onChange(of: suppressed) { _, s in if s { wait?.cancel(); shown = false } }
+                .popover(isPresented: $shown, arrowEdge: .top) { detail() }
+        }
+    }
+}
+
+/// The full details of a calendar item: its whole title, its time (or due), and for an event the account's colour and email
+/// (and its calendar); for a task its group and step.
+struct CalendarItemDetail: View {
+    let content: PlacedItem.Content
+    let calendar: CalCalendar?
+    @EnvironmentObject var store: Store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            switch content {
+            case .event(let e):
+                let colour = store.accountColors(for: CalendarCache(store: store).connectedAccountList())[e.account] ?? AccountColors.fallback
+                Text(e.title.isEmpty ? "(no title)" : e.title).font(.system(size: 13, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                Text(e.allDay ? "All day" : "\(Fmt.short(e.start)) \(Fmt.clock(e.start))–\(Fmt.clock(e.end))")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    Circle().fill(Color(hex: colour)).frame(width: 8, height: 8)
+                    Text(e.account).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
+                    if let calendar, calendar.calendarID != e.account, calendar.calendarID != CalendarCache.primaryAlias {
+                        Text("· \(calendar.name)").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            case .task(let t):
+                let card = store.card(t.id) ?? t
+                Text(card.title).font(.system(size: 13, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                if let due = card.due {
+                    Text("Due " + (card.dueHasTime ? "\(Fmt.short(due)) \(Fmt.clock(due))" : Fmt.short(due)))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 5) {
+                    Circle().fill(store.color(card.area)).frame(width: 8, height: 8)
+                    Text(card.area).font(.system(size: 11)).lineLimit(1)
+                    Text("· \(card.status.title)").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(10)
+        .frame(width: 260, alignment: .leading)
     }
 }
