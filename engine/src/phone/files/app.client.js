@@ -6,7 +6,8 @@
 /*@RESOLUTIONS_JS@*/
 
   var $ = function (id) { return document.getElementById(id); };
-  var SCREENS = ["loading", "pair", "signin", "board", "settings", "goals"];
+  var SCREENS = ["loading", "pair", "signin", "board", "settings"];
+  var goalsShown = false;   // More › Resolutions open (inside More, with the bottom bar, like More › Decisions)
   var STATUSES = ["todo", "doing", "watch", "done"];
   var MOVE = { todo: "Move to To do", doing: "Move to Doing", watch: "Move to Watch", done: "Mark as done" };
   var MOVED = { todo: "Moved to To do", doing: "Moved to Doing", watch: "Moved to Watch", done: "Done" };
@@ -488,7 +489,10 @@
     $("more-decisions").hidden = entries.indexOf("decisions") < 0;
     $("more-resolutions").hidden = entries.indexOf("resolutions") < 0;
     $("more-resolutions-sub").textContent = goalsSub(board.goals);   // Resolutions
-    if (current === "goals") renderGoals();
+    // Resolutions: its screen inside More (back arrow to More), closed when More is left or the area goes off.
+    if (view !== "more" || entries.indexOf("resolutions") < 0) goalsShown = false;
+    $("goals").hidden = !goalsShown;
+    if (goalsShown) { $("more").hidden = true; renderGoals(); }
     // The status tabs, list and + belong to the Board.
     document.querySelector("nav.tabs").hidden = !onBoard;
     list.hidden = !onBoard;
@@ -631,6 +635,7 @@
     if (pendingShare !== null && board && me) { var shared = pendingShare; pendingShare = null; shareInto(shared); }
     if (syncAgain && failures === 0 && me) { syncAgain = false; sync(); }
     if (me && failures === 0) circleSync(); // Circle: send its taps, then fetch its copy
+    if (me && failures === 0) decisionsFlush(); // Decisions: send changes queued offline (reviews, Make decision)
   }
 
   async function openBoard() {
@@ -1177,6 +1182,7 @@
     account: function () { return me ? me.account : shownAccount; },
     modules: function () { return board && board.modules; },
     zone: function () { return board && board.time_zone; },
+    makeDecision: function (text, source, context) { decisionForm(text, source, context); },   // Decisions (files/decisions.client.js)
     addTask: function (title) { act({ action: "add", title: title.slice(0, 200), group: groups()[0] || null }, "Added. It will show on your Mac shortly."); },
   });
   jots.wire();
@@ -1247,8 +1253,8 @@
   });
   $("more-settings").addEventListener("click", openSettings);
 /*@DECISIONS_UI@*/
-  $("more-resolutions").addEventListener("click", function () { show("goals"); renderGoals(); });
-  $("close-goals").addEventListener("click", function () { show("board"); render(); });
+  $("more-resolutions").addEventListener("click", function () { goalsShown = true; render(); window.scrollTo(0, 0); });
+  $("close-goals").addEventListener("click", function () { goalsShown = false; render(); window.scrollTo(0, 0); });
   $("pair-go").addEventListener("click", pair);
   $("pair-skip").addEventListener("click", function () { sessionSet(PAIR_KEY, null); start(); });
   $("signin-go").addEventListener("click", signIn);

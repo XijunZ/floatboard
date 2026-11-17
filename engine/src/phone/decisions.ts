@@ -6,7 +6,11 @@
  * - `GET /app/api/decisions` (phone session): the copy, when it was sent, and how many phone actions wait for the Mac.
  * - `POST /app/api/decisions/action` (phone session, same origin): `{ actions: [{ id, decision: "D-n", action: "review" |
  *   "not_decision", happened?, sound?, made_at? }] }`, at most 50. The phone's own id makes a repeat harmless. The review's
- *   answers are stored encrypted.
+ *   answers are stored encrypted. `action: "make"` (no `decision`) is a new decision from the phone's Make decision form:
+ *   `text`, `why`, `expected`, `confidence`, `type`, `quote` (the selected words) and `source` (the jot: `J-n` or the jot's
+ *   key), all stored encrypted; the Mac records it.
+ * - `POST /app/api/decisions/fill` (phone session, same origin): the form filled from a selection by the shared `fill_form`
+ *   job (`fillDecisionForm`), the same answer as the Mac's `/v2/decisions/fill`.
  * - `GET /v2/decision-actions` and `POST /v2/decision-actions/ack` (Mac): what waits, oldest first; acked ones are kept a
  *   week, then deleted.
  */
@@ -14,6 +18,7 @@ import { type Env, json, nowISO } from "../env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { readCappedJSON } from "../lib/http";
 import { route } from "../lib/router";
+import { fillDecisionForm } from "../routes/decisions";
 import { appJSON, requireAppSession, sameOrigin } from "./auth";
 
 export const MAX_COPY = 300;
@@ -23,7 +28,11 @@ const MAX_WAITING = 200;
 const KEEP_DAYS = 7;
 const DECISION_ID = /^D-\d{1,12}$/;
 const ACTION_ID = /^[A-Za-z0-9-]{8,64}$/;
-const ACTIONS = ["review", "not_decision"] as const;
+const ACTIONS = ["review", "not_decision", "make"] as const;
+const TYPES = ["operational", "strategic", "investment"];
+const CONFIDENCE = ["", "low", "medium", "high"];
+const SOURCE = /^[A-Za-z0-9:_@.-]{1,80}$/;
+type Made = { text: string; why: string; expected: string; confidence: string; type: string; quote: string; source: string };
 const isIso = (v: unknown): v is string => typeof v === "string" && v.length <= 40 && !Number.isNaN(Date.parse(v));
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
 const list = (v: unknown, n: number, max: number) => (Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, n).map((x: string) => x.slice(0, max)) : []);
@@ -67,7 +76,9 @@ route("GET", "/v2/decision-actions", async (_req, env, user) => {
   for (const r of results) {
     const p = r.payload_enc ? JSON.parse(await decrypt(env, r.payload_enc)) : {};
     actions.push({ id: r.client_id, decision: r.decision, action: r.action, made_at: r.made_at,
-      ...(r.action === "review" ? { happened: String(p.happened ?? ""), sound: String(p.sound ?? "") } : {}) });
+      ...(r.action === "review" ? { happened: String(p.happened ?? ""), sound: String(p.sound ?? "") } : {}),
+      ...(r.action === "make" ? { text: String(p.text ?? ""), why: String(p.why ?? ""), expected: String(p.expected ?? ""),
+        confidence: String(p.confidence ?? ""), type: String(p.type ?? "operational"), quote: String(p.quote ?? ""), source: String(p.source ?? "") } : {}) });
   }
   return json({ server_time: nowISO(), actions });
 });
@@ -93,13 +104,23 @@ async function waiting(env: Env, userId: string): Promise<number> {
   return (await env.DB.prepare("SELECT COUNT(*) n FROM decision_actions WHERE user_id=? AND taken=0").bind(userId).first<{ n: number }>())?.n ?? 0;
 }
 
-type Parsed = { clientId: string; decision: string; action: (typeof ACTIONS)[number]; happened: string; sound: string; madeAt: string | null };
+type Parsed = { clientId: string; decision: string; action: (typeof ACTIONS)[number]; happened: string; sound: string; madeAt: string | null; made?: Made };
 
 function parseAction(a: any): Parsed | string {
   if (!a || typeof a !== "object" || typeof a.id !== "string" || !ACTION_ID.test(a.id)) return "id must be 8 to 64 letters, digits or dashes";
-  if (typeof a.decision !== "string" || !DECISION_ID.test(a.decision)) return "decision must be D-n";
   if (!(ACTIONS as readonly unknown[]).includes(a.action)) return `action must be ${ACTIONS.join(" or ")}`;
   if (a.made_at !== undefined && a.made_at !== null && !isIso(a.made_at)) return "made_at must be an ISO date";
+  if (a.action === "make") {
+    const t = text(a.text, 300).trim();
+    if (!t) return "a decision needs its text";
+    if (a.confidence !== undefined && !CONFIDENCE.includes(a.confidence)) return "confidence must be low, medium or high";
+    if (a.type !== undefined && !TYPES.includes(a.type)) return `type must be ${TYPES.join(", ")}`;
+    if (a.source !== undefined && a.source !== "" && (typeof a.source !== "string" || !SOURCE.test(a.source))) return "source must be the jot's id or key";
+    return { clientId: a.id, decision: "", action: "make", happened: "", sound: "", madeAt: a.made_at ?? null,
+      made: { text: t, why: text(a.why, 500), expected: text(a.expected, 500), confidence: a.confidence ?? "", type: a.type ?? "operational",
+        quote: text(a.quote, MAX_ANSWER), source: a.source ?? "" } };
+  }
+  if (typeof a.decision !== "string" || !DECISION_ID.test(a.decision)) return "decision must be D-n";
   const happened = text(a.happened, MAX_ANSWER), sound = text(a.sound, MAX_ANSWER);
   if (a.action === "review" && !(happened + sound).trim()) return "a review needs an answer";
   return { clientId: a.id, decision: a.decision, action: a.action, happened, sound, madeAt: a.made_at ?? null };
@@ -133,12 +154,22 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
     const now = nowISO();
     const stmts: D1PreparedStatement[] = [];
     for (const a of list) {
-      const payload = a.action === "review" ? await encrypt(env, JSON.stringify({ happened: a.happened, sound: a.sound })) : null;
+      const payload = a.action === "review" ? await encrypt(env, JSON.stringify({ happened: a.happened, sound: a.sound }))
+        : a.made ? await encrypt(env, JSON.stringify(a.made)) : null;
       stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO decision_actions(id,user_id,client_id,device_id,decision,action,payload_enc,made_at,created)
           VALUES(?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), s.userId, a.clientId, s.deviceId, a.decision, a.action, payload, a.madeAt ?? now, now));
     }
     await env.DB.batch(stmts);
     return appJSON({ accepted: list.map((a) => a.clientId), waiting: await waiting(env, s.userId) }, 200, s.setCookie);
+  }
+  if (path === "/app/api/decisions/fill" && req.method === "POST") {
+    if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);
+    const s = await requireAppSession(req, env);
+    if (!s) return appJSON({ error: "not signed in" }, 401);
+    const rb = await readCappedJSON(req, 100_000);
+    if (!rb.ok) return appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie);
+    const r = await fillDecisionForm(env, s.userId, rb.body);
+    return appJSON(r.body, r.status, s.setCookie);
   }
   return null;
 }

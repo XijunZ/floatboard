@@ -170,6 +170,38 @@ describe("decisions: phone copy and actions", () => {
     expect((await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>()).waiting).toBe(0);
   });
 
+  it("phone_make_decision_is_queued_encrypted_and_reaches_the_mac", async () => {
+    const u = await user("PhoneMake");
+    const { cookie } = await pairPhone(u.key);
+    const act = (body: unknown) => call("/app/api/decisions/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify(body) });
+    const make = { id: "make-0000001", action: "make", text: "Keep the old supplier", why: "Cheaper", expected: "Costs flat", confidence: "medium",
+      type: "operational", quote: "we decided to keep the old supplier", source: "phone:abc-123", made_at: "2026-11-15T10:00:00Z" };
+    expect((await act({ actions: [make] })).status).toBe(200);
+    expect((await act({ actions: [{ ...make, id: "make-0000002", text: "  " }] })).status).toBe(400);
+    expect((await act({ actions: [{ ...make, id: "make-0000003", confidence: "certain" }] })).status).toBe(400);
+    expect((await act({ actions: [{ ...make, id: "make-0000004", source: "<script>" }] })).status).toBe(400);
+    const stored = await env.DB.prepare("SELECT payload_enc, decision FROM decision_actions WHERE user_id=? AND client_id='make-0000001'").bind(u.id).first<any>();
+    expect(stored.decision).toBe("");
+    expect(stored.payload_enc).not.toContain("supplier");
+    const mac = await (await call("/v2/decision-actions", { key: u.key })).json<any>();
+    expect(mac.actions).toEqual([{ id: "make-0000001", decision: "", action: "make", made_at: "2026-11-15T10:00:00Z", text: "Keep the old supplier",
+      why: "Cheaper", expected: "Costs flat", confidence: "medium", type: "operational", quote: "we decided to keep the old supplier", source: "phone:abc-123" }]);
+  });
+
+  it("phone_fills_the_form_with_the_shared_fill_form_job", async () => {
+    const u = await user("PhoneFill");
+    const { cookie } = await pairPhone(u.key);
+    const fill = (body: unknown, origin = BASE) => call("/app/api/decisions/fill", { method: "POST", headers: { Cookie: cookie, Origin: origin }, body: JSON.stringify(body) });
+    answers = [{ decision: "Keep the old supplier", why: "", expected: "", confidence: "", type: "operational", alternatives: "" }];
+    const r = await fill({ selection: "We decided to keep the old supplier." });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ decision: "Keep the old supplier", why: "not recorded", expected: "", confidence: null, type: "operational", alternatives: "" });
+    expect((await env.DB.prepare("SELECT job FROM llm_usage WHERE user_id=?").bind(u.id).first<any>()).job).toBe("fill_form");
+    expect((await fill({ selection: "x" }, "https://evil.example")).status).toBe(403);
+    expect((await fill({ selection: "" })).status).toBe(400);
+    expect((await call("/app/api/decisions/fill", { method: "POST", headers: { Origin: BASE }, body: "{}" })).status).toBe(401);
+  });
+
   it("phone_needs_a_session_and_copy_is_checked", async () => {
     expect((await call("/app/api/decisions")).status).toBe(401);
     const u = await user("Check");

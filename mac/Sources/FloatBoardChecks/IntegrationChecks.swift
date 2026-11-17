@@ -13,6 +13,7 @@ import SQLite3
     integrationLinkChecks(root)
     integrationScreeningChecks(root)
     integrationBudgetChecks(root)
+    integrationPhoneMakeChecks(root)
     integrationUpgradeRehearsal(root)
 }
 
@@ -85,6 +86,51 @@ import SQLite3
           "circle_and_decision_reminders_share_one_daily_limit")
     let ids = WeeklyReview.sections(store: s, now: decisionsNow).map(\.0.id)
     check(ids.contains("circle.due") && ids.contains(DecisionReviews.reviewsSection), "weekly_review_shows_circle_and_decisions")
+}
+
+// MARK: Make decision on the phone
+
+@MainActor private func integrationPhoneMakeChecks(_ root: URL) {
+    guard let s = integrationStore(root, "phone-make.sqlite") else { return }
+    DecisionsArea.registerCore()
+    let js = JotStore(store: s), ds = DecisionStore(store: s)
+    guard let jot = js.create(text: "Supplier call: we decided to keep the old supplier.", now: decisionsNow.addingTimeInterval(-3600)),
+          let phoneJot = js.add("Captured on the phone: we hire a designer in January.", kind: .jot, source: .phone, origin: "phone:abc-1",
+                                 tags: [], now: decisionsNow.addingTimeInterval(-1800)) else { check(false, "phone make setup"); return }
+    s.setTags(jot.shortID, primary: "Work", others: [])
+    func make(_ id: String, source: String, text: String = "Keep the old supplier", madeAt: Date = decisionsNow) -> PhoneDecisionAction {
+        var a = PhoneDecisionAction(id: id, decision: "", action: "make", madeAt: ISO8601DateFormatter().string(from: madeAt))
+        a.text = text; a.why = "Cheaper"; a.expected = "Costs flat"; a.confidence = "medium"; a.type = "strategic"
+        a.quote = "we decided to keep the old supplier"; a.source = source
+        return a
+    }
+    let r1 = DecisionPhone.apply([make("m1", source: jot.shortID.text), make("m1", source: jot.shortID.text)], store: s, now: decisionsNow)
+    let made = ds.all().filter { $0.source == .phone }
+    let d = made.first
+    check(r1.applied == ["m1", "m1"] && made.count == 1 && d?.status == .decided && d?.foundByClaude == false && d?.why == "Cheaper"
+          && d?.expected == "Costs flat" && d?.confidence == .medium && d?.type == .strategic && d?.quote == "we decided to keep the old supplier",
+          "phone_decision_recorded_once_with_its_four_fields")
+    check(d.map { x in s.itemLinks(of: x.shortID).contains { $0.other == jot.shortID && $0.kind == .source && $0.madeBy == .manual } } == true
+          && d.map { s.itemTags($0.shortID).primary == "Work" } == true, "phone_decision_linked_to_its_jot_with_its_tags")
+    // By the jot's key (a jot made on the phone); a jot not here yet waits a day, then the decision is recorded without it.
+    let r2 = DecisionPhone.apply([make("m2", source: "phone:abc-1", text: "Hire a designer in January"),
+                                  make("m3", source: "phone:not-here-yet", text: "Move the offsite"),
+                                  make("m4", source: "phone:never-came", text: "Close the old account", madeAt: decisionsNow.addingTimeInterval(-2 * 86400))],
+                                 store: s, now: decisionsNow)
+    let byText = { (t: String) in ds.all().first { $0.text == t } }
+    check(r2.applied == ["m2", "m4"] && r2.waiting == ["m3"] && byText("Move the offsite") == nil
+          && byText("Hire a designer in January").map { x in s.itemLinks(of: x.shortID).contains { $0.other == phoneJot.shortID } } == true
+          && byText("Close the old account").map { s.itemLinks(of: $0.shortID).isEmpty } == true, "phone_decision_waits_a_day_for_its_jot_then_recorded")
+    // Decisions switched off when the Mac takes it in: kept as a jot-linked Maybe draft.
+    s.setModule(.decisions, on: false)
+    let r3 = DecisionPhone.apply([make("m5", source: jot.shortID.text, text: "Pause the newsletter")], store: s, now: decisionsNow)
+    let off = byText("Pause the newsletter")
+    check(r3.applied == ["m5"] && off?.status == .maybe && off.map { x in s.itemLinks(of: x.shortID).contains { $0.other == jot.shortID } } == true,
+          "phone_decision_kept_as_maybe_while_decisions_is_off")
+    check(DecisionPhone.apply([make("m6", source: "", text: "   ")], store: s, now: decisionsNow).skipped.map(\.0) == ["m6"], "empty_phone_decision_skipped")
+    // An older phone's jot action never opens a form and never waits: a Maybe draft linked to the jot.
+    check(JotActions.makeDecision?(s, "We go with plan B\nbecause it is cheaper", jot.shortID) == true
+          && byText("We go with plan B").map { $0.status == .maybe && $0.source == .phone } == true, "older_phone_make_decision_kept_as_maybe_draft")
 }
 
 // MARK: Upgrade rehearsal (v11 -> 16)

@@ -457,11 +457,21 @@ box (the keyboard's microphone for voice; the draft is kept on the phone), Save 
 connection); below, the jots added in the last 30 days, newest first under day headings, with search (every word, in the text
 or the tags) and a tag filter ("Untagged" too). Tapping a jot: the full text (selectable), **Make task** / **Make decision**
 (on the selected words, or the whole jot; Make decision only while Decisions is on), Edit, Clean up, Delete (Undo 8 s).
+**Make decision** opens the decision form on the phone (decision, why, expected outcome, confidence; type smaller), filled by
+code at once and then by Claude's shared `fill_form` job (`POST /app/api/decisions/fill`) in the fields not touched; Save
+queues a `make` action in Decisions' queue (sent with the next sync, offline too). The Mac records it (made by you on the
+phone, linked to the jot with its tags); while Decisions is off on the Mac it is kept as a Maybe draft. A jot that has not
+reached the Mac yet is waited for one day, then the decision is recorded without the link.
 Offline: captures and changes wait in their own queue (`floatboard.jotqueue`, "2 jots waiting to sync") and the last list is
 shown from `floatboard.jots`; both are dropped at sign-out. Routes: `GET`/`POST /app/api/jots`, `POST /app/api/jots/cleanup`.
 **Android:** long-press the icon for **New jot** (`/app/?go=jot`) and **Plan** (`/app/?go=plan`); **Share → FloatBoard** from
 any app opens "Save to FloatBoard" with the shared title, text and link, saved as a jot or as a task (manifest `share_target`,
 GET, so no form post and no change to the page's CSP).
+## More › Resolutions
+
+This quarter's goals with done / open counts and the open tasks of each, read-only. It opens inside More (back arrow to
+More, bottom bar stays), like More › Decisions.
+
 ## More › Decisions (built with the Decisions area)
 
 - Read-only list from the Mac's copy (`PUT /v2/decisions`, encrypted on the engine): **Reviews due**, **This week**,

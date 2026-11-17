@@ -55,4 +55,30 @@ describe("phone decisions", () => {
     expect(L.decisionsWaiting(0)).toBe("");
     expect(L.decisionsWaiting(2)).toBe("2 changes waiting for your Mac");
   });
+
+  it("make_decision_form_is_filled_by_code_then_claude_in_untouched_fields", () => {
+    const f = L.decisionFormStart("\n  We decided to keep the old supplier.\nMore text");
+    expect(f).toEqual({ text: "We decided to keep the old supplier.", why: "not recorded", expected: "", confidence: "", type: "operational" });
+    const answer = { decision: "Keep the old supplier", why: "Cheaper", expected: "Costs flat", confidence: "medium", type: "strategic" };
+    expect(L.decisionFormFill({ ...f, why: "My own reason" }, { why: true }, answer))
+      .toEqual({ text: "Keep the old supplier", why: "My own reason", expected: "Costs flat", confidence: "medium", type: "strategic" });
+    expect(L.decisionFormFill(f, {}, { decision: "", confidence: "certain", type: "other" })).toEqual(f);
+  });
+
+  it("make_decision_action_carries_the_form_quote_and_jot", () => {
+    const f = { text: " Keep the old supplier ", why: "not recorded", expected: "Costs flat", confidence: "low", type: "investment" };
+    expect(L.makeDecisionAction(f, "we keep the old supplier", "phone:abc-1", "make-0000001", at)).toEqual({ id: "make-0000001", action: "make",
+      text: "Keep the old supplier", why: "", expected: "Costs flat", confidence: "low", type: "investment", quote: "we keep the old supplier",
+      source: "phone:abc-1", made_at: at });
+    expect(L.makeDecisionAction({ ...f, text: "  " }, "q", "J-1", "make-0000002", at)).toBeNull();
+    expect(L.makeDecisionAction({ ...f, confidence: "sure", type: "x" }, "q", "<bad>", "make-0000003", at))
+      .toMatchObject({ confidence: "", type: "operational", source: "" });
+  });
+
+  it("jots_make_decision_opens_the_phone_form_not_a_mac_action", () => {
+    expect(APP_JS).toContain("function decisionForm(");
+    expect(APP_JS).toContain("h.makeDecision(");
+    expect(APP_JS).toContain("/app/api/decisions/fill");
+    expect(APP_JS).not.toContain('op: "make_decision"');
+  });
 });

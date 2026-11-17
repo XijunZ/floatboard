@@ -266,15 +266,15 @@ const BODY = `${ICONS}
 <p id="decisions-status" class="muted small"></p>
 <div id="decisions-list" class="dec-list"></div>
 </section>
-<button id="add" class="fab" aria-label="Add a task">${icon("plus")}</button>
-<nav class="views" role="tablist" aria-label="Screens">${view("board", "Board", "board", true)}${view("plan", "Plan", "calendar")}${view("jots", "Jots", "jot")}${view("circle", "Circle", "people")}${view("more", "More", "more")}</nav>
-</main>
-
-<main id="goals" class="screen" hidden>
-<header class="top"><button id="close-goals" class="icon-btn" aria-label="Back">${icon("back")}</button><div class="title"><h1>Resolutions</h1><div id="goals-period" class="updated"></div></div></header>
+<section id="goals" class="area" role="tabpanel" hidden>
+<div class="dec-head"><button id="close-goals" class="icon-btn" type="button" aria-label="Back to More">${icon("back")}</button><h2>Resolutions</h2></div>
+<p id="goals-period" class="muted small"></p>
 <div id="goals-list" class="goals"></div>
 <p id="goals-empty" class="empty" hidden>No goals for this quarter yet. Set up to three in the Resolutions tab on your Mac.</p>
 <p class="muted small">Goals are set and reviewed on the Mac; here you see this quarter's and the tasks still open for each.</p>
+</section>
+<button id="add" class="fab" aria-label="Add a task">${icon("plus")}</button>
+<nav class="views" role="tablist" aria-label="Screens">${view("board", "Board", "board", true)}${view("plan", "Plan", "calendar")}${view("jots", "Jots", "jot")}${view("circle", "Circle", "people")}${view("more", "More", "more")}</nav>
 </main>
 
 <main id="settings" class="screen" hidden>

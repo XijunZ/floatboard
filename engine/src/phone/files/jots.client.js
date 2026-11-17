@@ -286,9 +286,9 @@
         if ((h.modules() || {}).decisions) {
           var md = h.el("button", "btn act", "Make decision");
           md.addEventListener("click", function () {
-            queueAction({ op: "make_decision", key: j.key, text: selectionOr(j).slice(0, 2000) });
+            var text = selectionOr(j);
             h.closeSheet();
-            h.toast("Decision goes to your Mac.");
+            h.makeDecision(text.slice(0, 8000), j.key, j.text);   // Decisions' form on the phone (files/decisions.client.js)
           });
           sheet.appendChild(md);
         }

@@ -46,15 +46,6 @@ struct MakeDecisionRequest: Identifiable {
             ui.mode = .expanded
             DecisionsUI.shared.make = MakeDecisionRequest(selection: ctx.text, source: ctx.source)
         })
-        // The phone's "Make decision" on a jot (Jots §4) opens the same form on the Mac, filled from the jot's text and
-        // linked to it. While Decisions is off, or another Make decision form is open, it stays waiting on the engine.
-        JotActions.makeDecision = { store, text, source in
-            guard store.isOn(.decisions), DecisionsUI.shared.make == nil else { return false }
-            ui.mode = .expanded
-            DecisionsUI.shared.make = MakeDecisionRequest(selection: text, source: source)
-            store.activity("decisions", .info, "Make decision from the phone: the form is open", detail: source.text)
-            return true
-        }
         GlobalSearchOpen.handlers[.decision] = { id in
             ui.tab = .decisions
             DecisionsUI.shared.selected = id.number

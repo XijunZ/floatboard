@@ -56,6 +56,16 @@ describe("resolutions: the phone screen", () => {
     expect(PAGE_HTML).not.toContain("Coming with the Resolutions area");
   });
 
+  it("opens_inside_more_with_the_bottom_bar_like_decisions", () => {
+    // The goals section sits in the board screen (whose bottom bar stays), after More › Decisions, not as a screen of its own.
+    const board = PAGE_HTML.slice(PAGE_HTML.indexOf('<main id="board"'), PAGE_HTML.indexOf("</main>", PAGE_HTML.indexOf('<main id="board"')));
+    expect(board).toContain('<section id="goals" class="area"');
+    expect(board.indexOf('id="goals"')).toBeGreaterThan(board.indexOf('id="decisions"'));
+    expect(board.indexOf('id="goals"')).toBeLessThan(board.indexOf('class="views"'));
+    expect(PAGE_HTML).not.toContain('<main id="goals"');
+    expect(APP_JS).not.toContain('show("goals")');
+  });
+
   it("goals_view_lists_goals_with_counts_and_open_task_titles", () => {
     const cards = [card(1, { title: "Write it" }), card(2, { title: "Done since", status: "done" }), card(3, { title: "Other" })];
     const v = L.goalsView([goal(4, { tasks: [1, 2, 9] }), goal(5, { done: 0, open: 0, tasks: [], parent: null })], cards);

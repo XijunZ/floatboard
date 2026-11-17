@@ -190,7 +190,8 @@ extension ConnectorClient {
             if !actions.isEmpty {
                 let r = DecisionPhone.apply(actions, store: store, now: now)
                 for (aid, why) in r.skipped { store.activity("decisions", .info, "A change from the phone was not applied: \(why)", detail: aid) }
-                try await client.ackDecisionActions(r.applied + r.skipped.map(\.0))
+                let done = r.applied + r.skipped.map(\.0)   // `r.waiting` stays on the engine for the next sync
+                if !done.isEmpty { try await client.ackDecisionActions(done) }
             }
             // Examples go into the rulebook of the engine that screens (this Mac's in Mac only mode).
             if DecisionsEngine.client(store: store)?.id == id { DecisionRulebook.applyPending(store: store, connector: id, now: now) }

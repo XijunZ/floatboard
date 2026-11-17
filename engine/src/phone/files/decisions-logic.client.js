@@ -53,3 +53,37 @@
   }
 
   function decisionsWaiting(n) { return n > 0 ? n + (n === 1 ? " change" : " changes") + " waiting for your Mac" : ""; }
+
+  // ------------------------------------------------------------ Make decision on the phone (from a jot)
+  // The 4-field form (decision, why, expected outcome, confidence; type smaller) opens filled by code, then Claude's fill
+  // (the shared fill_form job) fills only the fields the owner has not touched. Save queues a "make" action; the Mac records it.
+
+  var DECISION_CONFIDENCE = ["", "low", "medium", "high"];
+
+  function decisionFormStart(selection) {
+    var line = String(selection || "").split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean)[0] || "";
+    return { text: line.slice(0, 300), why: "not recorded", expected: "", confidence: "", type: "operational" };
+  }
+
+  // Claude's answer into the fields not touched (touched: { text?, why?, expected?, confidence?, type? }).
+  function decisionFormFill(form, touched, answer) {
+    var out = Object.assign({}, form), t = touched || {}, a = answer || {};
+    if (!t.text && typeof a.decision === "string" && a.decision.trim()) out.text = a.decision.trim().slice(0, 300);
+    if (!t.why && typeof a.why === "string" && a.why.trim()) out.why = a.why.trim().slice(0, 500);
+    if (!t.expected && typeof a.expected === "string") out.expected = a.expected.trim().slice(0, 500);
+    if (!t.confidence && DECISION_CONFIDENCE.indexOf(a.confidence || "") >= 0) out.confidence = a.confidence || "";
+    if (!t.type && DECISION_TYPES[a.type]) out.type = a.type;
+    return out;
+  }
+
+  // The queued action; null when the decision is empty. "not recorded" is sent as no reason.
+  function makeDecisionAction(form, quote, source, id, nowIso) {
+    var text = String(form && form.text || "").trim().slice(0, 300);
+    if (!text) return null;
+    var why = String(form.why || "").trim();
+    if (why.toLowerCase() === "not recorded") why = "";
+    return { id: id, action: "make", text: text, why: why.slice(0, 500), expected: String(form.expected || "").trim().slice(0, 500),
+      confidence: DECISION_CONFIDENCE.indexOf(form.confidence || "") >= 0 ? form.confidence || "" : "",
+      type: DECISION_TYPES[form.type] ? form.type : "operational", quote: String(quote || "").slice(0, 4000),
+      source: /^[A-Za-z0-9:_@.-]{1,80}$/.test(String(source || "")) ? String(source) : "", made_at: nowIso };
+  }
