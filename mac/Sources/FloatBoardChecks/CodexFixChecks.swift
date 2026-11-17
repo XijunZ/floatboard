@@ -340,6 +340,8 @@ import FloatBoardConnectors
         let none = GoogleAuthConfig.granted(scope: nil, gmailAsked: true)
         check(all && !none.calendar && !none.gmail, "f8_every_partial_consent_connects_only_what_was_granted")
     }
+
+    await codexRound2Checks(setup: setup, at: { at($0, $1, plusDays: $2) }, newTask: newTask, linkTask: { linkTask($0, $1, event: $2) })
 }
 
 /// A Google event as the API returns it.
@@ -390,6 +392,68 @@ final class GatedGoogle: @unchecked Sendable {
             }
             let (body, status) = handler(req)
             return (Data(body.utf8), HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        })
+    }
+}
+
+/// Round 2 of the Codex review (N1-N4).
+@MainActor private func codexRound2Checks(setup: (String) throws -> (Store, CalendarCache, CalendarOutbox), at: (Int, Int, Int) -> Date,
+                                          newTask: (Store, String, Date?, Bool) -> Int64, linkTask: (Store, Int64, String) -> Void) async {
+    let acct = "me@example.com"
+    let old = Date().addingTimeInterval(-86400)
+    func cacheEvent(_ cache: CalendarCache, _ id: String, _ title: String, _ s: Date, _ e: Date, updated: Date, fb: Int64? = nil, calendar: String = "me@example.com") {
+        cache.apply(account: acct, calendarID: calendar, changes: [GoogleEventChange(eventID: id, cancelled: false,
+            fields: CalEventFields(start: s, end: e, title: title, googleUpdated: updated, fbCard: fb))], nextToken: nil)
+    }
+
+    // N1. Two board edits of the same field queued before a send: sending the first must not make the second look older than
+    //     Google (Google's newer time there is FloatBoard's own write). The fake keeps the event and moves `updated` on PATCH.
+    do {
+        let (store, cache, outbox) = try setup("n1-stateful")
+        let id = newTask(store, "Draft", at(9, 0, 0), true)
+        linkTask(store, id, "s1")
+        cacheEvent(cache, "s1", "Draft", at(9, 0, 0), at(9, 30, 0), updated: old, fb: id)
+        let server = StatefulEvent(id: "s1", title: "Draft", start: at(9, 0, 0), end: at(9, 30, 0), updated: old)
+        if var c = store.card(id) { c.title = "Draft A"; store.update(c, now: Date().addingTimeInterval(-2)) }
+        if var c = store.card(id) { c.title = "Draft B"; store.update(c, now: Date().addingTimeInterval(-1)) }
+        await CalendarSender(store: store, apiFor: { _ in server.api() }, isOnline: { true }).drain()
+        TaskEventRules.reconcile(store: store, cache: cache, now: Date())
+        check(server.title == "Draft B" && outbox.rows(unsent: true).isEmpty && store.card(id)?.title == "Draft B"
+              && cache.event(account: acct, calendarID: acct, eventID: "s1")?.title == "Draft B", "n1_second_queued_edit_is_not_dropped_after_the_first_is_sent")
+        // A real change in Google after FloatBoard's own write still wins over an older queued edit.
+        if var c = store.card(id) { c.title = "Draft C"; store.update(c, now: Date().addingTimeInterval(-1)) }
+        server.externalEdit(title: "Draft (theirs)")
+        await CalendarSender(store: store, apiFor: { _ in server.api() }, isOnline: { true }).drain()
+        check(server.title == "Draft (theirs)" && outbox.rows(unsent: true).isEmpty, "n1_external_change_after_own_write_still_wins")
+    } catch { check(false, "n1: \(error)") }
+
+}
+
+/// A fake Google holding one event: GET returns it, PATCH changes it and moves `updated` on (as Google does).
+final class StatefulEvent: @unchecked Sendable {
+    let id: String
+    var title: String, start: Date, end: Date, updated: Date
+    private var version = 1
+    init(id: String, title: String, start: Date, end: Date, updated: Date) {
+        self.id = id; self.title = title; self.start = start; self.end = end; self.updated = updated
+    }
+    private func tick() { updated = max(Date(), updated.addingTimeInterval(1)); version += 1 }
+    func externalEdit(title: String) { self.title = title; tick() }
+    func api() -> GoogleCalendarAPI {
+        GoogleCalendarAPI(token: { _ in "tok" }, http: { [self] req in
+            var status = 200
+            if req.httpMethod == "PATCH" {
+                if let m = req.value(forHTTPHeaderField: "If-Match"), m != "\"v\(version)\"" { status = 412 } else {
+                    let body = (req.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:] // try?-ok: an empty body changes nothing
+                    if let t = body["summary"] as? String { title = t }
+                    if let s = (body["start"] as? [String: Any])?["dateTime"] as? String, let d = ISO8601DateFormatter().date(from: s) { start = d }
+                    if let e = (body["end"] as? [String: Any])?["dateTime"] as? String, let d = ISO8601DateFormatter().date(from: e) { end = d }
+                    tick()
+                }
+            }
+            let json = status == 412 ? #"{"error":{"code":412}}"# : eventJSON(id: id, title: title, start: GoogleTimes.rfc(start), end: GoogleTimes.rfc(end),
+                                                                            updated: GoogleTimes.rfc(updated), etag: "\"v\(version)\"")
+            return (Data(json.utf8), HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
         })
     }
 }
