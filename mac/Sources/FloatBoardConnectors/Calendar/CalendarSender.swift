@@ -114,7 +114,12 @@ public final class CalendarSender {
                            trace: row.uuid)
         } catch GoogleCalendarError.http(let status, _) where status == 412 {
             // The event changed in Google between the read and the change: the next run reads it again and decides again.
-            // Not a failure: no wait, no warning.
+            // Once is quiet; repeated ones wait longer each time, and the third in a row is written to Activity once.
+            if outbox.markConflict(uuid: row.uuid) >= 3, warned[row.uuid] != "conflict" {
+                warned[row.uuid] = "conflict"
+                store.activity("calendar", .warning, "An event kept changing in Google while FloatBoard tried to send a change to it (\(row.account)); will retry",
+                               detail: Self.describe(write), trace: row.uuid)
+            }
         } catch where Self.isPermanent(error) {
             outbox.markDead(uuid: row.uuid, error: "\(error)")
             warned[row.uuid] = nil

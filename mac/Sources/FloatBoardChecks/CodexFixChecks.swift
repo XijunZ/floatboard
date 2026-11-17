@@ -471,6 +471,31 @@ final class GatedGoogle: @unchecked Sendable {
               && store.links(of: other.id) == [real.id], "n3_rekey_collision_moves_links_to_the_surviving_event")
     } catch { check(false, "n3: \(error)") }
 
+    // N4. A 412 that keeps coming back: the first is quiet and retried at once; repeated ones back off, and the third in a row
+    //     writes one warning (not one per run); a success ends it.
+    do {
+        let (store, cache, outbox) = try setup("n4-412")
+        cacheEvent(cache, "q4", "Lunch", at(12, 0, 0), at(13, 0, 0), updated: old)
+        var conflict = true
+        let s12 = GoogleTimes.rfc(at(12, 0, 0)), e13 = GoogleTimes.rfc(at(13, 0, 0))
+        let fake = FakeGoogle()
+        fake.handler = { r in
+            if r.httpMethod == "PATCH", conflict { return (#"{"error":{"code":412,"message":"Precondition Failed"}}"#, 412) }
+            return (eventJSON(id: "q4", title: "Lunch", start: s12, end: e13, updated: GoogleTimes.rfc(old)), 200)
+        }
+        let sender = CalendarSender(store: store, apiFor: { _ in fake.api() }, isOnline: { true })
+        outbox.enqueue(.patch(eventID: "q4", title: "Lunch (mine)", start: nil, end: nil, allDayStart: nil), account: acct, calendarID: acct)
+        func warnings() -> Int { store.recentActivity(limit: 200).filter { $0.level == .warning && $0.message.contains("kept changing") }.count }
+        await sender.drain()
+        let quietFirst = warnings() == 0 && outbox.due(now: Date().addingTimeInterval(1)).count == 1
+        await sender.drain()
+        let backedOff = outbox.due(now: Date().addingTimeInterval(1)).isEmpty
+        for _ in 0..<3 { store.performForTest("UPDATE cal_outbox SET next_try=0"); await sender.drain() }
+        let once = warnings() == 1
+        conflict = false
+        store.performForTest("UPDATE cal_outbox SET next_try=0"); await sender.drain()
+        check(quietFirst && backedOff && once && outbox.rows(unsent: true).isEmpty, "n4_repeated_412_backs_off_and_warns_once")
+    } catch { check(false, "n4: \(error)") }
 }
 
 /// A fake Google holding one event: GET returns it, PATCH changes it and moves `updated` on (as Google does).
