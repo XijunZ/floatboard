@@ -536,6 +536,8 @@ final class StatefulEvent: @unchecked Sendable {
     var location = ""
     /// The next PATCH is applied but its answer is lost (the client sees a 503).
     var loseNextPatchAnswer = false
+    /// Set for an all-day event: its first day and (exclusive) end day, "yyyy-MM-dd", as Google keeps them.
+    var startDay: String?, endDay: String?
     private var version = 1
     init(id: String, title: String, start: Date, end: Date, updated: Date) {
         self.id = id; self.title = title; self.start = start; self.end = end; self.updated = updated
@@ -548,6 +550,7 @@ final class StatefulEvent: @unchecked Sendable {
     func externalEdit(start: Date, at: Date) { self.start = start; updated = at; version += 1 }
     func externalEdit(title: String, at: Date) { self.title = title; updated = at; version += 1 }
     func externalEdit(start: Date, end: Date, at: Date) { self.start = start; self.end = end; updated = at; version += 1 }
+    func externalEdit(endDay: String, at: Date) { self.endDay = endDay; updated = at; version += 1 }
     func api() -> GoogleCalendarAPI {
         GoogleCalendarAPI(token: { _ in "tok" }, http: { [self] req in
             var status = 200
@@ -557,12 +560,20 @@ final class StatefulEvent: @unchecked Sendable {
                     if let t = body["summary"] as? String { title = t }
                     if let s = (body["start"] as? [String: Any])?["dateTime"] as? String, let d = ISO8601DateFormatter().date(from: s) { start = d }
                     if let e = (body["end"] as? [String: Any])?["dateTime"] as? String, let d = ISO8601DateFormatter().date(from: e) { end = d }
+                    if let d = (body["start"] as? [String: Any])?["date"] as? String { startDay = d }
+                    if let d = (body["end"] as? [String: Any])?["date"] as? String { endDay = d }
+                    if (body["start"] as? [String: Any])?["dateTime"] is String { startDay = nil; endDay = nil }
                     tick()
                     if loseNextPatchAnswer { loseNextPatchAnswer = false; status = 503 }
                 }
             }
-            let json = status == 412 ? #"{"error":{"code":412}}"# : status == 503 ? #"{"error":{"code":503}}"# : eventJSON(id: id, title: title, start: GoogleTimes.rfc(start), end: GoogleTimes.rfc(end),
+            var json = status == 412 ? #"{"error":{"code":412}}"# : status == 503 ? #"{"error":{"code":503}}"# : eventJSON(id: id, title: title, start: GoogleTimes.rfc(start), end: GoogleTimes.rfc(end),
                                                                             updated: GoogleTimes.rfc(updated), etag: "\"v\(version)\"")
+            if status == 200, let sd = startDay, let ed = endDay {
+                let obj: [String: Any] = ["id": id, "summary": title, "status": "confirmed", "etag": "\"v\(version)\"", "updated": GoogleTimes.rfc(updated),
+                                          "start": ["date": sd], "end": ["date": ed]]
+                json = String(decoding: (try? JSONSerialization.data(withJSONObject: obj)) ?? Data(), as: UTF8.self) // try?-ok: a fixed dictionary; empty fails the check
+            }
             return (Data(json.utf8), HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
         })
     }
