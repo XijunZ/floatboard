@@ -83,6 +83,35 @@ import FloatBoardConnectors
         check(report("r8 moves", server, (at(12, 0, 0), at(13, 0, 0))) && outbox.rows(unsent: true).isEmpty,
               "r8_google_setting_the_first_queued_time_keeps_it_over_the_second")
     } catch { check(false, "r8 moves: \(error)") }
+
+    // Round 9: Google applies the first queued edit but its answer is lost. The retry finds Google already has the value this
+    // row sent: that is FloatBoard's own write, so the later queued edit (C) still goes.
+    func lostAnswer(_ name: String, first: CalWrite, second: CalWrite) async throws -> (StatefulEvent, CalendarOutbox, Store) {
+        let (store, cache, outbox) = try setup(name)
+        cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: name, cancelled: false,
+            fields: CalEventFields(start: at(10, 0, 0), end: at(11, 0, 0), title: "A", googleUpdated: old))], nextToken: nil)
+        let server = StatefulEvent(id: name, title: "A", start: at(10, 0, 0), end: at(11, 0, 0), updated: old)
+        _ = outbox.enqueue(first, account: acct, calendarID: acct, now: ago(30))
+        _ = outbox.enqueue(second, account: acct, calendarID: acct, now: ago(20))
+        server.loseNextPatchAnswer = true
+        let sender = CalendarSender(store: store, apiFor: { _ in server.api() }, isOnline: { true })
+        await sender.drain()                                   // applied in Google, answer lost: the row stays
+        store.performForTest("UPDATE cal_outbox SET next_try=0")
+        await sender.drain()
+        await sender.drain()
+        return (server, outbox, store)
+    }
+    do {
+        let (s, o, _) = try await lostAnswer("r9t", first: .patch(eventID: "r9t", title: "B", start: nil, end: nil, allDayStart: nil),
+                                             second: .patch(eventID: "r9t", title: "C", start: nil, end: nil, allDayStart: nil))
+        if s.title != "C" { print("  r9 renames: server title \(s.title)") }
+        check(s.title == "C" && o.rows(unsent: true).isEmpty, "r9_lost_answer_retry_counts_as_own_and_the_later_rename_goes")
+    } catch { check(false, "r9 renames: \(error)") }
+    do {
+        let (s, o, _) = try await lostAnswer("r9m", first: .patch(eventID: "r9m", title: nil, start: at(12, 0, 0), end: at(13, 0, 0), allDayStart: nil),
+                                             second: .patch(eventID: "r9m", title: nil, start: at(14, 0, 0), end: at(15, 0, 0), allDayStart: nil))
+        check(report("r9 moves", s, (at(14, 0, 0), at(15, 0, 0))) && o.rows(unsent: true).isEmpty, "r9_lost_answer_retry_counts_as_own_and_the_later_move_goes")
+    } catch { check(false, "r9 moves: \(error)") }
 }
 
 /// R7-2: each instance's original start (Google's originalStartTime) is kept and sent to the phone; the column is part of

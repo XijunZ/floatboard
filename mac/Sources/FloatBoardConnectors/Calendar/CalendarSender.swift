@@ -87,8 +87,11 @@ public final class CalendarSender {
                 let base = row.base ?? cache.event(account: row.account, calendarID: row.calendarID, eventID: eventID).map(CalPatchBase.init)
                 // What Google has now is noted first (a field whose value changed there, with Google's stamp now), so a later
                 // write of other fields cannot make that change look newer than it was.
-                let own = CalendarOutbox.observed(outbox.ownWrite(account: row.account, calendarID: row.calendarID, eventID: eventID),
-                                                  base: base, current: read.fields)
+                // A retry after a lost answer: values Google has that this row already sent are FloatBoard's own write.
+                let own = CalendarOutbox.claimingOwnRetry(
+                    CalendarOutbox.observed(outbox.ownWrite(account: row.account, calendarID: row.calendarID, eventID: eventID),
+                                            base: base, current: read.fields),
+                    attempted: row.attempted, current: read.fields)
                 outbox.saveKnown(account: row.account, calendarID: row.calendarID, eventID: eventID, own)
                 let toSend = CalendarOutbox.withoutNewerGoogleFields(write, queuedAt: row.created, base: base, own: own, current: read.fields)
                 if toSend != write {
@@ -98,6 +101,11 @@ public final class CalendarSender {
                 guard case .patch(_, let title, let start, let end, let allDayStart)? = toSend else {
                     saved = outbox.markSent(uuid: row.uuid, result: (read.eventID, read.fields), own: false)   // nothing left to send
                     break
+                }
+                // Noted on the row before the request goes, so a lost answer is recognised as this row's own write.
+                guard outbox.markAttempted(uuid: row.uuid, toSend!) else {
+                    outbox.markFailed(uuid: row.uuid, error: "Could not note the change as being sent")
+                    return
                 }
                 saved = outbox.markSent(uuid: row.uuid, result: try await api.patch(calendarID: row.calendarID, eventID: eventID, title: title,
                                                                                     start: start, end: end, allDayStart: allDayStart, ifMatch: read.etag),
