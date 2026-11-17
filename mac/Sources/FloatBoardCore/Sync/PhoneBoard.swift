@@ -24,11 +24,14 @@ public struct BoardEvent: Codable, Equatable {
     public var tasks: [Int64]
     public var series: String?
     public var repeatLabel: String?
-    enum CodingKeys: String, CodingKey { case id, title, start, end, allDay = "all_day", video, color, tasks, series, repeatLabel = "repeat" }
+    /// An instance's original start (ISO UTC): differs from `start` when it was moved in Google, so the phone lists it apart.
+    public var originalStart: String?
+    enum CodingKeys: String, CodingKey { case id, title, start, end, allDay = "all_day", video, color, tasks, series, repeatLabel = "repeat",
+                                              originalStart = "original_start" }
     public init(id: String, title: String, start: String, end: String, allDay: Bool, video: String?, color: String, tasks: [Int64],
-                series: String? = nil, repeatLabel: String? = nil) {
+                series: String? = nil, repeatLabel: String? = nil, originalStart: String? = nil) {
         self.id = id; self.title = title; self.start = start; self.end = end; self.allDay = allDay; self.video = video; self.color = color; self.tasks = tasks
-        self.series = series; self.repeatLabel = repeatLabel
+        self.series = series; self.repeatLabel = repeatLabel; self.originalStart = originalStart
     }
 }
 
@@ -314,7 +317,8 @@ public enum PhoneBoard {
             return BoardEvent(id: ShortID(kind: .event, number: e.shortID).text,
                               title: clip(e.title.trimmingCharacters(in: .whitespacesAndNewlines)).trimmingCharacters(in: .whitespacesAndNewlines),
                               start: isoUTC(e.start), end: isoUTC(e.end), allDay: e.allDay, video: video, color: hex,
-                              tasks: Array(tasks.prefix(maxEventTasks)), series: series, repeatLabel: label)
+                              tasks: Array(tasks.prefix(maxEventTasks)), series: series, repeatLabel: label,
+                              originalStart: series == nil ? nil : e.originalStart.map(isoUTC))
         }
     }
 

@@ -408,7 +408,9 @@ tasks linked to a meeting under it, then the open tasks due in that block. Empty
   every instance: "Standup · weekdays 09:00", "1:1 · weekly Tue 14:00", "Board · monthly". Its linked tasks are those of
   all its instances in the block; Today's Join opens today's instance. In Today the row shows the occurrence's actual
   time. An instance at another time than the series' usual one (the time in its label, else the time most of its
-  instances in the block share), e.g. one moved in Google, is listed as its own row with its own time and Join.
+  instances in the block share) is listed as its own row with its own time and Join. So is any instance moved in
+  Google to another day or time (all-day ones too): the Mac sends each instance's `original_start` (Google's
+  `originalStartTime`, ISO UTC; left out when bad) and the phone never folds an instance whose start differs from it.
 - The label comes from the series' rule. The Mac reads it once per series with `events.get(calendarId, recurringEventId,
   fields=recurrence,start)`, keeps it with the series' start and time zone (`cal_series`), reads it again at the daily
   full read, and puts it in words itself: FREQ DAILY / WEEKLY / MONTHLY / YEARLY, INTERVAL ("every 2 weeks"), BYDAY

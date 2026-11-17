@@ -76,7 +76,7 @@ export type Card = {
  * so the phone lists it once per block; both are absent for a one-off event.
  */
 export type BoardEvent = { id: string; title: string; start: string; end: string; all_day: boolean; video: string | null; color: string; tasks: number[];
-  series?: string; repeat?: string };
+  series?: string; repeat?: string; original_start?: string };
 export type CardWatch = { person: string; contact: string; since: string };
 /** The email a `link_email` action attaches (sent_at as the search gave it). */
 export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
@@ -204,8 +204,10 @@ export function parseEvents(body: any): BoardEvent[] | undefined {
     const series = typeof e.series === "string" && /^S-[0-9a-f]{1,32}$/.test(e.series) ? e.series : undefined;
     const rep = typeof e.repeat === "string" ? e.repeat.trim() : "";
     const repeat = rep && rep.length <= MAX_REPEAT && !/[\u0000-\u001f\u007f]/.test(rep) ? rep : undefined;
+    // An instance's original start (Google's originalStartTime; differs from `start` when moved): an ISO date, else left out.
+    const original = isIso(e.original_start) ? e.original_start as string : undefined;
     return { id: e.id, title, start: e.start, end: e.end, all_day: e.all_day, video, color: e.color, tasks: e.tasks,
-      ...(series ? { series } : {}), ...(repeat ? { repeat } : {}) };
+      ...(series ? { series } : {}), ...(repeat ? { repeat } : {}), ...(original ? { original_start: original } : {}) };
   });
 }
 

@@ -224,6 +224,10 @@ public struct GoogleCalendarAPI: Sendable {
         f.description = item["description"] as? String ?? ""
         f.htmlLink = item["htmlLink"] as? String ?? ""
         f.recurringID = item["recurringEventId"] as? String
+        if let o = item["originalStartTime"] as? [String: Any] {
+            if let d = o["date"] as? String, parseDay(d) != nil { f.originalStart = d }
+            else if let t = (o["dateTime"] as? String).flatMap(parseRFC3339) { f.originalStart = rfc3339(t) }
+        }
         let card = ((item["extendedProperties"] as? [String: Any])?["private"] as? [String: Any])?["floatboard_card"] as? String
         f.fbCard = card.flatMap { Int64($0) }
         f.videoLink = videoLink(item, location: f.location, description: f.description)

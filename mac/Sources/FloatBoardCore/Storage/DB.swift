@@ -66,15 +66,23 @@ public final class DB {
 
     deinit { sqlite3_close(handle) }
 
-    /// Version 11 was amended before release (Round 6): a board already at 11 from before then lacks `cal_series`'
-    /// `master_start` and `master_zone`. They are added when missing, without changing the version; a board that has
-    /// them is not touched. ALTER puts each before the table's PRIMARY KEY clause, so the result matches a new board.
+    /// Version 11 was amended before release (Rounds 6 and 7): a board already at 11 from before then lacks `cal_series`'
+    /// `master_start` and `master_zone` and `cal_events`' `original_start`. They are added when missing, without changing
+    /// the version; a board that has them is not touched. ALTER puts each before the table's constraints (PRIMARY KEY,
+    /// UNIQUE), so the result matches a new board.
     private func addMissingV11Columns() throws {
-        let have = Set(try query("PRAGMA table_info(cal_series)") { DB.text($0, 1) })
-        guard !have.isEmpty, !have.contains("master_start") || !have.contains("master_zone") else { return }
+        let wanted = [("cal_series", "master_start", "REAL"), ("cal_series", "master_zone", "TEXT"), ("cal_events", "original_start", "TEXT")]
+        var missing: [(String, String, String)] = []
+        for table in Set(wanted.map(\.0)) {
+            let have = Set(try query("PRAGMA table_info(\(table))") { DB.text($0, 1) })
+            guard !have.isEmpty else { continue }
+            missing += wanted.filter { $0.0 == table && !have.contains($0.1) }
+        }
+        guard !missing.isEmpty else { return }
         try transaction {
-            if !have.contains("master_start") { try exec("ALTER TABLE cal_series ADD COLUMN master_start REAL;") }
-            if !have.contains("master_zone") { try exec("ALTER TABLE cal_series ADD COLUMN master_zone TEXT;") }
+            for (table, column, type) in missing.sorted(by: { ($0.0, $0.1) < ($1.0, $1.1) }) {
+                try exec("ALTER TABLE \(table) ADD COLUMN \(column) \(type);")
+            }
         }
     }
 
@@ -158,7 +166,7 @@ public final class DB {
                 start REAL NOT NULL, end REAL NOT NULL, all_day INTEGER NOT NULL, start_day TEXT, end_day TEXT, title TEXT NOT NULL,
                 location TEXT NOT NULL DEFAULT '', video_link TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
                 html_link TEXT NOT NULL DEFAULT '', recurring_id TEXT, google_updated REAL NOT NULL, fb_card INTEGER,
-                gone INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, own_write TEXT,
+                gone INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, own_write TEXT, original_start TEXT,
                 UNIQUE(account, calendar_id, event_id)
             );
             CREATE INDEX cal_events_start ON cal_events(start);
@@ -300,7 +308,7 @@ public final class DB {
         start REAL NOT NULL, end REAL NOT NULL, all_day INTEGER NOT NULL, start_day TEXT, end_day TEXT, title TEXT NOT NULL,
         location TEXT NOT NULL DEFAULT '', video_link TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
         html_link TEXT NOT NULL DEFAULT '', recurring_id TEXT, google_updated REAL NOT NULL, fb_card INTEGER,
-        gone INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, own_write TEXT,
+        gone INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, own_write TEXT, original_start TEXT,
         UNIQUE(account, calendar_id, event_id)
     );
     CREATE INDEX cal_events_start ON cal_events(start);

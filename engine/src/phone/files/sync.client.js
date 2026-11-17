@@ -286,6 +286,8 @@
       if (isNaN(s) || isNaN(n)) return null;
       return { e: e, s: s, first: dayKey(s, zone), last: dayKey(n > s ? n - 1 : s, zone),
         series: typeof e.series === "string" && e.series ? e.series : null,
+        // Moved in Google (its start is not its original start): never folded into the series row.
+        moved: typeof e.original_start === "string" && !isNaN(Date.parse(e.original_start)) && Date.parse(e.original_start) !== s,
         label: typeof e.repeat === "string" && e.repeat ? e.repeat : null };
     }).filter(Boolean).sort(function (a, b) { return a.s - b.s; });
 
@@ -303,15 +305,16 @@
       var meetings = [], bySeries = {};
       var inBlock = evs.filter(function (x) { return !(x.first > b.to || x.last < b.from); });
       // A series' usual time in this block: the time in its label ("weekdays 09:00"), else the time most of its instances
-      // here share (the earliest on a tie). An instance at another time (moved in Google) is never hidden in the series row.
+      // here share (the earliest on a tie), counting only instances not moved in Google. A moved instance (its original start
+      // differs) or one at another time is never hidden in the series row: it is its own row with its day, time and Join.
       var usual = {};
       inBlock.forEach(function (x) {
-        if (!x.series || usual[x.series]) return;
+        if (!x.series || x.moved || usual[x.series]) return;
         var named = x.label && x.label.match(/\b\d{2}:\d{2}\b/);
         if (named) { usual[x.series] = named[0]; return; }
         var count = {}, best = null;
         inBlock.forEach(function (y) {
-          if (y.series !== x.series) return;
+          if (y.series !== x.series || y.moved) return;
           var k = timeKey(y);
           count[k] = (count[k] || 0) + 1;
           if (best === null || count[k] > count[best]) best = k;
@@ -324,7 +327,7 @@
         var day = x.first < b.from ? b.from : x.first;
         var time = x.e.all_day || x.first < b.from ? "" : clock.format(new Date(x.s));
         var when = b.key === "today" ? (time || "All day") : dayName(day) + (time ? " " + time : "");
-        if (x.series && timeKey(x) === usual[x.series]) {
+        if (x.series && !x.moved && timeKey(x) === usual[x.series]) {
           var m = bySeries[x.series];
           if (m) { tasks.forEach(function (t) { if (m.tasks.indexOf(t) < 0) m.tasks.push(t); }); return; }
           // The series row: its rule in words; in Today also the occurrence's actual time.
