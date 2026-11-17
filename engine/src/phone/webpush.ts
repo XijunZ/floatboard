@@ -142,7 +142,8 @@ let pushFetch: typeof fetch = (...a) => fetch(...a);
 export function setPushFetch(f: typeof fetch) { pushFetch = f; }
 
 export type PushSubscriptionRow = { device_id: string; user_id: string; endpoint: string; p256dh: string; auth: string; origin: string };
-export type PushPayload = { title: string; body: string; url: string };
+/** `circle`: the person (P-n) a Circle due reminder is about; the service worker then adds "Contacted" and "Snooze". */
+export type PushPayload = { title: string; body: string; url: string; circle?: string };
 
 const utf8 = (s: string) => enc.encode(s).length;
 
@@ -169,7 +170,7 @@ export function payloadJSON(p: PushPayload): string {
   const urls = p.url.length <= MAX_URL && p.url !== "/app/" ? [p.url, "/app/"] : ["/app/"];
   let out = "";
   for (const url of urls) {
-    const json = (title: string, body: string) => JSON.stringify({ title, body, url });
+    const json = (title: string, body: string) => JSON.stringify({ title, body, url, ...(p.circle && /^P-\d{1,12}$/.test(p.circle) ? { circle: p.circle } : {}) });
     const fits = (title: string, body: string) => utf8(json(title, body)) <= MAX_PLAINTEXT;
     const body = longestFitting(body0, (b) => fits(title0, b));
     const title = fits(title0, body) ? title0 : longestFitting(title0, (t) => fits(t, body));
