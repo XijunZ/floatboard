@@ -63,6 +63,9 @@ public struct ScreenOutcome: Equatable {
     public static let maxCharsPerJot = 20_000
     static let lastRunKey = "decisions.screened_at"
     static let sinceKey = "decisions.screen_since"
+    /// The highest jot id a finished run had seen: a jot with a higher id arrived after it and is read even when its own time
+    /// is older (a phone capture made offline, meeting notes the engine held while the Mac was off).
+    static let seenIDKey = "decisions.screen_jot_id"
 
     /// The most recent Sunday 17:00 at or before `now` (app zone).
     public static func lastDueTime(now: Date) -> Date {
@@ -91,11 +94,12 @@ public struct ScreenOutcome: Equatable {
     /// screened, oldest first, each with the earlier decisions it refers to.
     public static func pending(store: Store, now: Date) -> [ScreenJot] {
         let since = readFrom(store: store, now: now)
+        let seenID = ((try? store.db.query("SELECT value FROM meta WHERE key=?", [seenIDKey]) { DB.text($0, 0) })?.first).flatMap { Int64($0) } // try?-ok: unknown = arrival not tracked yet (times only)
         let rows: [(Int64, String, String, Date)]
         do {
             rows = try store.db.query("""
-                SELECT id, text, kind, added FROM jots WHERE deleted=0 AND updated>=? AND updated<=? ORDER BY updated, id
-                """, [since, now]) { (DB.int($0, 0), DB.text($0, 1), DB.text($0, 2), DB.date($0, 3) ?? now) }
+                SELECT id, text, kind, added FROM jots WHERE deleted=0 AND ((updated>=? AND updated<=?) OR id>?) ORDER BY updated, id
+                """, [since, now, seenID ?? Int64.max]) { (DB.int($0, 0), DB.text($0, 1), DB.text($0, 2), DB.date($0, 3) ?? now) }
         } catch {
             store.activity("decisions", .error, "Could not read the week's jots for screening", detail: "\(error)")
             return []
@@ -171,12 +175,22 @@ public struct ScreenOutcome: Equatable {
     }
 
     /// Where this run reads from: the start of the last complete run (the first time: 7 days ago).
+    /// The highest jot id on the board (0 when there is none; nil when it can't be read, so nothing is recorded).
+    public static func lastJotID(store: Store) -> Int64? {
+        do { return try store.db.query("SELECT coalesce(max(id), 0) FROM jots") { DB.int($0, 0) }.first } catch {
+            store.activity("decisions", .error, "Could not read the jots for screening", detail: "\(error)")
+            return nil
+        }
+    }
+
     public static func readFrom(store: Store, now: Date) -> Date { metaDate(store, sinceKey) ?? now.addingTimeInterval(-7 * 86400) }
 
     /// Notes a finished run: the next one reads jots changed from `started`, or, when some answers were unreadable, from
     /// `readFrom` again so those jots are read next time (versions already screened are skipped).
-    public static func finishRun(store: Store, started: Date, readFrom: Date, complete: Bool, now: Date) {
+    /// `jotsUpTo` (`lastJotID` read before the run's `pending`): jots up to it were read by this run when it completed.
+    public static func finishRun(store: Store, started: Date, readFrom: Date, complete: Bool, now: Date, jotsUpTo: Int64? = nil) {
         store.perform {
+            if complete, let jotsUpTo { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [seenIDKey, String(jotsUpTo)]) }
             try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [lastRunKey, String(now.timeIntervalSince1970)])
             try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)",
                              [sinceKey, String((complete ? started : readFrom).timeIntervalSince1970)])

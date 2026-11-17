@@ -156,6 +156,8 @@ public struct DecisionFilter: Equatable {
                 }
             }
             try linkPeopleRow(me, text: [text, d.quote, why].joined(separator: "\n"), now: now)
+            try linkMentionsRow(me, text: Self.typedText(text: text, why: why, expected: d.expected, alternatives: d.alternatives), previous: "",
+                                source: d.sourceItem, now: now)
             id = n
         }
         return id.flatMap { decision($0) }
@@ -171,6 +173,17 @@ public struct DecisionFilter: Equatable {
         let t = s.trimmingCharacters(in: .whitespaces)
         guard t.count == 10, let d = Due.startOfDay(t), Due.dayString(d) == t else { return "" }
         return d <= AppTime.calendar.startOfDay(for: notAfter) ? t : ""
+    }
+
+    /// The owner's own fields of a decision, where a typed id (`R-3`, `P-2`, `J-7`) links it (the quote is the source's text).
+    static func typedText(text: String, why: String, expected: String, alternatives: String) -> String {
+        [text, why, expected, alternatives].joined(separator: "\n")
+    }
+
+    /// Ids typed into the decision's fields link it (the foundation's `linkMentions`: new ids only, related or the area's own
+    /// kind, made by you). Its source is left out: that link is already there with its own kind and maker.
+    func linkMentionsRow(_ me: ShortID, text: String, previous: String, source: ShortID?, now: Date) throws {
+        try store.linkMentionsRow(in: text, previous: previous + (source.map { " " + $0.text } ?? ""), from: me, now: now)
     }
 
     /// Links people named in the text (code, D7).
@@ -264,6 +277,9 @@ public struct DecisionFilter: Equatable {
                       d.confidence?.rawValue ?? "", confidenceAdded, d.alternatives.trimmingCharacters(in: .whitespacesAndNewlines), d.type.rawValue,
                       d.status.rawValue, Self.validDay(d.decided, notAfter: old.recorded), due, now, d.id])
             if old.text != text { try linkPeopleRow(d.shortID, text: [text, old.quote, why].joined(separator: "\n"), now: now) }
+            try linkMentionsRow(d.shortID, text: Self.typedText(text: text, why: why, expected: expected, alternatives: d.alternatives),
+                                previous: Self.typedText(text: old.text, why: old.why, expected: old.expected, alternatives: old.alternatives),
+                                source: old.sourceItem, now: now)
         }
         return true
     }
