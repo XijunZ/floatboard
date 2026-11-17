@@ -18,13 +18,14 @@ CREATE UNIQUE INDEX jots_origin ON jots(origin) WHERE origin<>'';
 CREATE TABLE jot_meetings(
     jot_id INTEGER PRIMARY KEY, recap_key TEXT NOT NULL, fathom_url TEXT NOT NULL DEFAULT '', meeting_url TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '', scheduled_start REAL, invitees TEXT NOT NULL DEFAULT '[]',
-    matched_by TEXT NOT NULL DEFAULT '', tries INTEGER NOT NULL DEFAULT 0   -- link | time | suggested | '' (not yet)
+    matched_by TEXT NOT NULL DEFAULT '', received REAL NOT NULL   -- link | time | suggested | confirmed | '' (not yet)
 );
 -- Claude's tag suggestions per jot (open / accepted / dismissed).
 CREATE TABLE jot_suggestions(jot_id INTEGER NOT NULL, tag TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'open', at REAL NOT NULL,
     PRIMARY KEY(jot_id, tag));
 -- What the engine holds of each jot: the `updated` it last accepted, and whether Claude was asked for tags.
 CREATE TABLE jot_sync(jot_id INTEGER PRIMARY KEY, pushed REAL, tags_asked INTEGER NOT NULL DEFAULT 0);
+-- Two triggers keep cards.notes equal to the task note jot (edit, delete, restore): see TaskNotes.swift.
 ```
 Settings in `meta`: `jot_nudge` (JSON `{on, minutes}`; default on, 21:00 app zone), `jot_nudged_day` (last day the Mac
 showed it), `jot_daily_files` (JSON `{on, folder}`; default on, `~/Code/Resources/braindumps/daily`), `jot_files_at` (last
@@ -43,12 +44,12 @@ CREATE TABLE jot_copies (           -- the 30-day online copy (J13) and captures
   added TEXT NOT NULL, updated TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
   mac_saved_at TEXT,                             -- engine time the Mac last saved this jot's latest version (NULL: never)
   waiting INTEGER NOT NULL DEFAULT 0,            -- 1: a capture, edit, delete or meeting notes the Mac has not saved
-  rev INTEGER NOT NULL DEFAULT 0, recap_key TEXT,
+  rev INTEGER NOT NULL DEFAULT 0, recap_key TEXT, ref TEXT,   -- ref: an action row's jot key
   PRIMARY KEY (user_id, key));
 CREATE UNIQUE INDEX jot_copies_mac ON jot_copies(user_id, mac_id) WHERE mac_id IS NOT NULL;
 CREATE TABLE jot_actions_seen (user_id TEXT NOT NULL, id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (user_id, id));
 CREATE TABLE jot_nudges (user_id TEXT PRIMARY KEY, minutes INTEGER, zone TEXT NOT NULL DEFAULT 'Europe/London',
-  shown_day TEXT, jotted_day TEXT, done_today TEXT NOT NULL DEFAULT '[]', updated TEXT NOT NULL);
+  shown_day TEXT, jotted_day TEXT, done_enc TEXT, updated TEXT NOT NULL);
 ```
 Text is encrypted like the board copy (`lib/crypto`). Prune (hourly): `waiting=0 AND mac_saved_at < now − 30 days`. A row
 the Mac has not saved (`waiting=1` or `mac_saved_at IS NULL`) is never removed (§9).
@@ -190,4 +191,7 @@ tags on jots (Mac only, like other setup). Old task notes are not back-filled (s
 ## 8. Foundation extensions (separate commits titled "Foundation: …")
 
 - `MakeTask.dueMentioned(in:now:)` and the Make task form's due date and Claude fill (J7).
-- `JotActions.makeDecision` hook in core (phone "Make decision" → the Decisions area; nil until Decisions registers it).
+- `JotActions.makeDecision` hook in core (phone "Make decision" → the Decisions area; nil until Decisions registers it), in
+  `Jots/JotsRegistry.swift`.
+- `ConnectorClient.call` is internal instead of private, so `FloatBoardConnectors/Jots/JotsClient.swift` can use it.
+- Checks: `schema_version_is_12` now reads `>= 12`; the v10 board in `DueStorageChecks` also drops the v13 tables.
