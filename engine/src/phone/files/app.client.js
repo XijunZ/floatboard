@@ -616,10 +616,16 @@
     saveQueue();
     closeSheet();
     render();
-    var u = card ? undoFor(card, a, Date.now()) : null;
+    if (a.action === "delete" || a.action === "done") buzz();
+    var u = card ? (a.action === "delete" ? deleteUndoFor(card, a, Date.now()) : undoFor(card, a, Date.now())) : null;
     if (u) showUndo(u); else toast(done);
     failures = 0;
     sync();
+  }
+
+  /** A short vibration where the phone has one (Delete, Done). */
+  function buzz() {
+    try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { /* no vibration: nothing to do */ }
   }
 
   var undo = null;
@@ -644,7 +650,35 @@
     var u = undo;
     hideUndo();
     if (!undoLive(u, Date.now())) return;
+    if (u.deleted) {
+      // Not sent yet: taken out of the queue, nothing is sent. Sent (or being sent): a restore brings it back on the Mac.
+      var step = undoDeleteStep(u, queue.actions, syncing, newId(), new Date().toISOString());
+      if (step.restore) { act(step.restore, "Bringing it back"); return; }
+      queue.actions = step.actions;
+      saveQueue();
+      render();
+      toast("Not deleted");
+      return;
+    }
     act(undoAction(u, newId(), new Date().toISOString()), "Moved back to " + STEP_NAMES[u.from]);
+  }
+
+  // Delete: a task the email sorting made offers the Mac's "teach" choices, so the sorting learns; others just go.
+  var TEACH = [["not_action", "Not an action (teach)"], ["wrong_details", "Wrong details (teach)"], ["duplicate", "Duplicate (teach)"]];
+  function deleteCard(c) {
+    if (!c.teach_on_delete) { act({ card_id: c.id, action: "delete" }, "Deleted", c); return; }
+    openSheet(function (sheet) {
+      sheet.appendChild(el("h3", null, "Delete"));
+      sheet.appendChild(el("p", "sub", c.title));
+      TEACH.forEach(function (t) {
+        var b = el("button", "btn act", t[1]);
+        b.addEventListener("click", function () { act({ card_id: c.id, action: "delete", teach: t[0] }, "Deleted", c); });
+        sheet.appendChild(b);
+      });
+      var plain = el("button", "btn act danger", "Just delete");
+      plain.addEventListener("click", function () { act({ card_id: c.id, action: "delete" }, "Deleted", c); });
+      sheet.appendChild(plain);
+    });
   }
 
   // ------------------------------------------------------------ sheets
@@ -721,6 +755,13 @@
         a.appendChild(document.createTextNode(linkLabel(l)));
         sheet.appendChild(a);
       });
+      if (!c.pending) {
+        var del = el("button", "btn act danger");
+        del.appendChild(icon("trash"));
+        del.appendChild(document.createTextNode("Delete"));
+        del.addEventListener("click", function () { deleteCard(c); });
+        sheet.appendChild(del);
+      }
       sheet.appendChild(el("p", "sub hint", "Edit details on your Mac."));
     });
   }

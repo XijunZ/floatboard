@@ -120,6 +120,7 @@ const ICONS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" styl
 <symbol id="i-gear" viewBox="0 0 24 24"><path d="M18.8 10.3L21.5 10.8L21.5 13.2L18.8 13.7L18 15.6L19.6 17.9L17.9 19.6L15.6 18L13.7 18.8L13.2 21.5L10.8 21.5L10.3 18.8L8.4 18L6.1 19.6L4.4 17.9L6 15.6L5.2 13.7L2.5 13.2L2.5 10.8L5.2 10.3L6 8.4L4.4 6.1L6.1 4.4L8.4 6L10.3 5.2L10.8 2.5L13.2 2.5L13.7 5.2L15.6 6L17.9 4.4L19.6 6.1L18 8.4Z"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></symbol>
 <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
 <symbol id="i-link" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
 <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="12.5" height="12" rx="2"/><path d="M15.5 10.5L21 7.5v9l-5.5-3z"/></symbol>

@@ -119,8 +119,18 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
 
   it("a_move_offers_undo_and_undo_is_a_new_queued_move", () => {
     expect(APP_JS).toContain('act({ card_id: c.id, action: s }, MOVED[s], c)');
-    expect(APP_JS).toMatch(/var u = card \? undoFor\(card, a, Date\.now\(\)\) : null;\s*if \(u\) showUndo\(u\); else toast\(done\);/);
-    expect(APP_JS).toMatch(/function undoLast\(\) \{[\s\S]*if \(!undoLive\(u, Date\.now\(\)\)\) return;\s*act\(undoAction\(u, newId\(\), new Date\(\)\.toISOString\(\)\)/);
+    expect(APP_JS).toMatch(/var u = card \? \(a\.action === "delete" \? deleteUndoFor\(card, a, Date\.now\(\)\) : undoFor\(card, a, Date\.now\(\)\)\) : null;\s*if \(u\) showUndo\(u\); else toast\(done\);/);
+    expect(APP_JS).toMatch(/function undoLast\(\) \{[\s\S]*if \(!undoLive\(u, Date\.now\(\)\)\) return;[\s\S]*act\(undoAction\(u, newId\(\), new Date\(\)\.toISOString\(\)\)/);
+  });
+
+  it("delete_is_on_the_task_sheet_with_teach_choices_undo_and_a_short_vibration", () => {
+    expect(APP_JS).toMatch(/del\.addEventListener\("click", function \(\) \{ deleteCard\(c\); \}\);/);
+    expect(APP_JS).toContain('["not_action", "Not an action (teach)"], ["wrong_details", "Wrong details (teach)"], ["duplicate", "Duplicate (teach)"]');
+    expect(APP_JS).toContain('"Just delete"');
+    expect(APP_JS).toMatch(/if \(a\.action === "delete" \|\| a\.action === "done"\) buzz\(\);/);
+    expect(APP_JS).toContain("navigator.vibrate(30)");
+    expect(APP_JS).toMatch(/undoDeleteStep\(u, queue\.actions, syncing, newId\(\), new Date\(\)\.toISOString\(\)\)/);
+    expect(PAGE_HTML).toContain('<symbol id="i-trash"');
     expect(PAGE_HTML).toContain('<button id="undo-btn" class="undo-btn" type="button">Undo</button>');
   });
 
