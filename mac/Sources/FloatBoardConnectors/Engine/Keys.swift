@@ -10,9 +10,11 @@ public enum Keys {
     public static let claude = "claude-key"
     public static let gmailClientID = "gmail-client-id"
     public static let gmailClientSecret = "gmail-client-secret"
+    /// Circle's What's new: UK Companies House officers and appointments (a free key).
+    public static let companiesHouse = "companies-house-key"
 
     /// What can wait to be sent: the Claude key, and the Google client the engine uses for Gmail.
-    public enum Item: String, CaseIterable, Sendable { case claude, googleClient = "google_client" }
+    public enum Item: String, CaseIterable, Sendable { case claude, googleClient = "google_client", companiesHouse = "companies_house" }
 
     static func pendingKey(_ connector: String) -> String { "keys.pending.\(connector)" }
 
@@ -47,6 +49,16 @@ public enum Keys {
         store.activity("keys", .info, k.isEmpty ? "Claude key removed from this Mac" : "Claude key saved on this Mac")
     }
 
+    /// Saves (or, with "", removes) the Companies House key on this Mac and queues it for every engine.
+    @MainActor public static func setCompaniesHouse(_ key: String, store: Store) throws {
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        try Credentials.logging(k.isEmpty ? "remove the Companies House key" : "save the Companies House key", store: store) {
+            if k.isEmpty { try Credentials.delete(companiesHouse) } else { try Credentials.set(k, companiesHouse) }
+        }
+        try queue(.companiesHouse, store: store)
+        store.activity("keys", .info, k.isEmpty ? "Companies House key removed from this Mac" : "Companies House key saved on this Mac")
+    }
+
     /// Saves (or, with an empty id, removes) the Google client the engine uses to read Gmail, and queues it.
     @MainActor public static func setGmailClient(id: String, secret: String, store: Store) throws {
         let i = id.trimmingCharacters(in: .whitespacesAndNewlines), s = secret.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -70,19 +82,20 @@ public enum Keys {
     public static func push(connector id: String, store: Store, client: ConnectorClient) async -> Bool {
         let items = pending(connector: id, store: store)
         guard !items.isEmpty else { return true }
-        var claudeKey: String?, google: (id: String, secret: String)?
+        var claudeKey: String?, google: (id: String, secret: String)?, chKey: String?
         if items.contains(.claude) { claudeKey = value(claude, store: store) ?? "" }
+        if items.contains(.companiesHouse) { chKey = value(companiesHouse, store: store) ?? "" }
         if items.contains(.googleClient) {
             let gid = value(gmailClientID, store: store) ?? ""
             let secret = value(gmailClientSecret, store: store) ?? ""
             google = gid.isEmpty || secret.isEmpty ? ("", "") : (gid, secret)
         }
         do {
-            try await client.setKeys(claudeKey: claudeKey, googleClient: google)
+            try await client.setKeys(claudeKey: claudeKey, googleClient: google, companiesHouseKey: chKey)
             // Only clear what was sent: a key changed meanwhile stays queued.
             try setPending(pending(connector: id, store: store).subtracting(items), connector: id, store: store)
             store.activity("connector:\(id)", .info, "Keys sent to the engine",
-                           detail: items.map { $0 == .claude ? "Claude key" : "Google client" }.sorted().joined(separator: ", "))
+                           detail: items.map { $0 == .claude ? "Claude key" : $0 == .companiesHouse ? "Companies House key" : "Google client" }.sorted().joined(separator: ", "))
             return pending(connector: id, store: store).isEmpty
         } catch {
             store.activity("connector:\(id)", .warning, "Could not send keys to the engine; will try again at the next sync",

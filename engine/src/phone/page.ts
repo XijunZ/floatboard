@@ -85,6 +85,15 @@ border:0;border-radius:12px;background:transparent;color:var(--muted);font:inher
 .area .placeholder{background:var(--surface);border-radius:16px;padding:18px 16px;color:var(--muted);font-size:15px;text-align:center}
 .area .row-btn{justify-content:flex-start;background:var(--surface);color:var(--text);font-weight:500}
 .area .row-btn .sub{margin-left:auto;color:var(--muted);font-size:13px;font-weight:400}
+/* Circle (people) */
+.search{width:100%;min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:16px}
+.card.person{flex-direction:column;gap:0;margin-bottom:8px}
+.card.person.pp{flex-direction:row;align-items:center;justify-content:space-between;gap:10px}
+.card.person .t{min-width:0}
+.btn.small{width:auto;flex:none;min-height:40px;padding:0 12px;font-size:14px}
+.sheet h4{margin:10px 4px 2px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.sheet textarea.draft{width:100%;box-sizing:border-box;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:16px;padding:10px}
+.sheet .sub a{color:var(--accent)}
 .card .tag{padding:0 7px;border-radius:9px;background:var(--surface2);font-size:13px}
 .sheet .chips{display:flex;flex-wrap:wrap;gap:8px}
 .sheet .chip{min-height:40px;padding:6px 14px;border-radius:20px;background:var(--surface);font-size:15px;border:1px solid var(--line)}
@@ -213,7 +222,7 @@ const BODY = `${ICONS}
 <div id="pending-note" class="banner" hidden></div>
 <div id="list" class="list" role="tabpanel"></div>
 <p id="empty" class="empty" hidden></p>
-<section id="plan" class="plan" role="tabpanel" hidden><div id="today" class="today"></div><p id="plan-empty" class="empty" hidden>Nothing planned for today, the rest of this week or next week.</p></section>
+<section id="plan" class="plan" role="tabpanel" hidden><div id="today" class="today"></div><div id="plan-circle" class="today" hidden></div><p id="plan-empty" class="empty" hidden>Nothing planned for today, the rest of this week or next week.</p></section>
 <section id="jots" class="area" role="tabpanel" hidden>
 <div class="jot-compose"><label for="jot-text" class="sr">New jot</label>
 <textarea id="jot-text" rows="3" maxlength="20000" placeholder="Write a jot. Tap the keyboard's microphone to speak."></textarea>
@@ -222,7 +231,7 @@ const BODY = `${ICONS}
 <div id="jot-list"></div>
 <p id="jot-empty" class="empty" hidden></p>
 </section>
-<section id="circle" class="area" role="tabpanel" hidden><div class="placeholder">Circle arrives here with the Circle area: who is due, and each person's card.</div></section>
+<section id="circle" class="area" role="tabpanel" hidden><input id="circle-search" class="search" type="search" placeholder="Search people" aria-label="Search people"><div id="circle-list" class="today"></div><p id="circle-empty" class="empty" hidden></p></section>
 <section id="more" class="area" role="tabpanel" hidden>
 <button id="more-decisions" class="btn row-btn" type="button">Decisions<span class="sub">Coming with the Decisions area</span></button>
 <button id="more-resolutions" class="btn row-btn" type="button">Resolutions<span class="sub">Coming with the Resolutions area</span></button>

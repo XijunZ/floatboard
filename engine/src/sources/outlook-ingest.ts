@@ -16,6 +16,7 @@ import { Budget, CALLS_PER_INVOCATION } from "../lib/budget";
 import { recordCrash, runUser } from "../triage/run";
 import { alertFor } from "../reminders/alerts";
 import { zonedParts } from "../lib/time";
+import { recordOutlookExchanges } from "../circle/gmail";
 
 export const OUTLOOK_KIND = "outlook_web";
 export const WRONG_MAILBOX = "This isn't the connected Outlook mailbox";
@@ -118,6 +119,7 @@ export async function ingestOutlook(req: Request, env: Env, afterStore?: (userId
       (user_id,source_id,row_key,from_name,from_addr,subject,preview,received,created) VALUES(?,?,?,?,?,?,?,?,?)`)
     .bind(src.user_id, src.id, r.key, r.fromName, r.fromAddr, r.subject, r.preview, r.received, now))) : [];
   const stored = results.filter((r) => r.meta.changes > 0).length;
+  await recordOutlookExchanges(env, src.user_id, good); // Circle: "heard from" (sender and time only; nothing while Circle is off)
   // Rows read, or a mailbox read from the page, mean the page and the mailbox are fine again: an earlier problem
   // clears. A connection test (no rows, no mailbox) proves only the token, so it changes nothing but last_run.
   const stmts = [items.length || mailbox

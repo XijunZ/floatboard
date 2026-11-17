@@ -176,7 +176,7 @@ describe("setup page", () => {
     const r = await setKeys(u.key, { claude_key: "sk-ant-very-secret", google_client: { client_id: "cid.apps", client_secret: "gcs-secret-777" } });
     expect(r.status).toBe(200);
     const body = await r.text();
-    expect(JSON.parse(body).keys).toEqual({ claude: true, google_client_id: "cid.apps", fathom: false });
+    expect(JSON.parse(body).keys).toEqual({ claude: true, google_client_id: "cid.apps", fathom: false, companies_house: false });
     expect(body).not.toContain("sk-ant-very-secret");
     expect(body).not.toContain("gcs-secret-777");
     const page = await (await get("/setup", s.cookie)).text();
@@ -188,14 +188,14 @@ describe("setup page", () => {
     expect(row.anthropic_key_enc).not.toContain("sk-ant-very-secret");
     expect(await decrypt(env as any, row.anthropic_key_enc)).toBe("sk-ant-very-secret");
     const status = await (await call("/v2/status", { key: u.key })).json<any>();
-    expect(status.keys).toEqual({ claude: true, google_client_id: "cid.apps", fathom: false });
+    expect(status.keys).toEqual({ claude: true, google_client_id: "cid.apps", fathom: false, companies_house: false });
     expect(JSON.stringify(status)).not.toContain("sk-ant");
     // The log says what changed, never the key.
     const ev = JSON.stringify((await env.DB.prepare("SELECT detail FROM run_events WHERE user_id=? AND decision='keys'").bind(u.id).all()).results);
     expect(ev).toContain("Claude key saved");
     expect(ev).not.toContain("sk-ant-very-secret");
     // Removing: "" for the Claude key, null for the Google client.
-    expect((await (await setKeys(u.key, { claude_key: "", google_client: null })).json<any>()).keys).toEqual({ claude: false, google_client_id: null, fathom: false });
+    expect((await (await setKeys(u.key, { claude_key: "", google_client: null })).json<any>()).keys).toEqual({ claude: false, google_client_id: null, fathom: false, companies_house: false });
   });
 
   it("rulebook_is_readable_by_the_app", async () => {
