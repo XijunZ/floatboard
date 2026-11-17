@@ -200,8 +200,9 @@ extension Store {
     }
 
     /// Ids typed into a saved text (`text`, which was `previous`): each id that is new in the text, exists and is not the
-    /// item itself is linked (related, manual). An id already in `previous` is left alone, so one the owner unlinked with ✕
-    /// stays unlinked until it is typed again.
+    /// item itself is linked (related, manual, or the kind the id's area registered in `MentionKinds`). An id already in
+    /// `previous` is left alone, so one the owner unlinked with ✕ stays unlinked until it is typed again. A pair that is
+    /// already linked keeps its link as it is (a typed id never downgrades or replaces a link of another kind).
     public func linkMentions(in text: String, previous: String, from item: ShortID, now: Date = Date()) {
         perform { try linkMentionsRow(in: text, previous: previous, from: item, now: now) }
     }
@@ -209,6 +210,10 @@ extension Store {
     func linkMentionsRow(in text: String, previous: String, from item: ShortID, now: Date) throws {
         let before = Set(ShortID.mentions(in: previous))
         for id in ShortID.mentions(in: text) where id != item && !before.contains(id) && itemExists(id) {
+            // A typed id only adds a link: one the two items already have (any kind, visible or hidden) is never replaced.
+            let (from, to) = ShortID.ordered(item, id)
+            guard try db.query("SELECT 1 FROM links WHERE from_type=? AND from_id=? AND to_type=? AND to_id=?",
+                               Self.pairArgs(from, to), { _ in 1 }).isEmpty else { continue }
             try linkRow(item, id, kind: MentionKinds.kind(store: self, from: item, to: id), madeBy: .manual, actor: .user, now: now)
         }
     }

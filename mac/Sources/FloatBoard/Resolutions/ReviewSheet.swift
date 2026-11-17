@@ -34,10 +34,10 @@ struct ReviewSheet: View {
                     }
                     ForEach(problems, id: \.self) { Text($0).foregroundStyle(.red).font(.system(size: 11)) }
                     if saved || active.isEmpty {
-                        Text("Next: \(period.next.title)").font(.system(size: 13, weight: .semibold))
+                        Text("Next: \(r.rolloverPeriod(of: period, now: now).title)").font(.system(size: 13, weight: .semibold))
                         Text("Kept and changed goals carry on here with their open tasks. Add new ones if there is room.")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
-                        GoalSection(period: period.next, expanded: $expanded, onDelete: { r.delete($0.id) }) { EmptyView() }
+                        GoalSection(period: r.rolloverPeriod(of: period, now: now), expanded: $expanded, onDelete: { r.delete($0.id) }) { EmptyView() }
                     }
                 }
                 .padding(.vertical, 2)
@@ -67,7 +67,7 @@ struct ReviewSheet: View {
             }
             .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 300)
             if c.wrappedValue.outcome == .changed {
-                TextField("The goal's new wording for \(period.next.title)", text: c.newTitle).textFieldStyle(.roundedBorder)
+                TextField("The goal's new wording for \(r.rolloverPeriod(of: period, now: now).title)", text: c.newTitle).textFieldStyle(.roundedBorder)
             }
             TextField("A short note: what happened, what you learned (saved as a jot)", text: c.note, axis: .vertical)
                 .lineLimit(2...4).textFieldStyle(.roundedBorder)
