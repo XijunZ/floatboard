@@ -101,11 +101,15 @@ struct BannerView: View {
 /// Clicking the label opens the Calendar tab on that day; Join (only when the event has a video link) opens the link.
 struct BarMeetingView: View {
     @EnvironmentObject var ui: UIState
+    @EnvironmentObject var store: Store
     let event: CalEvent
 
     var body: some View {
+        // The account's colour: which email the meeting comes from.
+        let colour = store.accountColors(for: CalendarCache(store: store).connectedAccountList())[event.account]
         HStack(spacing: 6) {
             HStack(spacing: 4) {
+                if let colour { Circle().fill(Color(hex: colour)).frame(width: 7, height: 7) }
                 Image(systemName: "clock").font(.system(size: 10, weight: .semibold))
                 Text(BarMeeting.label(event)).lineLimit(1).truncationMode(.tail)
             }

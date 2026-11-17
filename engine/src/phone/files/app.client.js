@@ -411,6 +411,12 @@
   function meetingRow(m, byId) {
     var row = el("div", "ev");
     row.appendChild(el("span", "when", m.when));
+    // The account's colour (which email it comes from), as on the Mac.
+    if (typeof m.color === "string" && /^#[0-9a-fA-F]{6}$/.test(m.color)) {
+      var dot = el("span", "dot", "");
+      dot.style.background = m.color;
+      row.appendChild(dot);
+    }
     var body = el("span", "body");
     body.appendChild(el("span", "t", m.label ? m.title + " · " + m.label : m.title));
     m.tasks.forEach(function (id) { if (byId[id]) body.appendChild(el("div", "task", byId[id].title)); });

@@ -363,9 +363,10 @@ public enum PhoneBoard {
         guard let monday = calendar.date(byAdding: .day, value: -sinceMonday, to: from),
               let to = calendar.date(byAdding: .day, value: 14, to: monday) else { return [] }
         let cache = CalendarCache(store: store)
-        let colors = Dictionary(cache.calendars().map { ("\($0.account)\u{0}\($0.calendarID)", $0.color) }, uniquingKeysWith: { a, _ in a })
+        // Each meeting carries its account's colour (which email it comes from), as on the Mac.
+        let colors = store.accountColors(for: cache.connectedAccountList())
         return cache.meetings(from: from, to: to).prefix(maxEvents).map { e in
-            let hex = colors["\(e.account)\u{0}\(e.calendarID)"].flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
+            let hex = colors[e.account].flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
             let video = joinLink(e.videoLink)
             let tasks = store.links(of: ShortID(kind: .event, number: e.shortID)).filter { $0.kind == .task }.map(\.number)
             var series: String?, label: String?

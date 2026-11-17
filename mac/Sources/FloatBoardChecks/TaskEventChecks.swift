@@ -369,7 +369,7 @@ import FloatBoardConnectors
         await signedOut.syncOnce()
         check(cache.calendars().first?.needsReconnect == true, "sync_not_connected_flags_reconnect")
 
-        // Listing calendars: owned and primary ones are shown, others start hidden.
+        // Listing calendars: the main one starts shown; one not ticked in Google (no "selected") starts hidden (review fix 1).
         let fake2 = Fake()
         fake2.handler = { _ in (##"{"items":[{"id":"me@example.com","summary":"Me","accessRole":"owner","primary":true,"backgroundColor":"#111111"},{"id":"team","summary":"Team","accessRole":"reader","backgroundColor":"#222222"}]}"##, 200) }
         let lister = CalendarSync(store: store, apiFor: { _ in api(fake2) }, accounts: { [acct] }, now: { t })

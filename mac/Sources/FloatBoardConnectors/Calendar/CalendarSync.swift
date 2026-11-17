@@ -48,8 +48,10 @@ public final class CalendarSync {
         await syncOnce()
     }
 
-    /// Reads each connected account's calendar list. New owned calendars and each account's main one start shown; others hidden
-    /// (the user chooses in Settings). A known calendar keeps its choice.
+    /// Reads each connected account's calendar list. A new calendar starts shown (merged into the same day and week in its
+    /// account's colour) when it is the main one, or ticked in Google Calendar and not hidden there and not one Google
+    /// generates (holidays, birthdays, week numbers); others start off (`CalendarSettings.startsShown`). The user switches
+    /// any on or off in Settings. A known calendar keeps its choice.
     public func refreshCalendars() async {
         lastListed = now()
         await refreshCalendars(only: accounts())
@@ -61,7 +63,8 @@ public final class CalendarSync {
             do {
                 let found = try await apiFor(account).listCalendars()
                 cache.upsertCalendars(account: account, found.map {
-                    CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned, shown: $0.owned || $0.primary,
+                    CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned,
+                                shown: CalendarSettings.startsShown(primary: $0.primary, selected: $0.selected, hidden: $0.hidden, calendarID: $0.id),
                                 primary: $0.primary)
                 })
                 lastProblem[key] = nil

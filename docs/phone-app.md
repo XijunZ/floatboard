@@ -182,7 +182,7 @@ Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (
   the step is unchanged, else the push time. Each push is compared with the last one: step changes, new cards and gone
   cards are logged (device "mac"); the first push is the baseline. Waiting phone moves older than a card's new
   `status_at` are marked taken (the Mac already shows that step) or superseded.
-  `events` (optional, at most 200, today through the end of next week) are `{ id: "E-37", title, start, end, all_day, video (https or null), color, tasks: [card ids], series?, repeat? }`;
+  `events` (optional, at most 200, today through the end of next week) are `{ id: "E-37", title, start, end, all_day, video (https or null), color (the Google account's colour, shown as a dot on the Plan's meeting line), tasks: [card ids], series?, repeat? }`;
   `time_zone` is the Mac's zone, so the phone's planning summary shows the Mac's times. Both are stored in the encrypted copy and returned by `GET /app/api/board`.
 - `POST /app/api/action` `{ sent_at?, actions: [{ id, made_at?, card_id?, action, title?, group? }] }` (1 to 100; body
   at most 64 KB; the older single action still works). Times are corrected by `received_at - sent_at` (ignored past

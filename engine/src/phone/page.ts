@@ -118,6 +118,7 @@ min-height:56px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .today h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:10px 4px 6px}
 .ev{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.06);margin-bottom:8px}
 .ev .when{flex:none;min-width:58px;font-size:14px;color:var(--muted);margin-top:2px}
+.ev .dot{flex:none;width:9px;height:9px;border-radius:50%;margin-top:7px}
 .ev .body{flex:1;min-width:0}
 .ev .t{font-size:17px;overflow-wrap:anywhere}
 .ev .task{font-size:14px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
