@@ -27,7 +27,7 @@ background:var(--accent);color:var(--accent-text);font-weight:600;font-size:17px
 .btn:disabled{opacity:.55}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:12px;color:var(--text)}
 .icon-btn:active,.card:active,.tab:active{opacity:.6}
-.screen{max-width:640px;margin:0 auto;padding:0 16px 120px}
+.screen{max-width:640px;margin:0 auto;padding:0 16px 170px}
 .center{min-height:80vh;display:flex;flex-direction:column;justify-content:center;gap:16px;text-align:center;
 padding-top:calc(24px + env(safe-area-inset-top))}
 .logo{width:72px;height:72px;margin:0 auto;border-radius:18px;box-shadow:var(--shadow)}
@@ -52,9 +52,20 @@ header.top h1{font-size:24px}
 .updated.off{color:var(--text)}
 .note{font-size:13px;color:var(--muted);margin:0 0 8px 4px}
 nav.tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:6px 0 10px}
-nav.views{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:4px 0 2px}
-.view{min-height:36px;border:0;border-radius:12px;background:transparent;color:var(--muted);font:inherit;font-weight:600}
-.view[aria-selected=true]{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+nav.views{position:fixed;left:0;right:0;bottom:0;z-index:8;display:flex;justify-content:center;background:var(--surface);
+border-top:1px solid var(--line);padding:4px max(6px,env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left))}
+.view{flex:1 1 0;min-width:0;max-width:128px;min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+border:0;border-radius:12px;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600}
+.view svg.i{width:22px;height:22px}
+.view[aria-selected=true]{color:var(--accent)}
+.area{display:flex;flex-direction:column;gap:10px;padding-top:6px}
+.area .placeholder{background:var(--surface);border-radius:16px;padding:18px 16px;color:var(--muted);font-size:15px;text-align:center}
+.area .row-btn{justify-content:flex-start;background:var(--surface);color:var(--text);font-weight:500}
+.area .row-btn .sub{margin-left:auto;color:var(--muted);font-size:13px;font-weight:400}
+.card .tag{padding:0 7px;border-radius:9px;background:var(--surface2);font-size:13px}
+.sheet .chips{display:flex;flex-wrap:wrap;gap:8px}
+.sheet .chip{min-height:40px;padding:6px 14px;border-radius:20px;background:var(--surface);font-size:15px;border:1px solid var(--line)}
+.sheet .chip[aria-pressed=true]{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
 .tab{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:58px;padding:6px 2px;border-radius:14px;
 color:var(--muted);font-size:13px;font-weight:600}
 .tab .row{display:flex;align-items:center;gap:5px}
@@ -84,7 +95,7 @@ min-height:56px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .marks.m2{color:var(--danger)}
 .empty{text-align:center;color:var(--muted);padding:48px 16px}
 .banner{background:var(--surface);border-radius:14px;padding:12px 14px;margin-bottom:10px;font-size:14px;color:var(--muted)}
-.fab{position:fixed;right:calc(20px + env(safe-area-inset-right));bottom:calc(24px + env(safe-area-inset-bottom));z-index:6;width:60px;
+.fab{position:fixed;right:calc(20px + env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));z-index:6;width:60px;
 height:60px;border-radius:30px;background:var(--accent);color:var(--accent-text);display:flex;align-items:center;justify-content:center;
 box-shadow:var(--shadow)}
 .fab svg.i{width:28px;height:28px;stroke-width:2.4}
@@ -105,7 +116,7 @@ display:flex;flex-direction:column;gap:10px;max-height:85vh;overflow:auto;animat
 .sheet form.find{display:flex;gap:8px}
 .sheet form.find .btn{width:auto;flex:none}
 @keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
-.toast{position:fixed;left:16px;right:16px;bottom:calc(96px + env(safe-area-inset-bottom));z-index:30;margin:0 auto;max-width:520px;
+.toast{position:fixed;left:16px;right:16px;bottom:calc(156px + env(safe-area-inset-bottom));z-index:30;margin:0 auto;max-width:520px;
 background:var(--text);color:var(--bg);padding:12px 16px;border-radius:14px;text-align:center;box-shadow:var(--shadow)}
 .toast.undo{display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 8px 6px 16px}
 .toast.undo .sep{opacity:.6}
@@ -129,10 +140,18 @@ const ICONS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" styl
 <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="12.5" height="12" rx="2"/><path d="M15.5 10.5L21 7.5v9l-5.5-3z"/></symbol>
 <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></symbol>
 <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+<symbol id="i-board" viewBox="0 0 24 24"><rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="11" rx="1.5"/><rect x="15.5" y="4" width="5" height="7" rx="1.5"/></symbol>
+<symbol id="i-jot" viewBox="0 0 24 24"><path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M9 11h6M9 15h6"/></symbol>
+<symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5 5.5-5s4.9 1.7 5.5 5"/><circle cx="17" cy="9.5" r="2.5"/><path d="M15.5 14.3c2.6-.5 4.6 1 5 4.2"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor"/></symbol>
+<symbol id="i-tag" viewBox="0 0 24 24"><path d="M3.5 12.5V4.5h8l9 9-8 8z"/><circle cx="8" cy="9" r="1.4"/></symbol>
 <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
 </svg>`;
 
 const icon = (name: string) => `<svg class="i" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+const view = (name: string, label: string, ic: string, selected = false) =>
+  `<button class="view" type="button" role="tab" data-view="${name}" aria-selected="${selected}">${icon(ic)}<span>${label}</span></button>`;
 
 const tab = (status: string, label: string) =>
   `<button class="tab" role="tab" data-tab="${status}" aria-selected="false"><span class="row">${icon(status)}<span class="count" data-count="${status}">0</span></span><span>${label}</span></button>`;
@@ -164,8 +183,7 @@ const BODY = `${ICONS}
 <div class="bar">
 <header class="top"><div class="title"><h1>FloatBoard</h1><div id="sync-status" class="updated" role="status" aria-live="polite"></div></div>
 <button id="refresh" class="icon-btn" aria-label="Sync now">${icon("refresh")}</button>
-<button id="open-settings" class="icon-btn" aria-label="Settings">${icon("gear")}</button></header>
-<nav class="views" role="tablist" aria-label="Screens"><button class="view" type="button" role="tab" data-view="board" aria-selected="true">Board</button><button class="view" type="button" role="tab" data-view="plan" aria-selected="false">Plan</button></nav>
+</header>
 <nav class="tabs" role="tablist">${tab("todo", "To do")}${tab("doing", "Doing")}${tab("watch", "Watch")}${tab("done", "Done today")}</nav>
 </div>
 <p id="sync-note" class="note" role="status" hidden></p>
@@ -173,7 +191,15 @@ const BODY = `${ICONS}
 <div id="list" class="list" role="tabpanel"></div>
 <p id="empty" class="empty" hidden></p>
 <section id="plan" class="plan" role="tabpanel" hidden><div id="today" class="today"></div><p id="plan-empty" class="empty" hidden>Nothing planned for today, the rest of this week or next week.</p></section>
+<section id="jots" class="area" role="tabpanel" hidden><div class="placeholder">Jots arrive here with the Jots area: a writing box and your last 30 days of notes.</div></section>
+<section id="circle" class="area" role="tabpanel" hidden><div class="placeholder">Circle arrives here with the Circle area: who is due, and each person's card.</div></section>
+<section id="more" class="area" role="tabpanel" hidden>
+<button id="more-decisions" class="btn row-btn" type="button">Decisions<span class="sub">Coming with the Decisions area</span></button>
+<button id="more-resolutions" class="btn row-btn" type="button">Resolutions<span class="sub">Coming with the Resolutions area</span></button>
+<button id="more-settings" class="btn row-btn" type="button">${icon("gear")}Settings</button>
+</section>
 <button id="add" class="fab" aria-label="Add a task">${icon("plus")}</button>
+<nav class="views" role="tablist" aria-label="Screens">${view("board", "Board", "board", true)}${view("plan", "Plan", "calendar")}${view("jots", "Jots", "jot")}${view("circle", "Circle", "people")}${view("more", "More", "more")}</nav>
 </main>
 
 <main id="settings" class="screen" hidden>
@@ -193,7 +219,7 @@ const BODY = `${ICONS}
 </div>
 <h2>Phone and Mac</h2>
 <div class="group">
-<p class="muted small">Move tasks, add tasks, open links and link an email here. Mac only: editing or deleting tasks, notes, reply drafts, calendar and settings.</p>
+<p class="muted small">Move, add, delete and tag tasks, open links and link an email here. Mac only: editing titles, notes, reply drafts, calendar and settings.</p>
 </div>
 <h2>This phone</h2>
 <div class="group">

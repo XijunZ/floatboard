@@ -12,7 +12,7 @@ import { type Env, nowISO } from "../env";
 import { logEvent } from "../lib/runlog";
 import type { AlertItem } from "../triage/run";
 import { zonedParts, zoneOrDefault } from "../lib/time";
-import { type Card, currentBoard } from "../phone/board";
+import { type Card, REMINDER_GRACE_MS, boardReminders, currentBoard } from "../phone/board";
 import { chaseFor } from "./watch";
 
 export const DUE_WINDOW_MS = 15 * 60_000;
@@ -81,6 +81,24 @@ export async function runDueAlerts(env: Env, nowMs = Date.now(),
           await env.DB.prepare("DELETE FROM due_alerts_sent WHERE user_id=? AND card_id=? AND due=?").bind(u.user_id, c.id, c.due).run();
           await logEvent(env, { run_id: "due", user_id: u.user_id, decision: "due reminder not sent; will try again",
             detail: String((e as Error)?.message ?? e).slice(0, 300), trace: `card ${c.id}` }).run();
+        }
+      }
+      // Budget reminders (Circle, Decisions): the Mac shows each in its first 10 minutes; one still in its latest copy after
+      // that is the phone's, sent once (claimed like a due reminder, card 0, keyed by the reminder id), within a day.
+      for (const r of await boardReminders(env, u.user_id)) {
+        const fire = Date.parse(r.fire_at);
+        if (Number.isNaN(fire) || nowMs < fire + REMINDER_GRACE_MS || nowMs > fire + 86400_000) continue;
+        const key = `budget:${r.id}`;
+        const claim = await env.DB.prepare("INSERT OR IGNORE INTO due_alerts_sent(user_id,card_id,due,sent_at) VALUES(?,0,?,?)")
+          .bind(u.user_id, key, new Date(nowMs).toISOString()).run();
+        if (!claim.meta.changes) continue;
+        try {
+          await send({ id: r.id, title: r.title, why: r.text, sender: "", due: null, link: "", reminder: true });
+          sent++;
+        } catch (e) {
+          await env.DB.prepare("DELETE FROM due_alerts_sent WHERE user_id=? AND card_id=0 AND due=?").bind(u.user_id, key).run();
+          await logEvent(env, { run_id: "due", user_id: u.user_id, decision: "reminder not sent; will try again",
+            detail: String((e as Error)?.message ?? e).slice(0, 300), trace: r.id }).run();
         }
       }
     } catch (e) {

@@ -56,6 +56,13 @@ const EMAIL_KINDS = ["sorting", "user"] as const;
 const MAX_MESSAGE_ID = 998;
 const MAX_ACCOUNT = 320;
 const DEFAULT_COLOR = "#8e8e93";
+/** Tags on a task (primary first: its group), the assistant's areas, and budget reminders (foundation design §4). */
+const MAX_TAGS = 20;
+const MAX_TAG = 60;
+const MODULES = ["jots", "circle", "decisions", "resolutions"] as const;
+const MAX_REMINDERS = 20;
+/** The Mac shows a budget reminder in the first 10 minutes; after that it is the phone's (sent once, if still in the copy). */
+export const REMINDER_GRACE_MS = 10 * 60_000;
 
 export type Status = (typeof STATUSES)[number];
 /** One link on a task: what it opens and where. `label` "calendar" marks the task's calendar event. */
@@ -69,7 +76,12 @@ export type Card = {
   teach_on_delete?: true;
   /** Watch only: whom it waits on, how to recognise their reply ("email:<address>", "wa:<chat id>" or ""), and since when. */
   watch?: CardWatch;
+  /** Every tag, primary (the group) first, and when they last changed on the Mac (newest change wins against set_tags). */
+  tags?: string[]; tags_at?: string | null;
 };
+export type Modules = Record<(typeof MODULES)[number], boolean>;
+/** A budget reminder waiting to be shown (the Mac sends the ones it has not shown). */
+export type BoardReminder = { id: string; title: string; text: string; fire_at: string };
 /**
  * A calendar event for the phone's planning summary: ISO UTC times, `tasks` = ids of the cards linked to it. A repeating
  * meeting's instances share `series` (an opaque "S-" key) and carry `repeat` (its rule in a few words, "weekdays 09:00"),
@@ -81,12 +93,14 @@ export type CardWatch = { person: string; contact: string; since: string };
 /** The email a `link_email` action attaches (sent_at as the search gave it). */
 export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
 export type PhoneAction = {
-  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number] | "watch_reply" | "delete" | "restore";
+  id: string; client_id: string | null; card_id: number | null; action: Status | "add" | (typeof LINKS)[number] | "watch_reply" | "delete" | "restore" | "set_tags";
   title: string | null; group: string | null; created: string; made_at: string; email?: LinkedEmail;
   /** delete only: the "teach" reason chosen on the phone (not_action | wrong_details | duplicate). */
   teach?: string;
   /** watch_reply only: the watched person wrote again ("Anna replied by email"); the Mac moves the task back to To do. */
   reason?: string;
+  /** set_tags only: the task's tags, primary (its group) first. */
+  tags?: string[];
 };
 type ActionRow = {
   id: string; rid: number; client_id: string | null; card_id: number | null; action: string; title: string | null; group_name: string | null;
@@ -95,6 +109,46 @@ type ActionRow = {
 const isMove = (action: string): action is Status => (STATUSES as readonly string[]).includes(action);
 /** Actions decided by "newest change wins" against the card's last step change on the Mac: moves and delete. */
 const newestWins = (action: string) => isMove(action) || action === "delete";
+
+/** A task's tags: 1 to 20 names, each 1 to 60 characters, no repeats (case ignored). Throws on anything else. */
+function parseTags(v: unknown, at: string): string[] {
+  if (!Array.isArray(v) || v.length < 1 || v.length > MAX_TAGS) throw new Error(`${at} must be a list of 1 to ${MAX_TAGS} tags`);
+  const seen = new Set<string>();
+  return v.map((t: unknown, i: number) => {
+    if (typeof t !== "string" || !t.trim() || t.length > MAX_TAG) throw new Error(`${at}[${i}] must be text of 1 to ${MAX_TAG} characters`);
+    if (seen.has(t.trim().toLowerCase())) throw new Error(`${at}[${i}] repeats`);
+    seen.add(t.trim().toLowerCase());
+    return t.trim();
+  });
+}
+
+/** The optional `modules` of a push: each area on or off. Absent: undefined (an older Mac). */
+export function parseModules(v: unknown): Modules | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) throw new Error("modules must be an object");
+  const out = {} as Modules;
+  for (const m of MODULES) {
+    const x = (v as any)[m];
+    if (x !== undefined && typeof x !== "boolean") throw new Error(`modules.${m} must be true or false`);
+    out[m] = x === true;
+  }
+  return out;
+}
+
+/** The optional `reminders` of a push (budget reminders the Mac has not shown). */
+export function parseReminders(v: unknown): BoardReminder[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v) || v.length > MAX_REMINDERS) throw new Error(`reminders must be a list of at most ${MAX_REMINDERS}`);
+  return v.map((r: any, i: number) => {
+    const at = `reminders[${i}]`;
+    if (!r || typeof r !== "object") throw new Error(`${at} must be an object`);
+    if (typeof r.id !== "string" || !/^[A-Za-z0-9_:.-]{1,120}$/.test(r.id)) throw new Error(`${at}.id must be a reminder id`);
+    if (typeof r.title !== "string" || r.title.length > MAX_TITLE) throw new Error(`${at}.title must be text up to ${MAX_TITLE} characters`);
+    if (typeof r.text !== "string" || r.text.length > MAX_TITLE) throw new Error(`${at}.text must be text up to ${MAX_TITLE} characters`);
+    if (!isIso(r.fire_at)) throw new Error(`${at}.fire_at must be an ISO date`);
+    return { id: r.id, title: r.title, text: r.text, fire_at: r.fire_at };
+  });
+}
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const isIso = (v: unknown): v is string => typeof v === "string" && v.length <= 40 && !Number.isNaN(Date.parse(v));
@@ -166,6 +220,8 @@ export function parseCards(body: any): Card[] {
       if (links) out.links = links;
       if (c.watch !== undefined && c.watch !== null) out.watch = cardWatch(c.watch);
       if (c.teach_on_delete === true) out.teach_on_delete = true;   // anything else: a plain delete (never a refused push)
+      if (c.tags !== undefined && c.tags !== null) out.tags = parseTags(c.tags, "tags");
+      if (c.tags_at !== undefined && c.tags_at !== null) out.tags_at = isoOrNull(c.tags_at, "tags_at");
       if (c.email !== undefined && c.email !== null) {
         if (!EMAIL_KINDS.includes(c.email)) throw new Error("email must be sorting or user when given");
         out.email = c.email;
@@ -234,12 +290,13 @@ export function corrected(at: string | null | undefined, skew: number | null, re
   return iso(Math.min(Date.parse(at) + skew, receivedMs));
 }
 
-type Snapshot = { cards: Card[]; events?: BoardEvent[]; time_zone?: string; updated: string };
+type Snapshot = { cards: Card[]; events?: BoardEvent[]; time_zone?: string; modules?: Modules; reminders?: BoardReminder[]; updated: string };
 async function loadSnapshot(env: Env, userId: string): Promise<Snapshot | null> {
   const row = await env.DB.prepare("SELECT data_enc, updated FROM board_snapshots WHERE user_id=?").bind(userId).first<{ data_enc: string; updated: string }>();
   if (!row) return null;
   const d = JSON.parse(await decrypt(env, row.data_enc));
-  return { cards: d.cards as Card[], events: d.events as BoardEvent[] | undefined, time_zone: d.time_zone as string | undefined, updated: row.updated };
+  return { cards: d.cards as Card[], events: d.events as BoardEvent[] | undefined, time_zone: d.time_zone as string | undefined,
+    modules: d.modules as Modules | undefined, reminders: d.reminders as BoardReminder[] | undefined, updated: row.updated };
 }
 
 const ACTION_COLS = "id, rowid AS rid, client_id, card_id, action, title, group_name, created, COALESCE(made_at, created) AS made_at, taken, payload";
@@ -280,6 +337,14 @@ export function overlay(cards: Card[], actions: ActionRow[], snapUpdated: string
       hidden.add(a.card_id);
     } else if (a.action === "restore" && a.card_id !== null) {
       hidden.delete(a.card_id);
+    } else if (a.action === "set_tags" && a.payload) {
+      // Newest wins against the Mac's last tag change; the first tag is the group (colour from a card already in it).
+      const c = out.find((x) => x.id === a.card_id);
+      const tags = JSON.parse(a.payload).tags as string[] | undefined;
+      if (c && tags?.length && a.made_at >= (c.tags_at ?? statusAt(c, snapUpdated))) {
+        c.tags = tags;
+        if (c.group !== tags[0]) { c.group = tags[0]; c.color = cards.find((x) => x.group === tags[0])?.color ?? DEFAULT_COLOR; }
+      }
     }
   }
   return hidden.size ? out.filter((c) => !hidden.has(c.id)) : out;
@@ -296,6 +361,11 @@ async function notApplied(env: Env, userId: string, deviceId: string): Promise<s
       ORDER BY rowid DESC LIMIT ${MAX_SUPERSEDED_LISTED}`).bind(userId, deviceId).all<{ client_id: string }>()).results.map((r) => r.client_id).reverse();
 }
 
+/** The budget reminders in the Mac's latest copy (none without one). */
+export async function boardReminders(env: Env, userId: string): Promise<BoardReminder[]> {
+  return (await loadSnapshot(env, userId))?.reminders ?? [];
+}
+
 /** The board as the phone would see it now (the Mac's copy plus phone moves not yet applied); empty without a copy. */
 export async function currentBoard(env: Env, userId: string): Promise<Card[]> {
   const [snap, actions] = await Promise.all([loadSnapshot(env, userId), overlayActions(env, userId)]);
@@ -308,7 +378,7 @@ async function boardBody(env: Env, userId: string, deviceId: string) {
     notApplied(env, userId, deviceId), accountMarker(userId)]);
   return { updated: snap?.updated ?? null, server_time: nowISO(), account, cards: overlay(snap?.cards ?? [], actions, snap?.updated ?? null),
     ...(snap?.events ? { events: snap.events } : {}), ...(snap?.time_zone ? { time_zone: snap.time_zone } : {}),
-    pending: waiting?.n ?? 0, superseded };
+    ...(snap?.modules ? { modules: snap.modules } : {}), pending: waiting?.n ?? 0, superseded };
 }
 
 const logStmt = (env: Env, r: { id: string; userId: string; device: string; cardId: number | null; kind: string; value: string | null; madeAt: string;
@@ -334,8 +404,11 @@ route("PUT", "/v2/board", async (req, env, user) => {
   if (!rb.ok) return rb.tooLarge ? json({ error: "too large" }, 413) : json({ error: "Invalid JSON" }, 400);
   let cards: Card[];
   try { cards = parseCards(rb.body); } catch (e) { return json({ error: (e as Error).message }, 400); }
-  let events: BoardEvent[] | undefined, timeZone: string | undefined;
-  try { events = parseEvents(rb.body); timeZone = parseZone(rb.body.time_zone); } catch (e) { return json({ error: (e as Error).message }, 400); }
+  let events: BoardEvent[] | undefined, timeZone: string | undefined, modules: Modules | undefined, reminders: BoardReminder[] | undefined;
+  try {
+    events = parseEvents(rb.body); timeZone = parseZone(rb.body.time_zone);
+    modules = parseModules(rb.body.modules); reminders = parseReminders(rb.body.reminders);
+  } catch (e) { return json({ error: (e as Error).message }, 400); }
   const sentAt = rb.body.sent_at ?? null;
   if (sentAt !== null && !isIso(sentAt)) return json({ error: "sent_at must be an ISO date" }, 400);
   const skew = skewOf(sentAt, receivedMs);
@@ -370,7 +443,10 @@ route("PUT", "/v2/board", async (req, env, user) => {
     }
   }
   stmts.unshift(env.DB.prepare("INSERT INTO board_snapshots(user_id,data_enc,updated) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET data_enc=excluded.data_enc, updated=excluded.updated")
-    .bind(user.id, await encrypt(env, JSON.stringify({ cards, ...(events ? { events } : {}), ...(timeZone ? { time_zone: timeZone } : {}) })), now));
+    .bind(user.id, await encrypt(env, JSON.stringify({ cards, ...(events ? { events } : {}), ...(timeZone ? { time_zone: timeZone } : {}),
+      ...(modules ? { modules } : {}), ...(reminders ? { reminders } : {}) })), now));
+  // Each area's background jobs read which areas are on from settings.
+  if (modules) stmts.push(env.DB.prepare("UPDATE settings SET modules=? WHERE user_id=?").bind(JSON.stringify(modules), user.id));
   await env.DB.batch(stmts);
   return json({ ok: true, count: cards.length });
 });
@@ -380,7 +456,8 @@ route("GET", "/v2/phone-actions", async (_req, env, user) => {
     action: a.action as PhoneAction["action"], title: a.title, group: a.group_name, created: a.created, made_at: a.made_at,
     ...(a.action === "link_email" && a.payload ? { email: JSON.parse(a.payload) as LinkedEmail } : {}),
     ...(a.action === "watch_reply" && a.payload ? { reason: String(JSON.parse(a.payload).reason ?? "") } : {}),
-    ...(a.action === "delete" && a.payload ? { teach: String(JSON.parse(a.payload).teach ?? "") } : {}) }));
+    ...(a.action === "delete" && a.payload ? { teach: String(JSON.parse(a.payload).teach ?? "") } : {}),
+    ...(a.action === "set_tags" && a.payload ? { tags: JSON.parse(a.payload).tags as string[] } : {}) }));
   return json({ server_time: nowISO(), actions });
 });
 
@@ -450,7 +527,8 @@ export async function handleBoard(req: Request, env: Env): Promise<Response | nu
   return null;
 }
 
-type Parsed = { card_id: number | null; action: PhoneAction["action"]; title: string | null; group: string | null; email?: LinkedEmail; teach?: string };
+type Parsed = { card_id: number | null; action: PhoneAction["action"]; title: string | null; group: string | null; email?: LinkedEmail; teach?: string;
+  tags?: string[] };
 type Outcome = { accepted: string[]; dropped: { id: string | null; reason: string }[] } | { error: string; status: number };
 
 /** Validate one action's content (not its id or times); a message on anything off. */
@@ -485,7 +563,11 @@ function parseAction(body: any): Parsed | string {
     if (!(TEACH as readonly unknown[]).includes(body.teach)) return `teach must be one of ${TEACH.join(", ")}`;
     return { card_id: body.card_id, action, title: null, group: null, teach: body.teach };
   }
-  return "action must be todo, doing, watch, done, add, link_email, unlink_email, delete or restore";
+  if (action === "set_tags") {
+    if (!Number.isSafeInteger(body.card_id)) return "card_id must be an integer";
+    try { return { card_id: body.card_id, action, title: null, group: null, tags: parseTags(body.tags, "tags") }; } catch (e) { return (e as Error).message; }
+  }
+  return "action must be todo, doing, watch, done, add, link_email, unlink_email, delete, restore or set_tags";
 }
 
 type NewAction = Parsed & { clientId: string; madeAt: string; superseded: boolean };
@@ -501,9 +583,10 @@ async function store(env: Env, userId: string, deviceId: string, list: NewAction
     const id = crypto.randomUUID();
     stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO phone_actions(id,user_id,card_id,action,title,group_name,created,taken,client_id,device_id,made_at,sent_at,payload)
         VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?)`).bind(id, userId, a.card_id, a.action, a.title, a.group, now, a.clientId, deviceId, a.madeAt, sentAt,
-      a.email ? JSON.stringify(a.email) : a.teach ? JSON.stringify({ teach: a.teach }) : null));
+      a.email ? JSON.stringify(a.email) : a.teach ? JSON.stringify({ teach: a.teach }) : a.tags ? JSON.stringify({ tags: a.tags }) : null));
     // The log says a link was made or removed, never which email.
-    stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : isMove(a.action) ? "status" : a.action === "delete" || a.action === "restore" ? a.action : "link",
+    stmts.push(logStmt(env, { id, userId, device: deviceId, cardId: a.card_id, kind: a.action === "add" ? "add" : isMove(a.action) ? "status"
+      : a.action === "delete" || a.action === "restore" ? a.action : a.action === "set_tags" ? "tags" : "link",
       value: a.action === "add" ? await encrypt(env, a.title!) : a.action === "delete" ? (a.teach ?? null) : a.action, madeAt: a.madeAt, receivedAt: now, clientId: a.clientId }));
     if (a.superseded) stmts.push(...supersedeStmts(env, userId, { id, client_id: a.clientId, card_id: a.card_id }, deviceId, now));
   }
@@ -538,6 +621,13 @@ async function known(env: Env, userId: string, clientIds: string[]): Promise<Set
   return seen;
 }
 
+/** An action older than the Mac's own change to the same thing loses: a move or delete against the card's step change,
+ *  set_tags against its last tag change. */
+function olderThanMac(action: string, c: Card, madeAt: string, snapUpdated: string): boolean {
+  if (action === "set_tags") return madeAt < (c.tags_at ?? statusAt(c, snapUpdated));
+  return newestWins(action) && madeAt < statusAt(c, snapUpdated);
+}
+
 /** The older single-action shape `{ card_id?, action, title?, group? }`: made now, errors as before (400, 404, 429). */
 async function doSingle(env: Env, userId: string, deviceId: string, body: any, receivedMs: number): Promise<Outcome> {
   const p = parseAction(body);
@@ -548,7 +638,7 @@ async function doSingle(env: Env, userId: string, deviceId: string, body: any, r
   const clientId = crypto.randomUUID();
   const madeAt = iso(receivedMs);
   if (p.email && !(await ownGmail(env, userId, p.email.account))) return { error: "account must be one of your Gmail inboxes", status: 400 };
-  const err = await store(env, userId, deviceId, [{ ...p, clientId, madeAt, superseded: !!c && newestWins(p.action) && madeAt < statusAt(c, snap!.updated) }], null, receivedMs);
+  const err = await store(env, userId, deviceId, [{ ...p, clientId, madeAt, superseded: !!c && olderThanMac(p.action, c, madeAt, snap!.updated) }], null, receivedMs);
   return err ? { error: err, status: 429 } : { accepted: [clientId], dropped: [] };
 }
 
@@ -587,7 +677,7 @@ async function doBatch(env: Env, userId: string, deviceId: string, body: any, re
     const madeAt = corrected(a.made_at, skew, receivedMs) ?? iso(receivedMs);
     inBatch.add(a.id);
     accepted.push(a.id);
-    fresh.push({ ...p, clientId: a.id, madeAt, superseded: !!c && newestWins(p.action) && madeAt < statusAt(c, snap!.updated) });
+    fresh.push({ ...p, clientId: a.id, madeAt, superseded: !!c && olderThanMac(p.action, c, madeAt, snap!.updated) });
   });
   const err = await store(env, userId, deviceId, fresh, sentAt, receivedMs);
   return err ? { error: err, status: 429 } : { accepted, dropped };

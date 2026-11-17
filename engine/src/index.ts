@@ -5,7 +5,7 @@ import { routes } from "./lib/router";
 import { readJSON } from "./lib/http";
 import { decrypt } from "./lib/crypto";
 import { processRecap } from "./triage/recap";
-import { fathomSignatureProblem, fathomToMessage } from "./sources/fathom";
+import { fathomSignatureProblem, fathomToMessage, meetingMeta, recordMeeting } from "./sources/fathom";
 import { catchUpFathom } from "./sources/fathomCatchup";
 import "./routes/sources";
 import "./routes/v2";
@@ -13,6 +13,7 @@ import "./routes/archive";
 import "./routes/keys";
 import "./routes/models";
 import "./routes/handover";
+import "./routes/meetings";
 import "./sources/chat-ingest";
 import { handleEmailSearch } from "./email/search";
 import { handleSetup, purgeExpiredSetup } from "./setup/routes";
@@ -67,7 +68,9 @@ export default {
         return json({ error: "bad payload" }, 400);
       }
       try {
-        await processRecap(env, src.user_id, fathomToMessage(rp.body, src.id), undefined, { rawOnUnusable: true });
+        const m = fathomToMessage(rp.body, src.id);
+        await recordMeeting(env, src.user_id, meetingMeta(rp.body, m));
+        await processRecap(env, src.user_id, m, undefined, { rawOnUnusable: true });
       } catch (e) {
         // A 500 makes Fathom retry; the hourly catch-up is the second chance.
         const msg = `Fathom notes couldn't be saved: ${(e as Error)?.message ?? e}`.slice(0, 300);

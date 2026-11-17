@@ -3,7 +3,7 @@ import { logEvent } from "../lib/runlog";
 import { decrypt } from "../lib/crypto";
 import { processRecap, recapKnown } from "../triage/recap";
 import { Budget, BudgetExhausted } from "../lib/budget";
-import { fathomToMessage, recapKeys } from "./fathom";
+import { fathomToMessage, meetingMeta, recapKeys, recordMeeting } from "./fathom";
 import { log } from "../triage/run";
 
 /**
@@ -66,6 +66,7 @@ export async function catchUpFathom(env: Env, userId: string, calls: Budget, fet
         continue;
       }
       const msg = fathomToMessage(m, src.id);
+      await recordMeeting(env, userId, meetingMeta(m, msg));
       const known = await recapKnown(env, userId, recapKeys(msg));
       if (!known) {
         calls.take(1); // the summary call to Claude
