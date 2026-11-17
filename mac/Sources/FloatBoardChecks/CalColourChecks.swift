@@ -56,7 +56,7 @@ import FloatBoardConnectors
         let fake = FakeGoogle()
         fake.handler = { r in
             if r.url?.path.hasSuffix("/users/me/calendarList") == true {
-                return (##"{"items":[{"id":"a@example.com","summary":"Me","accessRole":"owner","primary":true,"backgroundColor":"#111111"},{"id":"family#x","summary":"Family","accessRole":"reader","backgroundColor":"#16a765"},{"id":"team#y","summary":"Team","accessRole":"writer","backgroundColor":"#4986e7"},{"id":"en.uk#holiday@group.v.calendar.google.com","summary":"Holidays in the UK","accessRole":"reader","backgroundColor":"#16a765"},{"id":"addressbook#contacts@group.v.calendar.google.com","summary":"Birthdays","accessRole":"reader","backgroundColor":"#92e1c0"},{"id":"e_2_en#weeknum@group.v.calendar.google.com","summary":"Week Numbers","accessRole":"reader","backgroundColor":"#9fc6e7"}]}"##, 200)
+                return (##"{"items":[{"id":"a@example.com","summary":"Me","accessRole":"owner","primary":true,"backgroundColor":"#111111"},{"id":"family#x","summary":"Family","accessRole":"reader","backgroundColor":"#16a765","selected":true},{"id":"team#y","summary":"Team","accessRole":"writer","backgroundColor":"#4986e7","selected":true},{"id":"colleague#z","summary":"A colleague","accessRole":"reader","backgroundColor":"#ac725e"},{"id":"room#r","summary":"Room 4","accessRole":"reader","backgroundColor":"#d06b64","selected":true,"hidden":true},{"id":"en.uk#holiday@group.v.calendar.google.com","summary":"Holidays in the UK","accessRole":"reader","backgroundColor":"#16a765","selected":true},{"id":"addressbook#contacts@group.v.calendar.google.com","summary":"Birthdays","accessRole":"reader","backgroundColor":"#92e1c0"},{"id":"e_2_en#weeknum@group.v.calendar.google.com","summary":"Week Numbers","accessRole":"reader","backgroundColor":"#9fc6e7"}]}"##, 200)
             }
             return (#"{"items":[],"nextSyncToken":"T"}"#, 200)
         }
@@ -64,7 +64,8 @@ import FloatBoardConnectors
         let mine = cache.calendars().filter { $0.account == a }
         let on = Set(mine.filter(\.shown).map(\.name))
         if on != ["Me", "Family", "Team"] { print("  cal2 shown: \(mine.map { "\($0.name)=\($0.shown)" })") }
-        check(mine.count == 6 && on == ["Me", "Family", "Team"], "cal2_all_listed_calendars_start_shown_except_google_generated_ones")
+        // Review fix 1: only the main calendar and those ticked in Google (selected, not hidden, not generated) start shown.
+        check(mine.count == 8 && on == ["Me", "Family", "Team"], "cal2_listed_calendars_start_shown_only_when_ticked_in_google")
         _ = cache.setShown(account: a, calendarID: "team#y", false)
         await CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [a] }).refreshCalendars()
         check(cache.calendars().first { $0.calendarID == "team#y" }?.shown == false, "cal2_a_calendar_switched_off_stays_off")

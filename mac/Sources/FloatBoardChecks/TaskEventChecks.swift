@@ -369,13 +369,13 @@ import FloatBoardConnectors
         await signedOut.syncOnce()
         check(cache.calendars().first?.needsReconnect == true, "sync_not_connected_flags_reconnect")
 
-        // Listing calendars: every calendar, owned or subscribed, starts shown (owner's decision, CAL-2).
+        // Listing calendars: the main one starts shown; one not ticked in Google (no "selected") starts hidden (review fix 1).
         let fake2 = Fake()
         fake2.handler = { _ in (##"{"items":[{"id":"me@example.com","summary":"Me","accessRole":"owner","primary":true,"backgroundColor":"#111111"},{"id":"team","summary":"Team","accessRole":"reader","backgroundColor":"#222222"}]}"##, 200) }
         let lister = CalendarSync(store: store, apiFor: { _ in api(fake2) }, accounts: { [acct] }, now: { t })
         await lister.refreshCalendars()
         let cals = cache.calendars()
-        check(cals.count == 2 && cals.first { $0.calendarID == "team" }?.shown == true && cals.first { $0.calendarID == cal }?.shown == true,
+        check(cals.count == 2 && cals.first { $0.calendarID == "team" }?.shown == false && cals.first { $0.calendarID == cal }?.shown == true,
               "sync_lists_calendars_with_sensible_defaults")
     } catch { check(false, "sync setup: \(error)") }
 
