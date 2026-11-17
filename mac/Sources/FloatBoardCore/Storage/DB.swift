@@ -69,7 +69,7 @@ public final class DB {
     /// Version 11 was amended before release (Rounds 6 and 7): a board already at 11 from before then lacks `cal_series`'
     /// `master_start` and `master_zone` and `cal_events`' `original_start`. They are added when missing, without changing
     /// the version; a board that has them is not touched. ALTER puts each before the table's constraints (PRIMARY KEY,
-    /// UNIQUE), so the result matches a new board.
+    /// UNIQUE), so the result matches a new board. Adding `original_start` also makes the next calendar pass a full read.
     private func addMissingV11Columns() throws {
         let wanted = [("cal_series", "master_start", "REAL"), ("cal_series", "master_zone", "TEXT"), ("cal_events", "original_start", "TEXT")]
         var missing: [(String, String, String)] = []
@@ -83,6 +83,9 @@ public final class DB {
             for (table, column, type) in missing.sorted(by: { ($0.0, $0.1) < ($1.0, $1.1) }) {
                 try exec("ALTER TABLE \(table) ADD COLUMN \(column) \(type);")
             }
+            // Cached events have no original start yet: the next pass does the daily full read of every calendar now
+            // (it first takes in what changed since the last pass, keeps its bookmark, and hides or deletes nothing).
+            if missing.contains(where: { $0.1 == "original_start" }) { try exec("UPDATE cal_calendars SET full_read_at=NULL;") }
         }
     }
 
