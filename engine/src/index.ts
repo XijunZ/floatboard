@@ -14,6 +14,7 @@ import "./routes/keys";
 import "./routes/models";
 import "./routes/handover";
 import "./routes/meetings";
+import "./routes/reminders";
 import { handleJotsApp, purgeJots, recordMeetingNotes, runJotNudges } from "./jots/copies";
 import { handleJotsCleanupApp } from "./jots/ai";
 import { purgeCircle } from "./routes/circle";

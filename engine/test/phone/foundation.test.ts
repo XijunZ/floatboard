@@ -210,3 +210,45 @@ describe("foundation round 1 (F1): one tag rule; a bad tag never blocks the boar
     expect(b.cards[1].tags).toHaveLength(20);
   });
 });
+
+describe("foundation round 2 (R2): one notification id, shown once across Mac and phone", () => {
+  async function user(name: string) {
+    const u = await newUser(name);
+    await env.DB.prepare("UPDATE users SET ntfy_topic='budget-topic' WHERE id=?").bind(u.id).run();
+    return u;
+  }
+  const claim = (key: string, id: unknown) => call("/v2/reminders/claim", { method: "POST", key, body: JSON.stringify({ id }) });
+
+  it("a_reminder_the_mac_claimed_is_never_sent_even_when_its_board_update_was_lost", async () => {
+    const u = await user("Claimed");
+    const fire = Date.parse("2026-11-19T09:00:00Z");
+    const reminders = [{ id: "rb-circle_due-P-4-2026-11-19", title: "Sam Example", text: "Message P-4", fire_at: iso(fire) }];
+    await put(u.key, { cards: [card(1)], reminders });
+    const r = await claim(u.key, reminders[0].id);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ owner: "mac" });
+    expect(await (await claim(u.key, reminders[0].id)).json()).toEqual({ owner: "mac" });   // asking again: still the Mac's
+    ntfy = [];
+    expect(await runDueAlerts(env as any, fire + 11 * 60_000)).toBe(0);                   // the copy still lists it
+    expect(ntfy).toHaveLength(0);
+  });
+
+  it("a_reminder_the_phone_already_got_is_not_the_macs", async () => {
+    const u = await user("Phone first");
+    const fire = Date.parse("2026-11-19T09:00:00Z");
+    const reminders = [{ id: "rb-decision_review-D-2-2026-11-19", title: "Review", text: "Review D-2", fire_at: iso(fire) }];
+    await put(u.key, { cards: [card(1)], reminders });
+    ntfy = [];
+    expect(await runDueAlerts(env as any, fire + 11 * 60_000)).toBe(1);
+    expect(await (await claim(u.key, reminders[0].id)).json()).toEqual({ owner: "phone" });
+    // Another user's claim of the same id is their own.
+    const v = await user("Other claimer");
+    expect(await (await claim(v.key, reminders[0].id)).json()).toEqual({ owner: "mac" });
+  });
+
+  it("a_bad_id_is_refused", async () => {
+    const u = await user("Bad claim");
+    expect((await claim(u.key, "no spaces allowed")).status).toBe(400);
+    expect((await claim(u.key, 7)).status).toBe(400);
+  });
+});

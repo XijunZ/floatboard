@@ -291,6 +291,21 @@ public struct ConnectorClient {
         do { return try await call(method, path, body: body) } catch ConnectorError.http(404, _) { throw ConnectorError.noPhoneApp }
     }
 
+    /// Before this Mac shows a budget reminder: may it? One notification id is shown once across Mac and phone; the engine
+    /// answers `mac` (show it) or `phone` (it already went to the phone). An engine without the route (older) serves no
+    /// budget reminders to a phone: `noEngine`. No answer: `unreachable` (ask again next minute).
+    public func claimReminder(_ id: String) async -> ReminderClaim {
+        do {
+            let data = try await call("POST", "/v2/reminders/claim", body: try JSONSerialization.data(withJSONObject: ["id": id]))
+            let owner = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["owner"] as? String // try?-ok: an unreadable answer counts as no answer
+            switch owner { case "mac": return .mine; case "phone": return .phones; default: return .unreachable }
+        } catch ConnectorError.http(404, _) {
+            return .noEngine
+        } catch {
+            return .unreachable
+        }
+    }
+
     /// A one-time pairing address (valid 10 minutes) for the QR code, and when it expires.
     public func pairPhone() async throws -> (url: URL, expires: Date) {
         let data = try await phoneCall("POST", "/v2/app/pair")
