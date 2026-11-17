@@ -114,6 +114,8 @@ public struct Goal: Identifiable, Equatable {
     public var reviewed: Date?
     public var deleted: Bool
     public var shortID: ShortID { ShortID(kind: .resolution, number: id) }
+    /// True for an active goal whose period has ended: it still waits for its review (which stays possible however late).
+    public func reviewOverdue(now: Date) -> Bool { status == .active && level != .fiveYear && now >= period.interval.end }
 }
 
 /// An earlier wording of a goal.
@@ -393,7 +395,7 @@ public struct GoalProgress: Equatable {
         guard g.level != .fiveYear else { return .failure(GoalRefusal("The five-year picture is rewritten, not reviewed.")) }
         let wording = (outcome == .changed ? newTitle ?? "" : g.title).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !wording.isEmpty else { return .failure(GoalRefusal("Write the new wording for the changed goal.")) }
-        let np = g.period.next
+        let np = rolloverPeriod(of: g.period, now: now)
         var newParent: Int64?
         if outcome != .dropped {
             if let full = fullRefusal(np) { return .failure(GoalRefusal(full.message + " Make room there first, or drop this goal.")) }
@@ -443,6 +445,13 @@ public struct GoalProgress: Equatable {
         changed()
         guard goal(id)?.status == outcome.status else { return .failure(GoalRefusal("Could not save the review; see Activity.")) }
         return .success(newID.flatMap { goal($0) })
+    }
+
+    /// Where a kept or changed goal of `period` carries on when reviewed at `now`: the next period, or, for a review made
+    /// late (the next period is already over), the current period of that level.
+    public func rolloverPeriod(of period: GoalPeriod, now: Date) -> GoalPeriod {
+        let cur = GoalPeriod.current(period.level, now: now)
+        return period.next.interval.start >= cur.interval.start ? period.next : cur
     }
 
     /// The open tasks linked to this goal itself (not its sub-goals): what follows a kept goal into the next period.
@@ -580,12 +589,27 @@ public enum ResolutionNudges {
         return nil
     }
 
-    /// Reviews open at `now` whose period still has an active goal (quarter first), whether or not nudged.
-    @MainActor public static func openReviews(store: Store, now: Date) -> [GoalPeriod] {
+    /// Reviews in their window at `now` whose period still has an active goal (quarter first): the ones nudged.
+    @MainActor static func windowReviews(store: Store, now: Date) -> [GoalPeriod] {
         guard store.isOn(.resolutions) else { return [] }
         let r = ResolutionStore(store: store)
         return [GoalLevel.quarter, .year].compactMap { reviewPeriod($0, now: now) }
             .filter { p in r.goals(in: p).contains { $0.status == .active } }
+    }
+
+    /// Every review that can be done at `now`: those in their window (quarter first), then any ended period that still has
+    /// an active goal because its window was missed (overdue, oldest first). Never closed until done.
+    @MainActor public static func openReviews(store: Store, now: Date) -> [GoalPeriod] {
+        let window = windowReviews(store: store, now: now)
+        guard store.isOn(.resolutions) else { return [] }
+        let r = ResolutionStore(store: store)
+        var overdue: [GoalPeriod] = []
+        for level in [GoalLevel.quarter, .year] {
+            for g in r.goals(level: level) where g.reviewOverdue(now: now) && !window.contains(g.period) && !overdue.contains(g.period) {
+                overdue.append(g.period)
+            }
+        }
+        return window + overdue.sorted { ($0.interval.start, $0.level == .quarter ? 0 : 1) < ($1.interval.start, $1.level == .quarter ? 0 : 1) }
     }
 
     /// The first open review (the Resolutions tab's banner).
@@ -594,7 +618,7 @@ public enum ResolutionNudges {
     /// Nudges to give now: open reviews not nudged for their period yet, outside quiet hours.
     @MainActor public static func due(store: Store, now: Date) -> [Due] {
         guard !inQuietHours(ReminderBudget(store: store).settings, now: now) else { return [] }
-        return openReviews(store: store, now: now).filter { p in
+        return windowReviews(store: store, now: now).filter { p in
             let last = (try? store.db.query("SELECT value FROM meta WHERE key=?", [nudgedKey(p.level)]) { DB.text($0, 0) })?.first // try?-ok: unreadable = not nudged; at worst one extra nudge
             return last != p.key
         }.map { Due(level: $0.level, period: $0) }
