@@ -1,6 +1,7 @@
 "use strict";
 (function () {
 /*@SYNC_JS@*/
+/*@JOTS_JS@*/
 
   var $ = function (id) { return document.getElementById(id); };
   var SCREENS = ["loading", "pair", "signin", "board", "settings"];
@@ -479,6 +480,7 @@
     $("jots").hidden = view !== "jots";
     $("circle").hidden = view !== "circle";
     $("more").hidden = view !== "more";
+    if (view === "jots") jots.render(); // Jots screen (files/jots.client.js)
     var entries = moreEntries(board.modules);
     $("more-decisions").hidden = entries.indexOf("decisions") < 0;
     $("more-resolutions").hidden = entries.indexOf("resolutions") < 0;
@@ -515,6 +517,7 @@
     store(BOARD_KEY, null);
     store(QUEUE_KEY, null);
     store(SENT_KEY, null);
+    jots.drop(); // Jots: the cached jots and their queue go with the account
   }
 
   // /app/api/me answered: the session's account. Any board or queue of another account is dropped, never shown or sent.
@@ -526,6 +529,7 @@
     me = m;
     shownAccount = m.account;
     queue.account = m.account;
+    jots.restore();
   }
 
   // A board from the engine (GET /app/api/board or the answer to a batch of actions).
@@ -614,6 +618,8 @@
     if (board && current === "loading") show("board");
     render();
     note(replacedText(replaced, dropped, rejected));
+    syncJots();
+    if (pendingShare !== null && board && me) { var shared = pendingShare; pendingShare = null; shareInto(shared); }
     if (syncAgain && failures === 0 && me) { syncAgain = false; sync(); }
   }
 
@@ -1129,6 +1135,38 @@
 
   // ------------------------------------------------------------ start
 
+  // ------------------------------------------------------------ Jots (screen in files/jots.client.js)
+
+  var jots = JotsScreen({
+    $: $, el: el, api: api, openSheet: openSheet, closeSheet: closeSheet, toast: toast, store: store, load: load, newId: newId,
+    offline: offline, SignedOut: SignedOut,
+    account: function () { return me ? me.account : shownAccount; },
+    modules: function () { return board && board.modules; },
+    zone: function () { return board && board.time_zone; },
+    addTask: function (title) { act({ action: "add", title: title.slice(0, 200), group: groups()[0] || null }, "Added. It will show on your Mac shortly."); },
+  });
+  jots.wire();
+  // Long-press shortcuts ("New jot", "Plan") and Share into FloatBoard arrive as the page's address; read once, then cleared.
+  var launch = launchTarget(location.search);
+  var pendingShare = sharedText(location.search);
+  if (launch || pendingShare !== null) history.replaceState(null, "", location.pathname + location.hash);
+
+  function syncJots() {
+    if (!me || !board || !board.modules || !board.modules.jots) return;
+    jots.sync().catch(function (e) { if (e instanceof SignedOut) showSignIn(); });
+  }
+
+  function shareInto(text) {
+    if (board && board.modules && board.modules.jots) { view = "jots"; render(); jots.shareSheet(text); }
+    else jots.shareSheet(text, true);
+  }
+
+  function applyLaunch() {
+    if (launch === "jot") { view = "jots"; render(); jots.focus(); }
+    if (launch === "plan") { view = "plan"; render(); }
+    launch = null;
+  }
+
   async function start() {
     var m = /[#&]pair=([A-Za-z0-9_-]{10,200})/.exec(location.hash);
     if (m) {
@@ -1152,20 +1190,26 @@
       lastSync = typeof cached.at === "number" ? cached.at : 0;
       queue.account = cached.account;
       show("board");
+      jots.restore();
       render();
+      applyLaunch();
       failures = 0;
       await sync();
       if (me) checkPush();
       return;
     }
     await openBoard();
+    applyLaunch();
   }
 
   STATUSES.forEach(function (s) {
     document.querySelector('[data-tab="' + s + '"]').addEventListener("click", function () { tab = s; render(); window.scrollTo(0, 0); });
   });
   VIEWS.forEach(function (v) {
-    document.querySelector('[data-view="' + v + '"]').addEventListener("click", function () { view = v; render(); window.scrollTo(0, 0); });
+    document.querySelector('[data-view="' + v + '"]').addEventListener("click", function () {
+      view = v; render(); window.scrollTo(0, 0);
+      if (v === "jots") syncJots();
+    });
   });
   $("more-settings").addEventListener("click", openSettings);
   $("more-decisions").addEventListener("click", function () { toast("Decisions arrive here with the Decisions area."); });

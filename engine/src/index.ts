@@ -14,6 +14,8 @@ import "./routes/keys";
 import "./routes/models";
 import "./routes/handover";
 import "./routes/meetings";
+import { handleJotsApp, purgeJots, recordMeetingNotes, runJotNudges } from "./jots/copies";
+import { handleJotsCleanupApp } from "./jots/ai";
 import "./sources/chat-ingest";
 import { handleEmailSearch } from "./email/search";
 import { handleSetup, purgeExpiredSetup } from "./setup/routes";
@@ -70,6 +72,7 @@ export default {
       try {
         const m = fathomToMessage(rp.body, src.id);
         await recordMeeting(env, src.user_id, meetingMeta(rp.body, m));
+        await recordMeetingNotes(env, src.user_id, m); // Jots J9: the full notes, for the Mac to attach to the meeting
         await processRecap(env, src.user_id, m, undefined, { rawOnUnusable: true });
       } catch (e) {
         // A 500 makes Fathom retry; the hourly catch-up is the second chance.
@@ -85,7 +88,8 @@ export default {
     }
     if (url.pathname.startsWith("/app/api/")) {
       // Phone app: signed in by the fb_session cookie only (never the user key).
-      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handlePush(req, env)) ?? (await handleEmailSearch(req, env)) ?? appJSON({ error: "not found" }, 404);
+      return (await handleAppAuth(req, env)) ?? (await handleBoard(req, env)) ?? (await handlePush(req, env)) ?? (await handleEmailSearch(req, env)) ??
+        (await handleJotsApp(req, env)) ?? (await handleJotsCleanupApp(req, env)) ?? appJSON({ error: "not found" }, 404);
     }
     // Phone app page, script, service worker, manifest and icons (no sign-in needed).
     const appFile = handleAppStatic(req);
@@ -106,6 +110,7 @@ export default {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const jobs = cronJobs(event.cron, event.scheduledTime);
     if (jobs.due) ctx.waitUntil(runDueAlerts(env));
+    if (jobs.due) ctx.waitUntil(runJotNudges(env)); // Jots J11: the daily nudge on the phone when the Mac did not show it
     if (jobs.read) ctx.waitUntil(runAllUsers(env, runRounds, undefined, { hourly: jobs.hourly, watch: jobs.watch }));
   },
 } satisfies ExportedHandler<Env>;
@@ -150,6 +155,7 @@ export async function runAllUsers(
     await purgePhoneActions(env);
     await purgeBoardLog(env);
     await purgeDueAlerts(env);
+    await purgeJots(env);
   } catch (e) {
     const msg = `Could not purge expired setup sessions: ${(e as Error)?.message ?? e}`.slice(0, 500);
     log("setup_purge_failed", { error: msg });
