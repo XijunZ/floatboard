@@ -84,3 +84,24 @@ extension Card {
     /// "Link an email" is offered: a task the email sorting did not make, with no email yet.
     public var canLinkEmail: Bool { !isFromEmailSorting && !hasLinkedEmail }
 }
+
+extension Card {
+    /// What the task pop-up saves: the card as it is stored now (`current`), with only the fields the user changed in the
+    /// pop-up since it opened (`edited` differs from `opened`) taken from the pop-up. A change made elsewhere meanwhile (a
+    /// title or time Google sent, a Meet link the calendar added, a connector's update) is kept, never reverted, and so is
+    /// never recorded as a newer edit of the user's that would be sent back to Google.
+    @MainActor public static func editorSave(opened: Card, edited: Card, current: Card) -> Card {
+        var out = current
+        if edited.title != opened.title { out.title = edited.title }
+        if edited.notes != opened.notes { out.notes = edited.notes }
+        if edited.link != opened.link { out.link = edited.link }
+        if edited.area != opened.area { out.area = edited.area }
+        if edited.importance != opened.importance { out.importance = edited.importance }
+        if !Store.sameDue(edited.due, edited.dueHasTime, opened.due, opened.dueHasTime) {
+            out.due = edited.due; out.dueHasTime = edited.dueHasTime
+        }
+        if edited.watchPerson != opened.watchPerson { out.watchPerson = edited.watchPerson }
+        if edited.watchContact != opened.watchContact { out.watchContact = edited.watchContact }
+        return out
+    }
+}

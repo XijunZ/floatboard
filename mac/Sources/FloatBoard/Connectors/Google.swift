@@ -34,6 +34,7 @@ final class Google: ObservableObject {
     func attach(store: Store) {
         self.store = store
         GoogleCredentials.store = store
+        CalendarCache.connectedAccounts = { [weak self] in self?.accounts ?? [] }
         clientID = GoogleCredentials.get("client-id") ?? ""
     }
 
@@ -90,8 +91,9 @@ final class Google: ObservableObject {
     // MARK: Connect an account
 
     /// Gmail screening uses the same Google client as Calendar: the Mac signs in (with Gmail access) and hands the
-    /// sign-in to the engine that screens (docs/architecture.md C9). `gmail` receives (address, refresh token).
-    static let gmailScopes = "https://www.googleapis.com/auth/gmail.modify openid email"
+    /// sign-in to the engine that screens (docs/architecture.md C9). `gmail` receives (address, refresh token). The same
+    /// sign-in also covers Calendar for that account, so it is not done twice.
+    static let gmailScopes = GoogleAuthConfig.gmailScopes.joined(separator: " ")
     private var gmailHandler: ((String, String) async throws -> Void)?
 
     func connectGmail(_ handler: @escaping (String, String) async throws -> Void) {
@@ -102,7 +104,8 @@ final class Google: ObservableObject {
     /// The client ID and secret, for handing a Gmail sign-in to an engine.
     var clientSecret: String? { GoogleCredentials.get("client-secret") }
 
-    func connect(scope: String? = nil) {
+    /// `loginHint` pre-selects the account when it signs in again (Settings › Calendar › Reconnect).
+    func connect(scope: String? = nil, loginHint: String? = nil) {
         if scope == nil { gmailHandler = nil }
         let scope = scope ?? Self.scopes
         guard isConfigured, let secret = GoogleCredentials.get("client-secret") else {
@@ -158,9 +161,11 @@ final class Google: ObservableObject {
                     .init(name: "code_challenge", value: challenge),
                     .init(name: "code_challenge_method", value: "S256"),
                     .init(name: "access_type", value: "offline"),
+                    .init(name: "include_granted_scopes", value: "true"),
                     .init(name: "prompt", value: "select_account consent"),
                     .init(name: "state", value: state),
                 ]
+                if let hint = loginHint { c.queryItems?.append(.init(name: "login_hint", value: hint)) }
                 if let u = c.url { NSWorkspace.shared.open(u) }
             }
         }
@@ -181,26 +186,52 @@ final class Google: ObservableObject {
                 fail("Google didn't return what we need: \(json["error_description"] ?? json["error"] ?? "unknown")")
                 return
             }
-            if let gmail = gmailHandler {
-                gmailHandler = nil
-                do { try await gmail(email, refresh); status = "Gmail \(email) connected." }
-                catch { fail("Signed in to \(email), but the engine didn't take it: \(error)") }
-                return
+            let expires = Double(json["expires_in"] as? Int ?? 3000)
+            // Only what Google says was granted is used: a sign-in without a permission never replaces one that has it.
+            let gmail = gmailHandler
+            gmailHandler = nil
+            var granted = GoogleAuthConfig.granted(scope: json["scope"] as? String, gmailAsked: gmail != nil)
+            // The one consent covers Calendar too: keep it as this account's Calendar sign-in first, so a failed hand-off
+            // to the engine does not lose it.
+            if granted.calendar, !saveCalendarSignIn(email: email, refresh: refresh, access: access, expiresIn: expires) { granted.calendar = false }
+            if let gmail, granted.gmail {
+                do { try await gmail(email, refresh) } catch {
+                    fail("Signed in to \(email), but the engine didn't take it: \(error)")
+                    return
+                }
             }
-            guard GoogleCredentials.set(refresh, "refresh:\(email)") else {
-                fail("Signed in, but couldn't save the sign-in on this Mac. Check the Activity log.")
-                return
+            let message = GoogleAuthConfig.connectedMessage(email: email, granted: granted, gmailAsked: gmail != nil)
+            if !granted.calendar && !granted.gmail {
+                fail(message, detail: "granted: \(json["scope"] as? String ?? "none")")
+            } else {
+                status = message
+                if message.contains("not allowed") { store?.activity("google", .warning, message, detail: "granted: \(json["scope"] as? String ?? "none")") }
             }
-            tokens[email] = (access, Date().addingTimeInterval(Double(json["expires_in"] as? Int ?? 3000) - 60))
-            if !accounts.contains(email) { accounts.append(email) }
-            UserDefaults.standard.set(accounts, forKey: "googleAccounts")
-            status = "Connected \(email)."
         } catch {
             fail("Sign-in failed: \(error.localizedDescription)", detail: "\(error)")
         }
     }
 
-    private func accessToken(for email: String) async throws -> String {
+    /// Keeps a sign-in as the account's Calendar sign-in and asks the app to read its calendars now. False (reported) when the
+    /// sign-in could not be saved on this Mac.
+    @discardableResult
+    private func saveCalendarSignIn(email: String, refresh: String, access: String, expiresIn: Double) -> Bool {
+        guard GoogleCredentials.set(refresh, "refresh:\(email)") else {
+            fail("Signed in, but couldn't save the sign-in on this Mac. Check the Activity log.")
+            return false
+        }
+        tokens[email] = (access, Date().addingTimeInterval(expiresIn - 60))
+        if !accounts.contains(email) { accounts.append(email) }
+        UserDefaults.standard.set(accounts, forKey: "googleAccounts")
+        CalendarListAttempts.forget(email)
+        // Read the account's calendar list and events now, so Settings › Calendar fills in (and a reconnect clears).
+        NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
+        return true
+    }
+
+    /// `forceRefresh` drops the saved token first (Google can invalidate one before it expires).
+    private func accessToken(for email: String, forceRefresh: Bool = false) async throws -> String {
+        if forceRefresh { tokens[email] = nil }
         if let t = tokens[email], t.expires > Date() { return t.token }
         guard let refresh = GoogleCredentials.get("refresh:\(email)"), let secret = GoogleCredentials.get("client-secret") else {
             throw GoogleError("\(email) isn't connected any more. Reconnect it in Settings › Outputs › Calendar.")
@@ -218,47 +249,18 @@ final class Google: ObservableObject {
 
     // MARK: Calendar
 
-    struct CreatedEvent { let id: String; let htmlLink: String; let meetLink: String? }
+    /// A Google Calendar client for one account; it asks this class for a fresh token each time it needs one.
+    func calendarAPI(for account: String) -> GoogleCalendarAPI {
+        GoogleCalendarAPI(token: { [weak self] force in
+            guard let self else { throw GoogleError("FloatBoard is closing.") }
+            guard await self.hasSignIn(account) else { throw GoogleCalendarError.notConnected(account: account) }
+            return try await self.accessToken(for: account, forceRefresh: force)
+        })
+    }
 
-    /// Creates an event on the account's main calendar. Timed tasks get 30 minutes; date-only tasks are all-day.
-    func createEvent(for card: Card, account: String, addMeet: Bool) async throws -> CreatedEvent {
-        guard let due = card.due else { throw GoogleError("Give the task a due date first.") }
-        let token = try await accessToken(for: account)
-        var body: [String: Any] = ["summary": card.title]
-        var description = card.notes
-        if let m = card.meetLink { description += (description.isEmpty ? "" : "\n\n") + m.absoluteString }
-        if !description.isEmpty { body["description"] = description }
-        if card.dueHasTime {
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime]
-            iso.timeZone = .current
-            let tz = TimeZone.current.identifier
-            body["start"] = ["dateTime": iso.string(from: due), "timeZone": tz]
-            body["end"] = ["dateTime": iso.string(from: due.addingTimeInterval(30 * 60)), "timeZone": tz]
-        } else {
-            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
-            let next = Calendar.current.date(byAdding: .day, value: 1, to: due) ?? due
-            body["start"] = ["date": f.string(from: due)]
-            body["end"] = ["date": f.string(from: next)]
-        }
-        if addMeet {
-            body["conferenceData"] = ["createRequest": [
-                "requestId": UUID().uuidString,
-                "conferenceSolutionKey": ["type": "hangoutsMeet"],
-            ]]
-        }
-        var req = URLRequest(url: URL(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1")!)
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:] // try?-ok: untrusted reply; a non-200 or missing id is reported below
-        guard (resp as? HTTPURLResponse)?.statusCode == 200, let id = json["id"] as? String else {
-            let msg = (json["error"] as? [String: Any])?["message"] as? String ?? "HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)"
-            throw GoogleError("Google Calendar said: \(msg)")
-        }
-        return CreatedEvent(id: id, htmlLink: json["htmlLink"] as? String ?? "", meetLink: json["hangoutLink"] as? String)
+    /// True when this account still has its saved sign-in (and the app has the Google client secret).
+    func hasSignIn(_ account: String) -> Bool {
+        GoogleCredentials.get("refresh:\(account)") != nil && GoogleCredentials.get("client-secret") != nil
     }
 
     // MARK: Helpers

@@ -82,6 +82,20 @@ private func fakeWhatsApp(_ folder: URL, now: Date) throws {
         check(again.isEmpty, "whatsapp_nothing_is_sent_twice")
     } catch { check(false, "whatsapp_read: \(error)") }
 
+    // Chat times are stamped in the app zone (the one the engine is told), not the Mac's.
+    do {
+        let savedTZ = ProcessInfo.processInfo.environment["TZ"], savedApp = AppTime.setting
+        setenv("TZ", "Asia/Shanghai", 1); tzset(); NSTimeZone.resetSystemTimeZone()
+        defer { if let savedTZ { setenv("TZ", savedTZ, 1) } else { unsetenv("TZ") }; tzset(); NSTimeZone.resetSystemTimeZone(); AppTime.apply(savedApp) }
+        AppTime.apply("Europe/London")
+        func text(_ zone: TimeZone?) throws -> [String] {
+            let c = zone.map { z in try? WhatsAppLocal.unreadChats(folder: folder, cursors: [:], now: now, zone: z) } ?? (try? WhatsAppLocal.unreadChats(folder: folder, cursors: [:], now: now)) // try?-ok: nil fails the check
+            return (c ?? []).map(\.transcript)
+        }
+        let byDefault = try text(nil), london = try text(TimeZone(identifier: "Europe/London")!), shanghai = try text(TimeZone(identifier: "Asia/Shanghai")!)
+        check(!byDefault.isEmpty && byDefault == london && byDefault != shanghai, "whatsapp_stamps_follow_app_zone_not_the_mac")
+    } catch { check(false, "whatsapp_stamps_follow_app_zone_not_the_mac: \(error)") }
+
     do {
         _ = try WhatsAppLocal.unreadChats(folder: root.appendingPathComponent("missing"), cursors: [:], now: now)
         check(false, "whatsapp_not_installed_is_said_plainly")

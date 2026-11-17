@@ -1,0 +1,6 @@
+{
+  "_note": "documented shape; recapture live after reconnect",
+  "error": {"code": 403, "message": "Request had insufficient authentication scopes.",
+    "errors": [{"message": "Insufficient Permission", "domain": "global", "reason": "insufficientPermissions"}],
+    "status": "PERMISSION_DENIED"}
+}

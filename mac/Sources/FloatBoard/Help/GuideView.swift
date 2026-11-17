@@ -15,7 +15,7 @@ struct GuideView: View {
                     swatch(fill: UrgencyStyle.fill(.today, neutral: .clear), ring: false, tint: UrgencyStyle.tint(.today), "Due today", "light orange")
                     swatch(fill: UrgencyStyle.fill(.tomorrow, neutral: .clear), ring: false, tint: UrgencyStyle.tint(.tomorrow), "Due tomorrow", "light yellow")
                     swatch(fill: Color.primary.opacity(0.08), ring: false, "Later or no due date", "plain")
-                    line("11-08", "On the bar: due month-day (configurable on the Bar tab)")
+                    line("11-08", "On the bar: due month-day (configurable in Settings › Bar)")
                 }
                 section("Importance") {
                     line("!!!", "High")
@@ -31,7 +31,7 @@ struct GuideView: View {
                         Text("Coloured pill = group. Click to move to the next group; right-click to choose.")
                             .font(.system(size: 12))
                     }
-                    note("Rename, recolour and reorder groups on the Groups tab.")
+                    note("Rename, recolour and reorder groups in Settings › Groups.")
                 }
                 section("Icons") {
                     note("Google Calendar (Settings › Outputs) is optional and only adds tasks to your calendar and Meet links.")
@@ -39,7 +39,7 @@ struct GuideView: View {
                     icon("calendar.badge.checkmark", "In Google Calendar (shown under the task): click to open the event")
                     icon("video.fill", "Join the Google Meet call")
                     icon("eye", "Move to Watch: waiting on someone else. Watch tasks stay on the board, off the bar; the bar's count adds “· N watch” when there are any")
-                    icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending. Columns start on Due date (Done on Date finished); ties go by importance, then oldest. Group keeps each group's tasks together, in Groups tab order")
+                    icon("arrow.up.arrow.down", "Column header: pick what to sort that column by (the bar's attributes) and flip ascending / descending. Columns start on Due date (Done on Date finished); ties go by importance, then oldest. Group keeps each group's tasks together, in the order set in Settings › Groups")
                     icon("plus", "Add row: the first chip picks the step (To do, Doing, Watch or Done) the new task goes into")
                     icon("arrow.uturn.backward", "Deleted by mistake? Press Undo on the bar that appears, or Edit → Undo Delete (⌥⌘Z) for the last deleted task")
                     icon("cursorarrow.click.2", "Double-click the bar to open the full board (a single click on a task does too)")
@@ -77,8 +77,14 @@ struct GuideView: View {
                     note("FloatBoard saves a checked copy of your board automatically: daily for 2 weeks, weekly for 2 months, monthly for a year. It also saves one just before an upgrade, a re-check or a restore, and keeps those for 90 days.")
                     note("Help → Restore from backup… brings an earlier copy back. A copy of the current board is saved first, so you can undo it.")
                 }
-                section("Google Calendar (optional)") {
-                    note("Connect a Google account in Settings › Outputs › Calendar only if you want tasks added to your calendar, with or without a Meet link. Nothing else needs it.")
+                section("Calendar (optional)") {
+                    note("Connect a Google account in Settings › Outputs › Calendar to see your calendars on the Calendar tab, as a day or a week. Nothing else needs it. Accounts connected before the Calendar tab existed show their main calendar at once; press Show all calendars… once to see the others. Connecting Gmail for an account also connects its Calendar.")
+                    note("Tasks with a due time sit at that time; tasks with only a date sit in the strip at the top. Events are coloured by their Google calendar. Tick a task's box to mark it done.")
+                    note("Drag an event to move it, drag its bottom edge to resize it, click empty time to add one. Changes reach Google right away, or when you are back online. Changes made in Google show here within about a minute. If Google refuses a change (for example on a calendar you can only read), it is not tried again: Activity says why, and a refused new event shows a red mark you can click to discard it.")
+                    note("Drag a task onto a time to put it on your calendar, or use Add to calendar on the task. Moving it in either place moves the other. Deleting the task deletes its event (Undo before it has been sent keeps the event exactly as it was); deleting the event in Google keeps the task and its date. Clearing a task's due leaves its event in Google. To move an event to another calendar, use Open in Google Calendar.")
+                    note("Every task has an id like T-142 and every event like E-37. Click one to copy it. Type an id in search to find the item. In an event, “Link a task…” links it to a task; in a task, “Link a meeting…” does the reverse. Linking never changes any time.")
+                    note("The bar shows your next meeting, with Join when it has a video link. The phone app opens on the Board; its Plan screen is a planning summary: today, the rest of this week and next week, with meetings (a repeating one once, like “Standup · weekdays 09:00”) and tasks due.")
+                    note("Settings › General › Time zone: UK time by default, or follow this Mac. Calendars are switched on or off in Settings › Outputs › Calendar.")
                 }
                 section("Keyboard") {
                     line("⌃⌥N", "New task from anywhere")

@@ -10,9 +10,8 @@ struct CalendarMenu: View {
     let card: Card
     /// Show "Add to Google Calendar" text next to the icon (used in the edit pop-up).
     var labeled = false
-    /// Called after the event is created, e.g. so the edit pop-up can show the new Meet link.
-    var onAdded: (String, Google.CreatedEvent) -> Void = { _, _ in }
-    @State private var working = false
+    /// Called after the event is queued for Google, e.g. so the edit pop-up can show the task is on the calendar.
+    var onAdded: (String) -> Void = { _ in }
 
     var body: some View {
         Menu {
@@ -41,7 +40,7 @@ struct CalendarMenu: View {
                 Button("Open pre-filled in browser instead") { NSWorkspace.shared.open(url) }
             }
         } label: {
-            let icon = working ? "hourglass" : (card.gcalAccount.isEmpty ? "calendar.badge.plus" : "calendar.badge.checkmark")
+            let icon = (card.gcalAccount.isEmpty ? "calendar.badge.plus" : "calendar.badge.checkmark")
             if labeled {
                 Label(card.gcalAccount.isEmpty ? "Add to Google Calendar" : "In Google Calendar", systemImage: icon)
             } else {
@@ -52,22 +51,14 @@ struct CalendarMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help(card.gcalAccount.isEmpty ? "Add to Google Calendar" : "In \(card.gcalAccount)'s calendar")
-        .disabled(working)
     }
 
+    /// One path for every way of putting a task on the calendar: a change waits in the calendar outbox and is sent at once
+    /// when online (the scheduler is nudged), kept and retried when not. Problems are written to Activity.
     private func add(_ account: String, meet: Bool) {
-        working = true
-        Task {
-            defer { working = false }
-            do {
-                let ev = try await google.createEvent(for: card, account: account, addMeet: meet)
-                store.markInCalendar(card, account: account, event: ev)
-                onAdded(account, ev)
-            } catch {
-                store.lastError = error.localizedDescription
-                store.activity("google", .error, "Could not add the task to Google Calendar", detail: error.localizedDescription)
-            }
-        }
+        guard store.addToCalendar(card, account: account, addMeet: meet) else { return }
+        onAdded(account)
+        NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
     }
 }
 
@@ -85,31 +76,7 @@ struct AccountsView: View {
         Group {
             VStack(alignment: .leading, spacing: 12) {
                 if showAccounts {
-                Text("Google Calendar (optional)").font(.system(size: 13, weight: .semibold))
-                Text("Only for adding tasks to your calendar and Meet links. Off until you connect an account.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                if google.accounts.isEmpty {
-                    Text("No accounts connected yet.").font(.system(size: 12)).foregroundStyle(.secondary)
-                }
-                ForEach(google.accounts, id: \.self) { email in
-                    HStack {
-                        Image(systemName: "person.crop.circle").foregroundStyle(.secondary)
-                        Text(email).font(.system(size: 12))
-                        Spacer()
-                        Button("Remove…") {
-                            if ConnectFlow.confirmTwice("Remove \(email)?",
-                                "FloatBoard stops adding tasks to this calendar and making Meet links with it. Events already made stay.",
-                                action: "Remove") { google.remove(email) }
-                        }
-                    }
-                    .frame(maxWidth: 520)
-                }
-                HStack {
-                    Button(google.busy ? "Waiting for sign-in in your browser…" : "Connect Google account…") { google.connect() }
-                        .disabled(!google.isConfigured || google.busy)
-                    if let s = google.status { Text(s).font(.system(size: 11)).foregroundStyle(.secondary) }
-                }
-
+                    CalendarSettingsView()
                 }
 
                 if showSetup {
@@ -155,6 +122,125 @@ struct AccountsView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Settings › Outputs › Calendar: the connected Google accounts, which account new events go to, and a switch for every calendar.
+struct CalendarSettingsView: View {
+    /// The block's help line, shared with the pictures.
+    static let help = "Switch on the calendars to show in the Calendar tab and the bar. Tasks you put on the calendar go to the default account."
+
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var google: Google
+    /// Pictures only: pretend these accounts are connected.
+    var accounts: [String]? = nil
+    /// Bumped after a change so the lists are read again.
+    @State private var tick = 0
+    /// Pictures can't draw system controls (pickers, switches, link buttons), so they get plain stand-ins.
+    @Environment(\.calendarSnapshot) private var snapshot
+
+    private var connected: [String] { accounts ?? google.accounts }
+
+    var body: some View {
+        let _ = tick
+        let all = CalendarCache(store: store).calendars()
+        let effective = CalendarSettings.effectiveDefault(saved: store.savedDefaultCalendarAccount(), connected: connected)
+        VStack(alignment: .leading, spacing: 14) {
+            if connected.isEmpty {
+                Text("No Google account connected yet. Connect one to see your calendars here and to put tasks on them.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            if connected.count > 1, let effective {
+                HStack {
+                    Text("New events go to").font(.system(size: 12))
+                    if snapshot {
+                        Text(effective + " ⌄").font(.system(size: 12)).padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.08)))
+                    } else {
+                        Picker("Default account", selection: Binding(get: { effective }, set: {
+                            if store.setDefaultCalendarAccount($0) { tick += 1 }
+                        })) {
+                            ForEach(connected, id: \.self) { Text($0).tag($0) }
+                        }
+                        .labelsHidden().fixedSize()
+                    }
+                }
+            }
+            ForEach(connected, id: \.self) { email in account(email, all: all) }
+            HStack {
+                Button(google.busy ? "Waiting for sign-in in your browser…" : "Connect Google account…") { google.connect() }
+                    .disabled(!google.isConfigured || google.busy)
+                if let s = google.status { Text(s).font(.system(size: 11)).foregroundStyle(.secondary) }
+            }
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+        .onReceive(NotificationCenter.default.publisher(for: .floatBoardCalendarSynced)) { _ in tick += 1 }
+    }
+
+    private func account(_ email: String, all: [CalCalendar]) -> some View {
+        let mine = CalendarSettings.calendars(of: email, in: all)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "person.crop.circle").foregroundStyle(.secondary)
+                Text(email).font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("Remove…") {
+                    if ConnectFlow.confirmTwice("Remove \(email)?",
+                        "FloatBoard stops adding tasks to this account's calendars and making Meet links with it, and its calendars stop showing until you add it again. Events already made stay.",
+                        action: "Remove") { google.remove(email); tick += 1 }
+                }
+            }
+            let state = CalendarSettings.state(account: email, calendars: all, lastList: CalendarListAttempts.outcome(email))
+            if state == .loading {
+                Text("Loading your calendars…").font(.system(size: 12)).foregroundStyle(.secondary).padding(.leading, 22)
+            }
+            if state == .reconnect {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.system(size: 11))
+                    if snapshot {
+                        Text("Reconnect to show your calendars").font(.system(size: 12)).foregroundStyle(Color.accentColor)
+                    } else {
+                        Button("Reconnect to show your calendars") { google.connect(loginHint: email) }
+                            .buttonStyle(.link).font(.system(size: 12))
+                            .disabled(!google.isConfigured || google.busy)
+                    }
+                }
+                .padding(.leading, 22)
+            }
+            if state == .mainOnly {
+                HStack(spacing: 6) {
+                    Text("Showing your main calendar.").font(.system(size: 12)).foregroundStyle(.secondary)
+                    if snapshot {
+                        Text("Show all calendars…").font(.system(size: 12)).foregroundStyle(Color.accentColor)
+                    } else {
+                        Button("Show all calendars…") { google.connect(loginHint: email) }
+                            .buttonStyle(.link).font(.system(size: 12))
+                            .disabled(!google.isConfigured || google.busy)
+                    }
+                }
+                .padding(.leading, 22)
+            }
+            ForEach(mine, id: \.calendarID) { c in
+                HStack(spacing: 8) {
+                    Circle().fill(Color(hex: c.color)).frame(width: 9, height: 9)
+                    Text(c.name).font(.system(size: 12)).lineLimit(1)
+                    Spacer()
+                    if snapshot {
+                        Capsule().fill(c.shown ? Color.accentColor : Color.primary.opacity(0.2)).frame(width: 26, height: 14)
+                            .overlay(Circle().fill(.white).padding(2), alignment: c.shown ? .trailing : .leading)
+                    } else {
+                        Toggle(c.name, isOn: Binding(get: { c.shown }, set: { on in
+                            if CalendarCache(store: store).setShown(account: email, calendarID: c.calendarID, on) {
+                                tick += 1
+                                NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
+                            }
+                        }))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    }
+                }
+                .padding(.leading, 22)
+            }
         }
     }
 }

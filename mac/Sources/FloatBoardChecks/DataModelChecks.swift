@@ -5,7 +5,7 @@ import FloatBoardCore
 /// never fall behind the schema. The engine has the same check for its D1 tables (engine/test/api/data-model.test.ts).
 @MainActor func dataModelChecks() {
     let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    let fixture = app.appendingPathComponent("Tests/Fixtures/schema-v10.json")
+    let fixture = app.appendingPathComponent("Tests/Fixtures/schema-v11.json")
     let doc = app.deletingLastPathComponent().appendingPathComponent("docs/data-model.md")
     let text: String, rows: [[Any]]
     do {

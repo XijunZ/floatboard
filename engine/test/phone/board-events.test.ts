@@ -1,0 +1,101 @@
+import { describe, it, expect } from "vitest";
+import { call, newUser } from "../helpers";
+import { pairPhone } from "../phone-helpers";
+
+const card = (id: number) => ({ id, title: `Task ${id}`, group: "Work", color: "#aabbcc", importance: 1, due: null, has_time: false,
+  status: "todo", link: null, done_at: null });
+const ev = (n: number, over: Record<string, unknown> = {}) => ({ id: `E-${n}`, title: `Meeting ${n}`, start: "2026-11-16T10:00:00.000Z",
+  end: "2026-11-16T11:00:00.000Z", all_day: false, video: "https://meet.example.com/x", color: "#112233", tasks: [1], ...over });
+const put = (key: string, body: unknown) => call("/v2/board", { method: "PUT", key, body: JSON.stringify(body) });
+
+describe("board events", () => {
+  it("serves_events_to_phone", async () => {
+    const u = await newUser("Events user");
+    const { cookie } = await pairPhone(u.key);
+    const r = await put(u.key, { cards: [card(1)], time_zone: "Europe/London", events: [ev(37, { title: "  Standup  " }), ev(38, { video: null, all_day: true })] });
+    expect(r.status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.time_zone).toBe("Europe/London");
+    expect(b.events).toHaveLength(2);
+    expect(b.events[0]).toEqual({ id: "E-37", title: "Standup", start: "2026-11-16T10:00:00.000Z", end: "2026-11-16T11:00:00.000Z", all_day: false,
+      video: "https://meet.example.com/x", color: "#112233", tasks: [1] });
+    expect(b.events[1].video).toBeNull();
+  });
+
+  it("old_macs_without_events_still_accepted", async () => {
+    const u = await newUser("Old mac");
+    const { cookie } = await pairPhone(u.key);
+    expect((await put(u.key, { cards: [card(1)] })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.cards).toHaveLength(1);
+    expect(b.events).toBeUndefined();
+  });
+
+  it("bad_video_is_dropped_to_null_and_the_push_succeeds", async () => {
+    const u = await newUser("Video user");
+    const { cookie } = await pairPhone(u.key);
+    const bad = ["http://meet.example.com/x", "javascript:alert(1)", "not a url", 5, "https://", "https://meet.example.com/a b"];
+    expect((await put(u.key, { cards: [card(1)], events: bad.map((video, i) => ev(i + 1, { video })) })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.events.map((e: any) => e.video)).toEqual(bad.map(() => null));
+  });
+
+  it("bad_time_zone_is_ignored_and_the_push_succeeds", async () => {
+    const u = await newUser("Zone user");
+    const { cookie } = await pairPhone(u.key);
+    for (const time_zone of ["Nowhere/Land", 5, "x".repeat(100)]) {
+      expect((await put(u.key, { cards: [card(1)], events: [ev(1)], time_zone })).status).toBe(200);
+      const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+      expect(b.time_zone).toBeUndefined();
+      expect(b.events).toHaveLength(1);
+    }
+  });
+
+  it("caps_events_at_200", async () => {
+    const u = await newUser("Cap user");
+    const many = (n: number) => Array.from({ length: n }, (_, i) => ev(i + 1, { tasks: [] }));
+    expect((await put(u.key, { cards: [], events: many(200) })).status).toBe(200);
+    expect((await put(u.key, { cards: [], events: many(201) })).status).toBe(400);
+  });
+
+  it("serves_series_and_repeat_of_repeating_meetings", async () => {
+    const u = await newUser("Series user");
+    const { cookie } = await pairPhone(u.key);
+    expect((await put(u.key, { cards: [], events: [ev(1, { series: "S-0123456789abcdef", repeat: "  weekdays 09:00 " }), ev(2)] })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.events[0].series).toBe("S-0123456789abcdef");
+    expect(b.events[0].repeat).toBe("weekdays 09:00");
+    expect("series" in b.events[1]).toBe(false);
+    expect("repeat" in b.events[1]).toBe(false);
+  });
+
+  it("bad_series_or_repeat_is_dropped_and_the_push_succeeds", async () => {
+    const u = await newUser("Bad series user");
+    const { cookie } = await pairPhone(u.key);
+    const bad = [{ series: "S-<script>" }, { series: 5 }, { series: "x".repeat(100) }, { repeat: 7 }, { repeat: "x".repeat(81) }, { repeat: "a\u0000b" }];
+    expect((await put(u.key, { cards: [], events: bad.map((o, i) => ev(i + 1, o)) })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.events).toHaveLength(bad.length);
+    expect(b.events.every((e: any) => !("series" in e) && !("repeat" in e))).toBe(true);
+  });
+
+  // Round 7: an instance's original start (Google's originalStartTime) reaches the phone; a bad one is left out.
+  it("serves_original_start_and_drops_a_bad_one", async () => {
+    const u = await newUser("Moved user");
+    const { cookie } = await pairPhone(u.key);
+    const good = "2026-11-20T09:00:00.000Z";
+    expect((await put(u.key, { cards: [], events: [ev(1, { original_start: good }), ev(2, { original_start: "nope" }), ev(3)] })).status).toBe(200);
+    const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
+    expect(b.events[0].original_start).toBe(good);
+    expect("original_start" in b.events[1]).toBe(false);
+    expect("original_start" in b.events[2]).toBe(false);
+  });
+
+  it("rejects_malformed_events", async () => {
+    const u = await newUser("Strict user");
+    const bad: Record<string, unknown>[] = [{ id: "E-0" }, { id: "37" }, { title: "x".repeat(201) }, { start: "nope" }, { all_day: "yes" },
+      { color: "red" }, { tasks: [0] }, { tasks: [1.5] }, { tasks: Array.from({ length: 21 }, (_, i) => i + 1) }, { tasks: "1" }];
+    for (const over of bad) expect((await put(u.key, { cards: [], events: [ev(1, over)] })).status).toBe(400);
+    expect((await put(u.key, { cards: [], events: "x" })).status).toBe(400);
+  });
+});

@@ -52,6 +52,9 @@ header.top h1{font-size:24px}
 .updated.off{color:var(--text)}
 .note{font-size:13px;color:var(--muted);margin:0 0 8px 4px}
 nav.tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:6px 0 10px}
+nav.views{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:4px 0 2px}
+.view{min-height:36px;border:0;border-radius:12px;background:transparent;color:var(--muted);font:inherit;font-weight:600}
+.view[aria-selected=true]{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
 .tab{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:58px;padding:6px 2px;border-radius:14px;
 color:var(--muted);font-size:13px;font-weight:600}
 .tab .row{display:flex;align-items:center;gap:5px}
@@ -66,7 +69,16 @@ min-height:56px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .card .t{font-size:17px;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .card .meta{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px;font-size:14px;color:var(--muted)}
 .card .due.late{color:var(--danger);font-weight:600}
+.card.overdue .t,.card .meta .late{color:var(--danger);font-weight:600}
 .card .wait-fresh{color:#1e9e4a}.card .wait-chase{color:#e8830c}.card .wait-late{color:var(--danger)}
+.today{margin-bottom:14px}
+.today h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:10px 4px 6px}
+.ev{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.06);margin-bottom:8px}
+.ev .when{flex:none;min-width:58px;font-size:14px;color:var(--muted);margin-top:2px}
+.ev .body{flex:1;min-width:0}
+.ev .t{font-size:17px;overflow-wrap:anywhere}
+.ev .task{font-size:14px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
+.ev .join{flex:none;align-self:center;padding:8px 12px;border-radius:12px;background:var(--accent);color:var(--accent-text);font-size:14px;font-weight:600;text-decoration:none}
 .marks{font-weight:800;letter-spacing:-.05em;color:var(--muted);flex:none;margin-top:1px}
 .marks.m1{color:var(--text)}
 .marks.m2{color:var(--danger)}
@@ -111,6 +123,7 @@ const ICONS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" styl
 <symbol id="i-gear" viewBox="0 0 24 24"><path d="M18.8 10.3L21.5 10.8L21.5 13.2L18.8 13.7L18 15.6L19.6 17.9L17.9 19.6L15.6 18L13.7 18.8L13.2 21.5L10.8 21.5L10.3 18.8L8.4 18L6.1 19.6L4.4 17.9L6 15.6L5.2 13.7L2.5 13.2L2.5 10.8L5.2 10.3L6 8.4L4.4 6.1L6.1 4.4L8.4 6L10.3 5.2L10.8 2.5L13.2 2.5L13.7 5.2L15.6 6L17.9 4.4L19.6 6.1L18 8.4Z"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></symbol>
 <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
 <symbol id="i-link" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
 <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="12.5" height="12" rx="2"/><path d="M15.5 10.5L21 7.5v9l-5.5-3z"/></symbol>
@@ -152,12 +165,14 @@ const BODY = `${ICONS}
 <header class="top"><div class="title"><h1>FloatBoard</h1><div id="sync-status" class="updated" role="status" aria-live="polite"></div></div>
 <button id="refresh" class="icon-btn" aria-label="Sync now">${icon("refresh")}</button>
 <button id="open-settings" class="icon-btn" aria-label="Settings">${icon("gear")}</button></header>
+<nav class="views" role="tablist" aria-label="Screens"><button class="view" type="button" role="tab" data-view="board" aria-selected="true">Board</button><button class="view" type="button" role="tab" data-view="plan" aria-selected="false">Plan</button></nav>
 <nav class="tabs" role="tablist">${tab("todo", "To do")}${tab("doing", "Doing")}${tab("watch", "Watch")}${tab("done", "Done today")}</nav>
 </div>
 <p id="sync-note" class="note" role="status" hidden></p>
 <div id="pending-note" class="banner" hidden></div>
 <div id="list" class="list" role="tabpanel"></div>
 <p id="empty" class="empty" hidden></p>
+<section id="plan" class="plan" role="tabpanel" hidden><div id="today" class="today"></div><p id="plan-empty" class="empty" hidden>Nothing planned for today, the rest of this week or next week.</p></section>
 <button id="add" class="fab" aria-label="Add a task">${icon("plus")}</button>
 </main>
 

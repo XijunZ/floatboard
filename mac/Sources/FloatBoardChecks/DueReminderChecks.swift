@@ -20,7 +20,7 @@ import FloatBoardCore
     }
     func card(_ id: Int64, due: Date?, status: Status = .todo, title: String = "Task") -> Card {
         Card(id: id, title: title, notes: "", area: "Work", importance: .medium, due: due, status: status, created: at(2026, 11, 1),
-             started: nil, done: nil)
+             started: nil, done: nil, dueHasTime: due.map { cal.component(.hour, from: $0) != 0 || cal.component(.minute, from: $0) != 0 } ?? false)
     }
     let now = at(2026, 11, 12, 8, 0)
 

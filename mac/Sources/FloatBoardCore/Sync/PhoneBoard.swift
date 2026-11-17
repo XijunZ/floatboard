@@ -10,6 +10,31 @@ public struct BoardLink: Codable, Equatable {
     public init(kind: String, url: String, label: String? = nil) { self.kind = kind; self.url = url; self.label = label }
 }
 
+/// One calendar event in the copy for the phone's planning summary. Times are ISO 8601 UTC; `tasks` are the ids of the cards
+/// linked to it. A repeating meeting's instances share `series` (an opaque "S-" key) and carry `repeat`, the rule in a few
+/// words ("weekdays 09:00"), so the phone lists the meeting once per block; both are left out for a one-off event.
+public struct BoardEvent: Codable, Equatable {
+    public var id: String
+    public var title: String
+    public var start: String
+    public var end: String
+    public var allDay: Bool
+    public var video: String?
+    public var color: String
+    public var tasks: [Int64]
+    public var series: String?
+    public var repeatLabel: String?
+    /// An instance's original start (ISO UTC): differs from `start` when it was moved in Google, so the phone lists it apart.
+    public var originalStart: String?
+    enum CodingKeys: String, CodingKey { case id, title, start, end, allDay = "all_day", video, color, tasks, series, repeatLabel = "repeat",
+                                              originalStart = "original_start" }
+    public init(id: String, title: String, start: String, end: String, allDay: Bool, video: String?, color: String, tasks: [Int64],
+                series: String? = nil, repeatLabel: String? = nil, originalStart: String? = nil) {
+        self.id = id; self.title = title; self.start = start; self.end = end; self.allDay = allDay; self.video = video; self.color = color; self.tasks = tasks
+        self.series = series; self.repeatLabel = repeatLabel; self.originalStart = originalStart
+    }
+}
+
 /// One task in the copy of the board the engine keeps for the phone app (`PUT /v2/board`).
 public struct BoardCard: Codable, Equatable {
     public var id: Int64
@@ -32,10 +57,14 @@ public struct BoardCard: Codable, Equatable {
     public var statusAt: String?
     /// Watch only: whom it waits on, how to recognise their reply, and since when (ISO 8601 UTC).
     public var watch: BoardWatch?
+    /// True for a task the email sorting made: deleting it on the phone offers the same "teach" choices as on the Mac.
+    public var teachOnDelete: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, title, group, color, importance, due, hasTime = "has_time", status, link, links, email, doneAt = "done_at", statusAt = "status_at", watch
+        case teachOnDelete = "teach_on_delete"
     }
+
 
     /// Every field is written, nil ones as null (the engine requires them all).
     public func encode(to e: Encoder) throws {
@@ -47,6 +76,7 @@ public struct BoardCard: Codable, Equatable {
         try c.encodeIfPresent(email, forKey: .email)
         try c.encode(doneAt, forKey: .doneAt); try c.encode(statusAt, forKey: .statusAt)
         try c.encodeIfPresent(watch, forKey: .watch)
+        if teachOnDelete == true { try c.encode(true, forKey: .teachOnDelete) }
     }
 }
 
@@ -87,17 +117,19 @@ public struct PhoneAction: Codable, Equatable {
     public var email: PhoneEmail?
     /// watch_reply only: why the task goes back to To do ("Anna replied by email").
     public var reason: String?
+    /// delete only: the "teach" choice made on the phone (not_action | wrong_details | duplicate), as on the Mac.
+    public var teach: String?
 
     public init(id: String, clientID: String? = nil, cardID: Int64?, action: String, title: String? = nil, group: String? = nil,
-                madeAt: Date? = nil, email: PhoneEmail? = nil, reason: String? = nil) {
+                madeAt: Date? = nil, email: PhoneEmail? = nil, reason: String? = nil, teach: String? = nil) {
         self.id = id; self.clientID = clientID; self.cardID = cardID; self.action = action; self.title = title; self.group = group
-        self.madeAt = madeAt; self.email = email; self.reason = reason
+        self.madeAt = madeAt; self.email = email; self.reason = reason; self.teach = teach
     }
 
     /// The key that makes an action apply once: the phone's id when there is one, else the engine's.
     public var onceKey: String { clientID.flatMap { $0.isEmpty ? nil : $0 } ?? id }
 
-    enum CodingKeys: String, CodingKey { case id, clientID = "client_id", cardID = "card_id", action, title, group, madeAt = "made_at", email, reason }
+    enum CodingKeys: String, CodingKey { case id, clientID = "client_id", cardID = "card_id", action, title, group, madeAt = "made_at", email, reason, teach }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -108,6 +140,7 @@ public struct PhoneAction: Codable, Equatable {
         title = try c.decodeIfPresent(String.self, forKey: .title)
         group = try c.decodeIfPresent(String.self, forKey: .group)
         reason = (try? c.decodeIfPresent(String.self, forKey: .reason)).flatMap { $0 } // try?-ok: only shown in the task's history
+        teach = (try? c.decodeIfPresent(String.self, forKey: .teach)).flatMap { $0 } // try?-ok: an unreadable reason is a plain delete
         // An unreadable time counts as unknown (applied without the newest-change test), not as a broken action.
         madeAt = (try? c.decodeIfPresent(String.self, forKey: .madeAt)).flatMap { $0 }.flatMap(PhoneBoard.parseISO) // try?-ok: unreadable time is treated as unknown
         // An unreadable email leaves it nil: the link is then skipped as invalid, never a broken batch.
@@ -120,6 +153,7 @@ public struct PhoneAction: Codable, Equatable {
         try c.encode(action, forKey: .action); try c.encodeIfPresent(title, forKey: .title); try c.encodeIfPresent(group, forKey: .group)
         try c.encodeIfPresent(madeAt.map(PhoneBoard.isoUTC), forKey: .madeAt)
         try c.encodeIfPresent(email, forKey: .email)
+        try c.encodeIfPresent(teach, forKey: .teach)
     }
 }
 
@@ -153,7 +187,7 @@ public enum PhoneBoard {
     /// Open tasks (board order) then tasks done today (local day, newest first), at most 500.
     /// Each card carries `status_at`: its last step change on this Mac (see `Store.lastStepChanges`).
     @MainActor
-    public static func payload(store: Store, now: Date, calendar: Calendar = .current) -> [BoardCard] {
+    public static func payload(store: Store, now: Date, calendar: Calendar = AppTime.calendar) -> [BoardCard] {
         let colors = Dictionary(store.areas.map { ($0.name, $0.colorHex) }, uniquingKeysWith: { a, _ in a })
         let open = store.active
         let doneToday = store.cards(in: .done).filter { c in c.done.map { calendar.isDate($0, inSameDayAs: now) } ?? false }
@@ -168,14 +202,15 @@ public enum PhoneBoard {
 
     public static func card(for c: Card, color: String?, calendar: Calendar) -> BoardCard {
         let hex = color.flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
-        let hasTime = c.due.map { Due.hasTime($0) } ?? false
+        let hasTime = c.dueHasTime
         let all = links(for: c)
         return BoardCard(id: c.id, title: clip(c.title), group: clip(c.area), color: hex, importance: c.importance.rawValue,
                          due: c.due.map { hasTime ? iso($0, calendar) : day($0, calendar) }, hasTime: hasTime,
                          status: c.status.rawValue, link: all.first?.url, links: all,
                          email: c.isFromEmailSorting ? "sorting" : c.emailLinkedByUser ? "user" : nil,
                          doneAt: c.status == .done ? c.done.map { iso($0, calendar) } : nil, statusAt: nil,
-                         watch: c.status == .watch ? c.watchSince.map { BoardWatch(person: clipTo(c.watchPerson, 100), contact: c.watchContact, since: isoUTC($0)) } : nil)
+                         watch: c.status == .watch ? c.watchSince.map { BoardWatch(person: clipTo(c.watchPerson, 100), contact: c.watchContact, since: isoUTC($0)) } : nil,
+                         teachOnDelete: c.teachOnDelete ? true : nil)
     }
 
     static func clipTo(_ s: String, _ n: Int) -> String { String(s.prefix(n)) }
@@ -251,30 +286,84 @@ public enum PhoneBoard {
         return f.date(from: s)
     }
 
-    /// The body sent to the engine: `{"cards":[...], "sent_at": ...}` with sorted keys. Without `sentAt` (as for the
-    /// hash), equal boards give equal bytes.
-    public static func body(_ cards: [BoardCard], sentAt: Date? = nil) throws -> Data {
+    /// Up to two weeks of meetings: enough for a full working calendar, bounded so one push stays small.
+    public static let maxEvents = 200
+    static let maxEventTasks = 20
+
+    /// The meetings for the phone's planning summary (Today, rest of this week, next week), by the app's calendar: from the
+    /// start of today to the end of next week (weeks start on Monday), at most 200, earliest first: shown calendars of
+    /// connected accounts, not events made from tasks (C6), each with the ids of its linked tasks and, for a repeating
+    /// meeting, its series and its rule in words (`RecurrenceLabel`; "repeats" while the rule is not read).
+    @MainActor
+    public static func events(store: Store, now: Date, calendar: Calendar = AppTime.calendar) -> [BoardEvent] {
+        let from = calendar.startOfDay(for: now)
+        let sinceMonday = (calendar.component(.weekday, from: from) + 5) % 7   // weekday: 1 = Sunday
+        guard let monday = calendar.date(byAdding: .day, value: -sinceMonday, to: from),
+              let to = calendar.date(byAdding: .day, value: 14, to: monday) else { return [] }
+        let cache = CalendarCache(store: store)
+        let colors = Dictionary(cache.calendars().map { ("\($0.account)\u{0}\($0.calendarID)", $0.color) }, uniquingKeysWith: { a, _ in a })
+        return cache.meetings(from: from, to: to).prefix(maxEvents).map { e in
+            let hex = colors["\(e.account)\u{0}\(e.calendarID)"].flatMap { $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil ? $0 : nil } ?? fallbackColor
+            let video = joinLink(e.videoLink)
+            let tasks = store.links(of: ShortID(kind: .event, number: e.shortID)).filter { $0.kind == .task }.map(\.number)
+            var series: String?, label: String?
+            if let r = e.recurringID, !r.isEmpty {
+                series = seriesKey(account: e.account, calendarID: e.calendarID, seriesID: r)
+                label = RecurrenceLabel.text(rule: cache.seriesRule(account: e.account, calendarID: e.calendarID, seriesID: r) ?? "",
+                                             start: e.start, allDay: e.allDay,
+                                             master: cache.seriesMaster(account: e.account, calendarID: e.calendarID, seriesID: r),
+                                             range: DateInterval(start: from, end: to))
+            }
+            return BoardEvent(id: ShortID(kind: .event, number: e.shortID).text,
+                              title: clip(e.title.trimmingCharacters(in: .whitespacesAndNewlines)).trimmingCharacters(in: .whitespacesAndNewlines),
+                              start: isoUTC(e.start), end: isoUTC(e.end), allDay: e.allDay, video: video, color: hex,
+                              tasks: Array(tasks.prefix(maxEventTasks)), series: series, repeatLabel: label,
+                              originalStart: series == nil ? nil : e.originalStart.map(isoUTC))
+        }
+    }
+
+    /// The phone's key for a repeating meeting: "S-" and 16 hex digits of a hash, so no Google id leaves the Mac.
+    static func seriesKey(account: String, calendarID: String, seriesID: String) -> String {
+        let d = SHA256.hash(data: Data("\(account)\u{0}\(calendarID)\u{0}\(seriesID)".utf8))
+        return "S-" + d.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A meeting link the phone can open: https, a host, no spaces, at most 2,000 characters; anything else is left out
+    /// (one odd link must never hold back the board).
+    static func joinLink(_ s: String) -> String? {
+        guard s.utf16.count <= 2000, s.range(of: #"\s"#, options: .regularExpression) == nil,
+              let u = URL(string: s), u.scheme?.lowercased() == "https", let host = u.host, !host.isEmpty else { return nil }
+        return s
+    }
+
+    /// The body sent to the engine: `{"cards":[...], "events":[...], "time_zone": ..., "sent_at": ...}` with sorted keys.
+    /// `events` and `time_zone` are left out when nil (older engines and checks). Without `sentAt` (as for the hash),
+    /// equal boards give equal bytes.
+    public static func body(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, sentAt: Date? = nil) throws -> Data {
         struct Body: Encodable {
-            let cards: [BoardCard]; let sentAt: String?
-            enum CodingKeys: String, CodingKey { case cards, sentAt = "sent_at" }
+            let cards: [BoardCard]; let events: [BoardEvent]?; let timeZone: String?; let sentAt: String?
+            enum CodingKeys: String, CodingKey { case cards, events, timeZone = "time_zone", sentAt = "sent_at" }
         }
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return try enc.encode(Body(cards: cards, sentAt: sentAt.map(isoUTC)))
+        return try enc.encode(Body(cards: cards, events: events, timeZone: timeZone, sentAt: sentAt.map(isoUTC)))
     }
 
     /// A stable fingerprint of the board for one engine address (a different engine always gets a push). It covers
-    /// each card's `status_at`, so a step change is sent even when the card ends on the same step.
-    public static func hash(_ cards: [BoardCard], engine: String) throws -> String {
+    /// each card's `status_at`, so a step change is sent even when the card ends on the same step, and the events.
+    public static func hash(_ cards: [BoardCard], events: [BoardEvent]? = nil, timeZone: String? = nil, engine: String) throws -> String {
         var data = Data(engine.utf8)
         data.append(0)
-        data.append(try body(cards))
+        data.append(try body(cards, events: events, timeZone: timeZone))
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
 
 extension Store {
     static func boardHashKey(_ connector: String) -> String { "phone_board_hash:\(connector)" }
+    /// History row and meta key marking a delete that came from the phone (meta: when it was made, on this Mac's clock).
+    static let phoneDeleteKind = "deleted from the phone"
+    static func phoneDeleteKey(_ cardID: Int64) -> String { "phone_delete_made:\(cardID)" }
     static func appliedKey(_ connector: String, _ id: String) -> String { "phone_action:\(connector):\(id)" }
 
     /// How long a sent board counts as current: after this it is sent again even if unchanged (covers an engine that
@@ -349,7 +438,7 @@ extension Store {
                                   engineAhead: TimeInterval = 0) -> PhoneApplyResult {
         let component = "connector:\(connector)"
         var result = PhoneApplyResult()
-        var moved = 0, added = 0, repeated = 0, superseded = 0, linked = 0
+        var moved = 0, added = 0, repeated = 0, superseded = 0, linked = 0, deleted = 0, restored = 0
         var unknown: [String] = []
         do {
             try db.run("DELETE FROM meta WHERE key LIKE ? AND CAST(value AS REAL) < ?",
@@ -362,6 +451,7 @@ extension Store {
             let madeHere = a.madeAt.map { $0.addingTimeInterval(-engineAhead) }
             do {
                 var outcome = "skip"
+                var gone: DeleteMemo?, back: Int64?
                 try performThrowing {
                     if try db.query("SELECT 1 FROM meta WHERE key=?", [key], { DB.int($0, 0) }).first != nil { outcome = "repeat"; return }
                     if a.action == "add" {
@@ -394,6 +484,39 @@ extension Store {
                         guard let row, row.0 == 0, row.1 == 0 else { outcome = "unknown"; return }
                         let at = madeHere.map { min($0, now) } ?? now
                         outcome = try watchReplyRow(cardID, reason: a.reason ?? "replied", at: at) ? "moved" : "superseded"
+                    } else if a.action == "delete", let cardID = a.cardID {
+                        // Exactly a delete on the Mac (connector told, the teach lesson, the task's calendar event with its
+                        // Undo window), unless a change on this Mac is newer. A teach reason counts only where the Mac offers it.
+                        let row = try db.query("SELECT deleted, withdrawn FROM cards WHERE id=?", [cardID]) { (DB.int($0, 0), DB.int($0, 1)) }.first
+                        guard let row, row.0 == 0, row.1 == 0 else { outcome = "unknown"; return }
+                        if let made = madeHere, let last = try lastStepChange(cardID), made < last.addingTimeInterval(-Self.sameTime) {
+                            outcome = "superseded"; return
+                        }
+                        let teach = card(cardID)?.teachOnDelete == true && ["not_action", "wrong_details", "duplicate"].contains(a.teach ?? "") ? a.teach : nil
+                        gone = try deleteCardRow(cardID, verdict: teach, now: now, calendarDelay: Store.phoneCalendarDeleteDelay)
+                        guard gone != nil else { outcome = "unknown"; return }
+                        // Marks this delete as the phone's (a later restore may take back only that), with when it was made.
+                        try insertEvent(cardID, Self.phoneDeleteKind, actor: .user, at: now)
+                        try db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)",
+                                   [Self.phoneDeleteKey(cardID), String((madeHere.map { min($0, now) } ?? now).timeIntervalSince1970)])
+                        outcome = "deleted"
+                    } else if a.action == "restore", let cardID = a.cardID {
+                        // Undo on the phone after its delete was sent: the task comes back as with Undo Delete here.
+                        guard try db.query("SELECT 1 FROM cards WHERE id=?", [cardID], { DB.int($0, 0) }).first != nil else { outcome = "unknown"; return }
+                        // Newest change wins: only the phone's own delete is taken back, and only by a restore made after it.
+                        // A task deleted on this Mac (also after a phone delete and restore) stays deleted.
+                        let latest = try db.query("""
+                            SELECT kind FROM events WHERE card_id=? AND (kind='deleted' OR kind=?) ORDER BY at DESC, id DESC LIMIT 1
+                            """, [cardID, Self.phoneDeleteKind]) { DB.text($0, 0) }.first
+                        let deleteMade = try db.query("SELECT value FROM meta WHERE key=?", [Self.phoneDeleteKey(cardID)]) { Double(DB.text($0, 0)) }.first ?? nil
+                        let deleted = try db.query("SELECT deleted FROM cards WHERE id=?", [cardID]) { DB.int($0, 0) }.first ?? 0
+                        if deleted != 0 {
+                            guard latest == Self.phoneDeleteKind, let made = deleteMade,
+                                  (madeHere ?? now).timeIntervalSince1970 >= made - Self.sameTime else { outcome = "superseded"; return }
+                        }
+                        if try restoreCardRow(cardID, memo: deleteMemos[cardID], now: now) { back = cardID }
+                        try db.run("DELETE FROM meta WHERE key=?", [Self.phoneDeleteKey(cardID)])
+                        outcome = "restored"
                     } else if let status = Status(rawValue: a.action), let cardID = a.cardID {
                         let row = try db.query("SELECT deleted, withdrawn, status FROM cards WHERE id=?", [cardID]) {
                             (DB.int($0, 0), DB.int($0, 1), DB.text($0, 2)) }.first
@@ -409,7 +532,15 @@ extension Store {
                     } else { outcome = "bad"; return }
                     try db.run("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", [key, String(now.timeIntervalSince1970)])
                 }
+                if let gone {
+                    // Undo stays possible here (Edit → Undo Delete) but the Mac shows no Undo bar for a phone delete.
+                    remember(gone)
+                    lastDeleted = DeletedTask(id: gone.task.id, title: gone.task.title, at: gone.task.at, barShown: false)
+                }
+                if let back { deleteMemos[back] = nil; if lastDeleted?.id == back { lastDeleted = nil } }
                 switch outcome {
+                case "deleted": deleted += 1; result.applied.append(a.id)
+                case "restored": restored += 1; result.applied.append(a.id)
                 case "moved": moved += 1; result.applied.append(a.id)
                 case "added": added += 1; result.applied.append(a.id)
                 case "linked": linked += 1; result.applied.append(a.id)
@@ -433,8 +564,10 @@ extension Store {
         if superseded > 0 {
             activity(component, .info, "Kept a newer change from this Mac", detail: "\(superseded) phone move(s) not applied")
         }
-        if moved + added + linked > 0 {
+        if moved + added + linked + deleted + restored > 0 {
             var parts: [String] = []
+            if deleted > 0 { parts.append("\(deleted) deleted") }
+            if restored > 0 { parts.append("\(restored) brought back") }
             if moved > 0 { parts.append("\(moved) moved") }
             if added > 0 { parts.append("\(added) added") }
             if linked > 0 { parts.append("\(linked) email link\(linked == 1 ? "" : "s") changed") }

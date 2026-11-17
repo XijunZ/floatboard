@@ -33,7 +33,7 @@ public enum DueReminders {
     public static func enabled(_ defaults: UserDefaults) -> Bool { enabled(stored: defaults.object(forKey: settingKey)) }
     public static func enabled(stored: Any?) -> Bool { stored as? Bool ?? true }
 
-    public static func plan(_ cards: [Card], now: Date, calendar: Calendar = .current) -> [DueReminder] {
+    public static func plan(_ cards: [Card], now: Date, calendar: Calendar = AppTime.calendar) -> [DueReminder] {
         var out: [DueReminder] = []
         let clock = DateFormatter()
         clock.locale = Locale(identifier: "en_US_POSIX"); clock.timeZone = calendar.timeZone; clock.dateFormat = "HH:mm"
@@ -44,8 +44,7 @@ public enum DueReminders {
                                        title: c.title, body: Watch.chaseText(person: c.watchPerson, at: next, since: since), fireAt: next))
             }
             guard let due = c.due else { continue }
-            let t = calendar.dateComponents([.hour, .minute], from: due)
-            let timed = (t.hour ?? 0) != 0 || (t.minute ?? 0) != 0   // as Due.hasTime, in this calendar
+            let timed = c.dueHasTime
             let fire: Date, until: Date, body: String
             if timed {
                 fire = due.addingTimeInterval(-lead); until = due; body = "Due " + clock.string(from: due)
@@ -87,7 +86,7 @@ public enum DueReminders {
         set { save(newValue.sorted()) }
     }
 
-    public func sync(cards: [Card], enabled: Bool, now: Date = Date(), calendar: Calendar = .current) {
+    public func sync(cards: [Card], enabled: Bool, now: Date = Date(), calendar: Calendar = AppTime.calendar) {
         let wanted = enabled ? DueReminders.plan(cards, now: now, calendar: calendar) : []
         let ids = Set(wanted.map(\.id))
         var known = memory

@@ -1,6 +1,6 @@
 # Calendar: design
 
-Date: 16 Nov 2026 · Status: for review (updated after builder check) · Part 1 of 4 (Calendar → Jots → People → Decisions)
+Date: 16 Nov 2026 · Status: built (16–17 Nov 2026), awaiting owner review · Part 1 of 4 (Calendar → Jots → People → Decisions)
 
 ## Why
 
@@ -74,7 +74,7 @@ due that day) and act on it there, with every change landing in Google, so they 
 | # | Decision |
 |---|---|
 | D7 | **Only when you put it there.** A task appears on FloatBoard's calendar whenever it has a due date. It reaches Google only when the user drags it onto a time slot or uses "Add to calendar" (as today, with or without Meet). No automatic pushing, no backfill. |
-| D8 | **Deleting:** deleting a task deletes the Google event FloatBoard made for it (Undo Delete recreates it). Deleting the event in Google leaves the task (D4). Nothing else deletes an event: clearing a task's due or time leaves its event in Google, still linked. |
+| D8 | **Deleting:** deleting a task deletes the Google event FloatBoard made for it (Undo Delete before the delete reaches Google takes it back, so the event stays exactly as it was; once sent, Undo makes a new event). Deleting the event in Google leaves the task (D4). Nothing else deletes an event: clearing a task's due or time leaves its event in Google, still linked. |
 | D9 | **Events made in Google** never create or change tasks; they just show in FloatBoard's calendar (mirror). |
 | D10 | **What stays in step** between a task and its event: title and time, both ways. Event length and description live only in Google. |
 | D11 | **"Add to calendar" on a date-only task** still makes an all-day event; moving it in Google changes the task's date. |

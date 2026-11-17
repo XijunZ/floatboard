@@ -146,8 +146,8 @@ device, passkey and session were all created; push payloads trimmed to fit 4096 
 ## Sync v2: engine keeps the record, newest change wins (decided)
 
 Scope stays **view + quick actions** on the phone: see the board, alerts, move between To do / Doing / Watch / Done,
-add a task. Editing details (title, notes, due, importance, group, delete) is Mac only; the phone's task sheet says
-"Edit details on your Mac".
+add a task, delete a task (since 17 Nov 2026, below). Editing details (title, notes, due, importance, group) is Mac only;
+the phone's task sheet says "Edit details on your Mac".
 
 1. **Action log on the engine** (`board_log`, kept 1 year): one row per change from any device: `id` (UUID, unique:
    a repeat is ignored), `user_id`, `device` ("mac" or the phone's device id), `card_id`, `kind`
@@ -178,10 +178,12 @@ queued offline 3 h); action on a card deleted on the Mac is dropped and logged; 
 Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (unique per user), `device_id`,
 `made_at`, `sent_at`, `outcome`.
 
-- `PUT /v2/board` `{ sent_at?, cards: [{ ...card, status_at? }] }`. A missing `status_at` keeps the previous time when
+- `PUT /v2/board` `{ sent_at?, time_zone?, events?, cards: [{ ...card, status_at? }] }`. A missing `status_at` keeps the previous time when
   the step is unchanged, else the push time. Each push is compared with the last one: step changes, new cards and gone
   cards are logged (device "mac"); the first push is the baseline. Waiting phone moves older than a card's new
   `status_at` are marked taken (the Mac already shows that step) or superseded.
+  `events` (optional, at most 200, today through the end of next week) are `{ id: "E-37", title, start, end, all_day, video (https or null), color, tasks: [card ids], series?, repeat? }`;
+  `time_zone` is the Mac's zone, so the phone's planning summary shows the Mac's times. Both are stored in the encrypted copy and returned by `GET /app/api/board`.
 - `POST /app/api/action` `{ sent_at?, actions: [{ id, made_at?, card_id?, action, title?, group? }] }` (1 to 100; body
   at most 64 KB; the older single action still works). Times are corrected by `received_at - sent_at` (ignored past
   7 days) and never later than `received_at`. A repeated id is accepted and not stored again. A move older than the
@@ -372,3 +374,78 @@ Deploy order: migrations 0031 and 0032 (`npm run migrate:remote`), then the engi
 `wrangler.toml`), then the Mac app. An older Mac skips a phone link as invalid (the phone shows it as replaced) and
 sends no `email` marker (the phone then offers Link an email only on tasks without an email link); a newer Mac
 against an older engine says "Update the engine first" when searching.
+
+### Built: Today list (Calendar, Nov 2026; replaced by the planning summary below)
+
+The phone shows a **Today** list above the board: today's meetings (time, title, a **Join** button when there is a
+video link) and the tasks due today. It is read only. The phone has no calendar access of its own: the Mac puts the
+events in the board copy it already sends.
+
+- `PUT /v2/board` gains optional `events` (today and tomorrow, at most 50) and `time_zone` (the Mac's zone, so the phone
+  shows the Mac's times, not the phone's). Each event is `{ id: "E-37", title, start, end, all_day, video, color, tasks }`.
+  The key is `all_day` (snake_case, like the cards). Both are kept in the encrypted board copy and come back from
+  `GET /app/api/board`. An older Mac sends neither and the phone simply has no Today meetings.
+- Robustness rule: one bad field never blocks the board push. A `video` that is not a valid https address becomes
+  none (no Join button) and an unknown `time_zone` is ignored, instead of the engine refusing the whole push with 400.
+  The Mac also checks the address before sending. Fields that are the wrong type (for example a missing `all_day`) are
+  still refused with 400, as for cards.
+- A task linked to an event is not repeated: it shows under its meeting, and a task that is itself on the calendar is
+  not counted as a meeting.
+- Deploy order: engine first, then the Mac app. An older engine ignores `events` safely; with the engine first, Today
+  shows from the first push.
+- Past events stay in Today all day (they are not removed once they end).
+
+### Changed: planning summary (Calendar, 17 Nov 2026; replaces the Today list)
+
+The phone shows a **planning summary** on its own **Plan** screen, the second after **Board** (navigation order: Board,
+Plan, later Jots and Circle; the app always opens on the Board, the choice is never stored). It has three blocks, in
+the Mac's time zone: **Today**, **Rest of this week** (tomorrow to Sunday; left out on a Sunday) and **Next week**
+(Monday to Sunday). Open tasks due before today lead the Today block in red, labelled "Overdue", oldest first. Each block lists its
+meetings, one line each (Today: the time or "All day"; the other blocks: the day and time, "Fri 14:00"), with the
+tasks linked to a meeting under it, then the open tasks due in that block. Empty blocks are not shown.
+
+- A repeating meeting (Google instances share `recurringEventId`) appears once per block with a short label instead of
+  every instance: "Standup · weekdays 09:00", "1:1 · weekly Tue 14:00", "Board · monthly". Its linked tasks are those of
+  all its instances in the block; Today's Join opens today's instance. In Today the row shows the occurrence's actual
+  time. An instance at another time than the series' usual one (the time in its label, else the time most of its
+  instances in the block share) is listed as its own row with its own time and Join. So is any instance moved in
+  Google to another day or time (all-day ones too): the Mac sends each instance's `original_start` (Google's
+  `originalStartTime`, ISO UTC; left out when bad) and the phone never folds an instance whose start differs from it.
+- The label comes from the series' rule. The Mac reads it once per series with `events.get(calendarId, recurringEventId,
+  fields=recurrence,start)`, keeps it with the series' start and time zone (`cal_series`), reads it again at the daily
+  full read, and puts it in words itself: FREQ DAILY / WEEKLY / MONTHLY / YEARLY, INTERVAL ("every 2 weeks"), BYDAY
+  (MO-FR = "weekdays"); anything else, or a rule not read yet, is "repeats". Weekdays and time are converted together
+  from the series' zone into the app's (Monday 23:00 in Los Angeles is "weekly Tue 07:00" in London); when a clock
+  change makes that differ between the days shown, the label has no time ("weekly Tue").
+- `PUT /v2/board`: `events` now cover today through the end of next week (weeks start on Monday), at most 200 (was 50).
+  Each instance of a repeating meeting carries `series` (an opaque "S-" key: a hash, no Google id leaves the Mac) and
+  `repeat` (the label). Robustness as before (R17): a `series` that is not an "S-" key or a `repeat` that is not short
+  plain text is left out (the meeting is then listed like a one-off), never a refused push.
+- The grouping is a pure function (`planBlocks` in the phone's sync logic), tested on its own
+  (engine/test/phone/phone-planning.test.ts).
+
+### Built: Delete on the phone, with feedback (17 Nov 2026; Sync v2 scope now includes delete)
+
+The task sheet has **Delete**. For a task the email sorting made (the board copy marks it `teach_on_delete: true`) it
+offers the Mac's choices: Not an action (teach), Wrong details (teach), Duplicate (teach), Just delete; the same reason
+values (`not_action`, `wrong_details`, `duplicate`) reach the same learning as on the Mac. Other tasks are deleted at
+once. After a delete the phone shows "Deleted · Undo" for the same 8 seconds as a move, and gives a short vibration
+(`navigator.vibrate(30)` where the phone has one; also on Done).
+
+- Wire: phone action `delete` `{ id, made_at, card_id, teach? }` (a teach value outside the three is refused as
+  invalid) and `restore` `{ id, made_at, card_id }` in `POST /app/api/action`; `GET /v2/phone-actions` carries them, with
+  `teach`. Logged in `board_log` as kind `delete` (value: the teach reason) or `restore`.
+- Newest change wins, as for moves: a delete made before the card's last step change on the Mac (`status_at`) is stored
+  as superseded on the engine and skipped as "superseded" by the Mac. The board overlay hides a card with a delete and
+  shows it again after a later restore.
+- The Mac applies `delete` exactly as its own delete (`Store.deleteCardRow`: the connector is told, the teach lesson is
+  recorded, the task's calendar event goes after the Undo window, D8/R19), once per phone id. The Mac shows no Undo bar
+  for it (Edit, Undo Delete still works). `restore` is the Mac's Undo Delete for that task (`restoreCardRow`): the same
+  links come back, an unsent connector delete is taken back with its lesson, the calendar event is kept or made again.
+- Undo on the phone (design chosen: simplest correct with Sync v2's append-only queue): a delete still waiting on the
+  phone and not being sent is taken out of the queue, so nothing is sent; once sent (or while a send is in progress) Undo
+  queues a `restore` made after the delete. The engine accepts a `restore` for a card the Mac already removed from its
+  copy, as long as the board ever had it. Until the Mac has restored and pushed, a card the Mac had already deleted does
+  not show on the phone.
+- Tests: engine `test/phone/phone-delete.test.ts`; Mac `PhoneDeleteChecks.swift`.
+

@@ -7,12 +7,11 @@ import SwiftUI
 final class UIState: ObservableObject {
     enum Mode { case banner, expanded, minimized, hidden }
     enum Tab: Hashable, CaseIterable {
-        case board, bar, groups, settings
+        case board, calendar, settings
         var title: String {
             switch self {
             case .board: "Board"
-            case .bar: "Bar"
-            case .groups: "Groups"
+            case .calendar: "Calendar"
             case .settings: "Settings"
             }
         }
@@ -23,13 +22,24 @@ final class UIState: ObservableObject {
     /// The open section of the Settings tab.
     @Published var settingsSection: SettingsSection = .mode
     @Published var hovering = false
+    /// Opens Settings on one section (the menu's "Bar…" and "Groups…", links elsewhere in the app).
+    func openSettings(_ section: SettingsSection) { tab = .settings; settingsSection = section }
     /// Set when the board should open with the "new task" box focused.
     @Published var wantsAddFocus = false
     /// Quick add happens inside the one-line banner, without opening the board.
     @Published var quickAdding = false
-    /// How the one-line bar orders tasks and what it shows (Bar tab).
+    /// How the one-line bar orders tasks and what it shows (Settings › Bar).
     @Published var bar = BarConfig() { didSet { bar.save(store: logStore) } }
     private var logStore: Store?
+    /// The meeting the bar shows right now (within 60 minutes of starting, or in progress), if any. Set by `refreshMeeting`.
+    @Published var nextMeeting: CalEvent?
+    /// Set by a click on the bar's meeting: the Calendar tab shows this day, then clears it.
+    @Published var calendarFocus: Date?
+    /// Looks up what the bar should show at `now`. Called when the bar appears, once a minute, and when the calendar changes.
+    func refreshMeeting(store: Store, now: Date = Date()) {
+        let next = (bar.showNextMeeting ?? true) ? BarMeeting.visible(next: CalendarCache(store: store).nextMeeting(after: now), now: now) : nil
+        if next != nextMeeting { nextMeeting = next }
+    }
     /// Loads the saved bar settings once the store exists (so a problem can be logged).
     func loadBar(store: Store) { logStore = store; bar = BarConfig.load(store: store) }
     /// Board search (highlights matching tasks).

@@ -201,20 +201,21 @@ extension Store {
                 p.1["card_id"] == String(old.id)
                     && abs(now.timeIntervalSince(Date(timeIntervalSince1970: Double(p.1["last_at"] ?? "") ?? 0))) <= 5
             }
-        let base: (area: String, imp: String, title: String, due: Date?)
+        let base: (area: String, imp: String, title: String, due: Date?, hasTime: Bool)
         if let p = pending?.1 {
             base = (p["from_area"] ?? old.area, p["from_importance"] ?? old.importance.title,
-                    p["from_title"] ?? old.title, Double(p["from_due"] ?? "").map { Date(timeIntervalSince1970: $0) })
+                    p["from_title"] ?? old.title, Double(p["from_due"] ?? "").map { Date(timeIntervalSince1970: $0) },
+                    p["from_due_has_time"].map { $0 == "1" } ?? old.dueHasTime)
         } else {
-            base = (old.area, old.importance.title, old.title, old.due)
+            base = (old.area, old.importance.title, old.title, old.due, old.dueHasTime)
         }
         var parts: [String] = []
         if base.area != new.area { parts.append("group: \(base.area) → \(new.area)") }
         if base.imp != new.importance.title { parts.append("importance: \(base.imp) → \(new.importance.title)") }
         if base.title != new.title { parts.append("title: \(base.title) → \(new.title)") }
-        if base.due != new.due {
-            let f = { (d: Date?) in d.map { Fmt.due($0) } ?? "none" }
-            parts.append("due: \(f(base.due)) → \(f(new.due))")
+        if base.due != new.due || (new.due != nil && base.hasTime != new.dueHasTime) {
+            let f = { (d: Date?, t: Bool) in d.map { Fmt.due($0, hasTime: t) } ?? "none" }
+            parts.append("due: \(f(base.due, base.hasTime)) → \(f(new.due, new.dueHasTime))")
         }
         if parts.isEmpty {
             if let id = pending?.0 {
@@ -234,6 +235,7 @@ extension Store {
         payload["last_at"] = String(now.timeIntervalSince1970)
         payload["from_area"] = base.area; payload["from_importance"] = base.imp; payload["from_title"] = base.title
         payload["from_due"] = base.due.map { String($0.timeIntervalSince1970) } ?? ""
+        payload["from_due_has_time"] = base.hasTime ? "1" : "0"
         if let id = pending?.0 {
             try db.run("UPDATE outbox SET payload_json=? WHERE uuid=?", [try Self.encodePayload(payload), id])
             try db.run("UPDATE corrections SET detail=?, at=? WHERE uuid=?", [detail, now, id])
@@ -250,7 +252,7 @@ extension Store {
     /// Callers' Card values may be stale, so writes derive from this.
     func currentCard(_ id: Int64) throws -> (card: Card, deleted: Bool)? {
         try db.query("""
-            SELECT title,area,importance,due,status,connector,source_mid,source_sent,source_meta,deleted,external_id
+            SELECT title,area,importance,due,status,connector,source_mid,source_sent,source_meta,deleted,external_id,due_day,due_has_time
             FROM cards WHERE id=?
             """, [id]) { s in
             let sent = sqlite3_column_type(s, 7) == SQLITE_NULL ? nil : DB.text(s, 7)
@@ -268,11 +270,13 @@ extension Store {
                     }
                 }
             }
+            let (due, dueHasTime) = Store.loadedDue(due: DB.date(s, 3), day: sqlite3_column_type(s, 11) == SQLITE_NULL ? nil : DB.text(s, 11),
+                                                    hasTime: DB.int(s, 12) != 0)
             let card = Card(id: id, title: DB.text(s, 0), notes: "", area: DB.text(s, 1),
-                            importance: Importance(rawValue: Int(DB.int(s, 2))) ?? .medium, due: DB.date(s, 3),
+                            importance: Importance(rawValue: Int(DB.int(s, 2))) ?? .medium, due: due,
                             status: Status(rawValue: DB.text(s, 4)) ?? .todo, created: Date(), started: nil, done: nil,
                             externalID: DB.text(s, 10), sourceMeta: meta, sourceKey: mid.map { SourceKey(messageID: $0, sentAt: sent ?? "") },
-                            connector: DB.text(s, 5))
+                            connector: DB.text(s, 5), dueHasTime: dueHasTime)
             return (card, DB.int(s, 9) == 1)
         }.first
     }

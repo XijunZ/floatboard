@@ -97,9 +97,15 @@ struct CardView: View {
                                      : "Moves back to To do when they reply (\(card.watchContact.hasPrefix("wa:") ? "on WhatsApp" : "by email")). A reminder every 3 days until then."))
                     }
                 }
+                IDChip(id: ShortID(kind: .task, number: card.id))
+                let meetings = store.links(of: ShortID(kind: .task, number: card.id)).filter { $0.kind == .event }.count
+                if meetings > 0 {
+                    Label("\(meetings)", systemImage: "calendar").labelStyle(.titleAndIcon).fixedSize()
+                        .help(meetings == 1 ? "Linked to 1 meeting" : "Linked to \(meetings) meetings")
+                }
                 Text("Added \(Fmt.short(card.created))").fixedSize()
                 if let due = card.due {
-                    Text("Due \(Fmt.due(due))")
+                    Text("Due \(Fmt.due(due, hasTime: card.dueHasTime))")
                         .foregroundStyle(card.isOverdue ? Color.red : Color.secondary)
                         .fontWeight(card.isOverdue ? .semibold : .regular)
                         .fixedSize()
@@ -199,7 +205,7 @@ struct UndoDeleteBar: View {
             .frame(maxWidth: 520)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .task(id: d.at) {
-                try? await Task.sleep(for: .seconds(8)) // try?-ok: cancelled when another delete replaces this bar
+                try? await Task.sleep(for: .seconds(Store.undoBarSeconds)) // try?-ok: cancelled when another delete replaces this bar
                 if !Task.isCancelled { withAnimation { store.dismissUndoBar(for: d) } }
             }
         }
@@ -239,5 +245,25 @@ struct DeleteControl: View {
             .fixedSize()
             .help("Delete")
         }
+    }
+}
+
+
+/// A task's visible id (T-142). Click copies it, so it can be pasted into a chat or a search.
+struct IDChip: View {
+    let id: ShortID
+    @State private var copied = false
+
+    var body: some View {
+        Text(copied ? "Copied" : id.text)
+            .monospacedDigit().fixedSize()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(id.text, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+            }
+            .help("\(id.text): click to copy")
     }
 }

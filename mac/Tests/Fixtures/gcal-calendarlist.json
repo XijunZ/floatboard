@@ -1,0 +1,14 @@
+{
+  "_note": "documented shape; recapture live after reconnect",
+  "kind": "calendar#calendarList",
+  "etag": "\"p33example\"",
+  "nextSyncToken": "CalListSyncExample1",
+  "items": [
+    {"kind": "calendar#calendarListEntry", "id": "alex@example.com", "summary": "Alex Example", "timeZone": "Europe/London",
+     "backgroundColor": "#9fe1e7", "foregroundColor": "#000000", "accessRole": "owner", "primary": true, "selected": true},
+    {"kind": "calendar#calendarListEntry", "id": "team123@group.calendar.example.com", "summary": "Team Calendar",
+     "backgroundColor": "#fad165", "accessRole": "writer", "selected": true},
+    {"kind": "calendar#calendarListEntry", "id": "holidays@group.calendar.example.com", "summary": "Public Holidays",
+     "backgroundColor": "#b3dc6c", "accessRole": "reader"}
+  ]
+}
