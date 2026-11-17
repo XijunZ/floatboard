@@ -3,9 +3,10 @@
 /*@SYNC_JS@*/
 /*@JOTS_JS@*/
 /*@DECISIONS_LOGIC@*/
+/*@RESOLUTIONS_JS@*/
 
   var $ = function (id) { return document.getElementById(id); };
-  var SCREENS = ["loading", "pair", "signin", "board", "settings"];
+  var SCREENS = ["loading", "pair", "signin", "board", "settings", "goals"];
   var STATUSES = ["todo", "doing", "watch", "done"];
   var MOVE = { todo: "Move to To do", doing: "Move to Doing", watch: "Move to Watch", done: "Mark as done" };
   var MOVED = { todo: "Moved to To do", doing: "Moved to Doing", watch: "Moved to Watch", done: "Done" };
@@ -486,6 +487,8 @@
     var entries = moreEntries(board.modules);
     $("more-decisions").hidden = entries.indexOf("decisions") < 0;
     $("more-resolutions").hidden = entries.indexOf("resolutions") < 0;
+    $("more-resolutions-sub").textContent = goalsSub(board.goals);   // Resolutions
+    if (current === "goals") renderGoals();
     // The status tabs, list and + belong to the Board.
     document.querySelector("nav.tabs").hidden = !onBoard;
     list.hidden = !onBoard;
@@ -550,6 +553,7 @@
     if (Array.isArray(b.events)) board.events = b.events;   // absent from Macs before the calendar
     if (typeof b.time_zone === "string") board.time_zone = b.time_zone;
     if (b.modules && typeof b.modules === "object") board.modules = b.modules;   // which areas are on (absent from older Macs: none)
+    if (Array.isArray(b.goals)) board.goals = b.goals;   // Resolutions: this quarter's goals (absent while the area is off)
     var sup = noticeSuperseded(sentIds, b.superseded);
     sentIds = sup.sentIds;
     store(SENT_KEY, sentIds);
@@ -1104,6 +1108,28 @@
     }
   }
 
+  // Resolutions: More › Resolutions, this quarter's goals (read-only). Text only ever goes in with textContent.
+  function renderGoals() {
+    var v = goalsView(board && board.goals, shown.length ? shown : (board ? board.cards : []));
+    $("goals-period").textContent = v.period ? "This quarter · " + v.period : "This quarter";
+    var box = $("goals-list");
+    box.textContent = "";
+    v.items.forEach(function (g) {
+      var el = document.createElement("article");
+      el.className = "goal";
+      [["gid", g.id + (g.parent ? " · " + g.parent : "")], ["gtitle", g.title], ["gmeta", g.counts]].forEach(function (p) {
+        var d = document.createElement("div"); d.className = p[0]; d.textContent = p[1]; el.appendChild(d);
+      });
+      if (g.tasks.length) {
+        var ul = document.createElement("ul");
+        g.tasks.forEach(function (t) { var li = document.createElement("li"); li.textContent = t; ul.appendChild(li); });
+        el.appendChild(ul);
+      }
+      box.appendChild(el);
+    });
+    $("goals-empty").hidden = v.items.length > 0;
+  }
+
   function openSettings() {
     show("settings");
     $("who").textContent = me && me.device ? "This phone: " + me.device : "";
@@ -1221,7 +1247,8 @@
   });
   $("more-settings").addEventListener("click", openSettings);
 /*@DECISIONS_UI@*/
-  $("more-resolutions").addEventListener("click", function () { toast("Resolutions arrive here with the Resolutions area."); });
+  $("more-resolutions").addEventListener("click", function () { show("goals"); renderGoals(); });
+  $("close-goals").addEventListener("click", function () { show("board"); render(); });
   $("pair-go").addEventListener("click", pair);
   $("pair-skip").addEventListener("click", function () { sessionSet(PAIR_KEY, null); start(); });
   $("signin-go").addEventListener("click", signIn);

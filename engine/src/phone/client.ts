@@ -29,9 +29,11 @@
  */
 import { SYNC_JS } from "./sync-logic";
 import { JOTS_JS } from "./jots-logic";
+import { RESOLUTIONS_JS } from "./resolutions-logic";
 import APP_SRC from "./files/app.client.js";
 import { CIRCLE_JS } from "./circle-client";
 import { DECISIONS_LOGIC_JS, DECISIONS_UI_JS } from "./decisions-client";
 
 export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS).replace("/*@JOTS_JS@*/", () => JOTS_JS).replace("/*@CIRCLE_JS@*/", () => CIRCLE_JS)
-  .replace("/*@DECISIONS_LOGIC@*/", () => DECISIONS_LOGIC_JS).replace("/*@DECISIONS_UI@*/", () => DECISIONS_UI_JS);
+  .replace("/*@DECISIONS_LOGIC@*/", () => DECISIONS_LOGIC_JS).replace("/*@DECISIONS_UI@*/", () => DECISIONS_UI_JS)
+  .replace("/*@RESOLUTIONS_JS@*/", () => RESOLUTIONS_JS);

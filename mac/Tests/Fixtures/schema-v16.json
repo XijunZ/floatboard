@@ -1,0 +1,332 @@
+[
+  [
+    "index",
+    "activity_trace",
+    "activity",
+    "CREATE INDEX activity_trace ON activity(trace)"
+  ],
+  [
+    "index",
+    "cal_events_start",
+    "cal_events",
+    "CREATE INDEX cal_events_start ON cal_events(start)"
+  ],
+  [
+    "index",
+    "cards_external_id",
+    "cards",
+    "CREATE INDEX cards_external_id ON cards(external_id)"
+  ],
+  [
+    "index",
+    "cards_source_key",
+    "cards",
+    "CREATE UNIQUE INDEX cards_source_key ON cards(connector, source_mid, source_sent)\n    WHERE source_mid IS NOT NULL"
+  ],
+  [
+    "index",
+    "events_card",
+    "events",
+    "CREATE INDEX events_card ON events(card_id)"
+  ],
+  [
+    "index",
+    "events_uuid",
+    "events",
+    "CREATE UNIQUE INDEX events_uuid ON events(uuid)"
+  ],
+  [
+    "index",
+    "instructions_part",
+    "instructions",
+    "CREATE INDEX instructions_part ON instructions(connector, part, at)"
+  ],
+  [
+    "index",
+    "item_tags_tag",
+    "item_tags",
+    "CREATE INDEX item_tags_tag ON item_tags(tag_id)"
+  ],
+  [
+    "index",
+    "jot_history_jot",
+    "jot_history",
+    "CREATE INDEX jot_history_jot ON jot_history(jot_id)"
+  ],
+  [
+    "index",
+    "jots_added",
+    "jots",
+    "CREATE INDEX jots_added ON jots(added)"
+  ],
+  [
+    "index",
+    "links_to",
+    "links",
+    "CREATE INDEX links_to ON links(to_type, to_id)"
+  ],
+  [
+    "index",
+    "reminders_day",
+    "reminders",
+    "CREATE INDEX reminders_day ON reminders(day)"
+  ],
+  [
+    "index",
+    "resolution_history_goal",
+    "resolution_history",
+    "CREATE INDEX resolution_history_goal ON resolution_history(goal_id)"
+  ],
+  [
+    "index",
+    "resolutions_period",
+    "resolutions",
+    "CREATE INDEX resolutions_period ON resolutions(level, period)"
+  ],
+  [
+    "index",
+    "sqlite_autoindex_areas_1",
+    "areas",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_cal_calendars_1",
+    "cal_calendars",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_cal_events_1",
+    "cal_events",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_cal_outbox_1",
+    "cal_outbox",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_cal_series_1",
+    "cal_series",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_connector_archive_1",
+    "connector_archive",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_connectors_1",
+    "connectors",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_corrections_1",
+    "corrections",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_item_tags_1",
+    "item_tags",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_links_1",
+    "links",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_meta_1",
+    "meta",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_module_applied_1",
+    "module_applied",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_outbox_1",
+    "outbox",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_reminders_1",
+    "reminders",
+    null
+  ],
+  [
+    "table",
+    "activity",
+    "activity",
+    "CREATE TABLE activity(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    at REAL NOT NULL,\n    component TEXT NOT NULL,\n    level TEXT NOT NULL,\n    message TEXT NOT NULL,\n    detail TEXT,\n    trace TEXT,\n    seen INTEGER NOT NULL DEFAULT 0\n)"
+  ],
+  [
+    "table",
+    "areas",
+    "areas",
+    "CREATE TABLE areas(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    name TEXT NOT NULL UNIQUE COLLATE NOCASE,\n    color TEXT NOT NULL,\n    position REAL NOT NULL\n, fixed INTEGER NOT NULL DEFAULT 0)"
+  ],
+  [
+    "table",
+    "cal_calendars",
+    "cal_calendars",
+    "CREATE TABLE cal_calendars(\n    account TEXT NOT NULL, calendar_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,\n    owned INTEGER NOT NULL, shown INTEGER NOT NULL, sync_token TEXT, synced_at REAL,\n    needs_reconnect INTEGER NOT NULL DEFAULT 0, full_read_at REAL, is_primary INTEGER NOT NULL DEFAULT 0,\n    PRIMARY KEY(account, calendar_id)\n)"
+  ],
+  [
+    "table",
+    "cal_events",
+    "cal_events",
+    "CREATE TABLE cal_events(\n    short_id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT NOT NULL,\n    start REAL NOT NULL, end REAL NOT NULL, all_day INTEGER NOT NULL, start_day TEXT, end_day TEXT, title TEXT NOT NULL,\n    location TEXT NOT NULL DEFAULT '', video_link TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',\n    html_link TEXT NOT NULL DEFAULT '', recurring_id TEXT, google_updated REAL NOT NULL, fb_card INTEGER,\n    gone INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, own_write TEXT, original_start TEXT, guests TEXT NOT NULL DEFAULT '[]',\n    UNIQUE(account, calendar_id, event_id)\n)"
+  ],
+  [
+    "table",
+    "cal_kept",
+    "cal_kept",
+    "CREATE TABLE cal_kept(\n    short_id INTEGER PRIMARY KEY, title TEXT NOT NULL, start REAL NOT NULL, \"end\" REAL NOT NULL, all_day INTEGER NOT NULL,\n    video_link TEXT NOT NULL DEFAULT '', kept_at REAL NOT NULL\n)"
+  ],
+  [
+    "table",
+    "cal_outbox",
+    "cal_outbox",
+    "CREATE TABLE cal_outbox(\n    uuid TEXT PRIMARY KEY, kind TEXT NOT NULL, account TEXT NOT NULL, calendar_id TEXT NOT NULL, event_id TEXT,\n    card_id INTEGER, payload_json TEXT NOT NULL, created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,\n    next_try REAL NOT NULL, last_error TEXT NOT NULL DEFAULT '', sent REAL, failed_at REAL,\n    conflicts INTEGER NOT NULL DEFAULT 0\n)"
+  ],
+  [
+    "table",
+    "cal_series",
+    "cal_series",
+    "CREATE TABLE cal_series(\n    account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',\n    read_at REAL NOT NULL, master_start REAL, master_zone TEXT,\n    PRIMARY KEY(account, calendar_id, series_id)\n)"
+  ],
+  [
+    "table",
+    "cards",
+    "cards",
+    "CREATE TABLE cards(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    title TEXT NOT NULL,\n    notes TEXT NOT NULL DEFAULT '',\n    area TEXT NOT NULL,\n    importance INTEGER NOT NULL DEFAULT 1,\n    due REAL,\n    status TEXT NOT NULL,\n    created REAL NOT NULL,\n    started REAL,\n    done REAL,\n    updated REAL,\n    deleted INTEGER NOT NULL DEFAULT 0\n, link TEXT NOT NULL DEFAULT '', gcal_account TEXT NOT NULL DEFAULT '', gcal_event TEXT NOT NULL DEFAULT '', gcal_link TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', external_id TEXT NOT NULL DEFAULT '', source_link TEXT NOT NULL DEFAULT '', source_meta TEXT NOT NULL DEFAULT '{}', imported_at REAL, source_mid TEXT, source_sent TEXT, withdrawn INTEGER NOT NULL DEFAULT 0, ai_summary TEXT NOT NULL DEFAULT '', connector TEXT NOT NULL DEFAULT '', proposal_json TEXT NOT NULL DEFAULT '', reply_draft_state TEXT, reply_draft_link TEXT NOT NULL DEFAULT '', reply_draft_error TEXT NOT NULL DEFAULT '', reply_draft_request TEXT NOT NULL DEFAULT '', reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0, gcal_calendar TEXT NOT NULL DEFAULT '', gcal_synced_at REAL, gcal_baseline TEXT NOT NULL DEFAULT '', item_source TEXT NOT NULL DEFAULT '')"
+  ],
+  [
+    "table",
+    "connector_archive",
+    "connector_archive",
+    "CREATE TABLE connector_archive(\n    id TEXT NOT NULL, removed_at REAL NOT NULL, name TEXT, base_url TEXT, settings_json TEXT,\n    settings_version INTEGER, restored_at REAL, PRIMARY KEY(id, removed_at)\n)"
+  ],
+  [
+    "table",
+    "connectors",
+    "connectors",
+    "CREATE TABLE connectors(\n    id TEXT PRIMARY KEY, name TEXT, base_url TEXT, capabilities_json TEXT, cursor TEXT,\n    settings_json TEXT, settings_version INTEGER DEFAULT 0, engine_settings_version INTEGER DEFAULT 0,\n    last_ok REAL, unreachable_since REAL\n, status_json TEXT NOT NULL DEFAULT '{}')"
+  ],
+  [
+    "table",
+    "corrections",
+    "corrections",
+    "CREATE TABLE corrections(\n    uuid TEXT PRIMARY KEY, connector TEXT, source_mid TEXT, source_sent TEXT,\n    proposed_json TEXT, verdict TEXT, detail TEXT, at REAL\n)"
+  ],
+  [
+    "table",
+    "events",
+    "events",
+    "CREATE TABLE events(\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    card_id INTEGER NOT NULL REFERENCES cards(id),\n    at REAL NOT NULL,\n    kind TEXT NOT NULL,\n    from_status TEXT,\n    to_status TEXT\n, actor TEXT NOT NULL DEFAULT 'user', uuid TEXT)"
+  ],
+  [
+    "table",
+    "instructions",
+    "instructions",
+    "CREATE TABLE instructions(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, connector TEXT NOT NULL, part TEXT NOT NULL, text TEXT NOT NULL,\n    source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', at REAL NOT NULL\n)"
+  ],
+  [
+    "table",
+    "item_tags",
+    "item_tags",
+    "CREATE TABLE item_tags(\n    item TEXT NOT NULL, tag_id INTEGER NOT NULL, is_primary INTEGER NOT NULL DEFAULT 0, added REAL NOT NULL,\n    PRIMARY KEY(item, tag_id)\n)"
+  ],
+  [
+    "table",
+    "jot_history",
+    "jot_history",
+    "CREATE TABLE jot_history(id INTEGER PRIMARY KEY AUTOINCREMENT, jot_id INTEGER NOT NULL, text TEXT NOT NULL, at REAL NOT NULL)"
+  ],
+  [
+    "table",
+    "jots",
+    "jots",
+    "CREATE TABLE jots(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'jot',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n)"
+  ],
+  [
+    "table",
+    "links",
+    "links",
+    "CREATE TABLE links(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,\n    to_type TEXT NOT NULL, to_id TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'related', made_by TEXT NOT NULL DEFAULT 'manual', subject TEXT NOT NULL DEFAULT '', hidden_by TEXT NOT NULL DEFAULT '',\n    UNIQUE(from_type, from_id, to_type, to_id)\n)"
+  ],
+  [
+    "table",
+    "meta",
+    "meta",
+    "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)"
+  ],
+  [
+    "table",
+    "module_applied",
+    "module_applied",
+    "CREATE TABLE module_applied(external_id TEXT PRIMARY KEY, at REAL NOT NULL)"
+  ],
+  [
+    "table",
+    "outbox",
+    "outbox",
+    "CREATE TABLE outbox(\n    uuid TEXT PRIMARY KEY, connector TEXT, kind TEXT, payload_json TEXT, created REAL,\n    attempts INTEGER DEFAULT 0, next_try REAL, last_error TEXT, sent REAL\n, detached INTEGER NOT NULL DEFAULT 0, detach_reason TEXT NOT NULL DEFAULT '')"
+  ],
+  [
+    "table",
+    "people",
+    "people",
+    "CREATE TABLE people(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, aliases TEXT NOT NULL DEFAULT '[]', tier TEXT NOT NULL DEFAULT 'network',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n)"
+  ],
+  [
+    "table",
+    "reminders",
+    "reminders",
+    "CREATE TABLE reminders(\n    id TEXT PRIMARY KEY, kind TEXT NOT NULL, item TEXT NOT NULL, text TEXT NOT NULL, day TEXT NOT NULL,\n    fire_at REAL NOT NULL, granted REAL NOT NULL, delivered REAL, delivered_by TEXT NOT NULL DEFAULT ''\n)"
+  ],
+  [
+    "table",
+    "resolution_history",
+    "resolution_history",
+    "CREATE TABLE resolution_history(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, title TEXT NOT NULL, notes TEXT NOT NULL, at REAL NOT NULL\n)"
+  ],
+  [
+    "table",
+    "resolutions",
+    "resolutions",
+    "CREATE TABLE resolutions(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, level TEXT NOT NULL, period TEXT NOT NULL, title TEXT NOT NULL,\n    notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', carried_from INTEGER,\n    position REAL NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'typed',\n    added REAL NOT NULL, updated REAL NOT NULL, reviewed REAL, deleted INTEGER NOT NULL DEFAULT 0\n)"
+  ],
+  [
+    "table",
+    "sqlite_sequence",
+    "sqlite_sequence",
+    "CREATE TABLE sqlite_sequence(name,seq)"
+  ],
+  [
+    "trigger",
+    "cal_events_keep",
+    "cal_events",
+    "CREATE TRIGGER cal_events_keep AFTER UPDATE ON cal_events WHEN NEW.gone=0 AND EXISTS (SELECT 1 FROM cal_kept WHERE short_id=NEW.short_id) BEGIN\n    UPDATE cal_kept SET title=NEW.title, start=NEW.start, \"end\"=NEW.\"end\", all_day=NEW.all_day, video_link=NEW.video_link WHERE short_id=NEW.short_id;\nEND"
+  ],
+  [
+    "trigger",
+    "links_keep_event",
+    "links",
+    "CREATE TRIGGER links_keep_event AFTER INSERT ON links BEGIN\n    INSERT OR REPLACE INTO cal_kept(short_id, title, start, \"end\", all_day, video_link, kept_at)\n    SELECT short_id, title, start, \"end\", all_day, video_link, CAST(strftime('%s','now') AS REAL) FROM cal_events\n    WHERE (NEW.from_type='E' AND short_id=CAST(NEW.from_id AS INTEGER)) OR (NEW.to_type='E' AND short_id=CAST(NEW.to_id AS INTEGER));\nEND"
+  ]
+]

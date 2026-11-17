@@ -35,6 +35,7 @@ import Foundation
             }
         }
         if changed { pushBoard() }   // the phone's copy drops what this Mac has shown
+        ResolutionsNudger.tick(store: store, now: now, show: show)   // quarter and year reviews: outside the budget
         let last = UserDefaults.standard.object(forKey: Self.nudgedKey) as? Date
         if WeeklyReview.nudgeDue(now: now, lastNudged: last) {
             UserDefaults.standard.set(now, forKey: Self.nudgedKey)
