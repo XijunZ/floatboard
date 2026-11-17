@@ -1,0 +1,19 @@
+import Foundation
+
+/// The Decisions area's registrations with the foundation (item lookup, search, weekly review). Called once at launch and by
+/// the checks; registering again replaces.
+@MainActor public enum DecisionsArea {
+    public static func registerCore() {
+        ItemCatalog.register(.decision) { store, n in
+            DecisionStore(store: store).decision(n).map {
+                ItemSummary(id: $0.shortID, title: $0.text, added: $0.added, updated: $0.updated, source: $0.source, deleted: $0.deleted)
+            }
+        }
+        GlobalSearch.register(.decision, module: .decisions) { store, q in
+            DecisionStore(store: store).all().filter { GlobalSearch.matches(DecisionStore.searchText($0), q) }.map {
+                SearchHit(id: $0.shortID, title: $0.text, detail: "\($0.status.title) · \($0.type.title) · from \($0.sourceLabel)", date: $0.recorded)
+            }
+        }
+        DecisionReviews.registerSections()
+    }
+}

@@ -15,7 +15,7 @@ struct ConnectorSettingsForm: View {
     static let placed: Set<String> = ["default_group", "auto_add", "alerts_on", "critical_hours", "mark_read_on_done", "ai_footer",
                                       "group_notes", "my_rules", "chat_rules", "ignore_senders", "allow_senders", "unread_only",
                                       "learned", "learn_at", "model_judge", "model_recap", "model_reply",
-                                      "rulebook_email", "rulebook_chat"]
+                                      "rulebook_email", "rulebook_chat", "rulebook_decisions"]
 
     @State private var draft = ConnectorSettingsDraft()
     @State private var message: String?
