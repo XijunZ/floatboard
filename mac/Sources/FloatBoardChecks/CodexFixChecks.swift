@@ -81,6 +81,36 @@ import FloatBoardConnectors
         check(patches.count == 1 && outbox.rows(unsent: true).count == 2, "f1_newer_patch_waits_for_the_failed_older_one")
     } catch { check(false, "f1 patch/patch: \(error)") }
 
+    // F2. A delete Undo took back while another change was on the wire is not sent: each row is read again just before sending.
+    do {
+        let (store, cache, outbox) = try setup("f2-undo")
+        let old = Date().addingTimeInterval(-86400)
+        let id = newTask(store, "Dentist", due: at(15))
+        linkTask(store, id, event: "y1")
+        cacheEvent(cache, "y1", "Dentist", at(15), at(15, 30), updated: old, fb: id)
+        cacheEvent(cache, "x1", "Standup", at(9), at(9, 15), updated: old)
+        outbox.enqueue(.patch(eventID: "x1", title: "Standup (moved)", start: nil, end: nil, allDayStart: nil), account: acct, calendarID: acct,
+                       now: Date().addingTimeInterval(-5))
+        if let c = store.card(id) { store.delete(c) }
+        store.performForTest("UPDATE cal_outbox SET next_try=0 WHERE kind='delete'")   // the delete is due, behind the slow patch
+        let gated = GatedGoogle()
+        gated.handler = { r in
+            if r.httpMethod == "DELETE" { return ("", 204) }
+            return (eventJSON(id: "x1", title: "Standup (moved)", start: GoogleTimes.rfc(at(9)), end: GoogleTimes.rfc(at(9, 15)), updated: GoogleTimes.rfc(old)), 200)
+        }
+        gated.holdFirst = { $0.url?.path.hasSuffix("/x1") == true }
+        let sender = CalendarSender(store: store, apiFor: { _ in gated.api() }, isOnline: { true })
+        let run = Task { await sender.drain() }
+        var waited = 0
+        while !gated.held && waited < 300 { try await Task.sleep(nanoseconds: 10_000_000); waited += 1 }
+        let wasHeld = gated.held
+        store.undoDelete()                            // Undo while the patch is on the wire
+        gated.release()
+        await run.value
+        let linked = ((try? store.db.query("SELECT gcal_event FROM cards WHERE id=?", [id]) { DB.text($0, 0) }) ?? []).first // try?-ok: nil fails the check
+        check(wasHeld && !gated.requests.contains { $0.httpMethod == "DELETE" } && store.card(id) != nil && linked == "y1"
+              && outbox.rows(unsent: true).isEmpty, "f2_undo_during_a_slow_send_keeps_the_event")
+    } catch { check(false, "f2 undo race: \(error)") }
 }
 
 /// A Google event as the API returns it.

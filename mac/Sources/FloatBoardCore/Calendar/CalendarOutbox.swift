@@ -83,6 +83,15 @@ public final class CalendarOutbox {
         return out
     }
 
+    /// Takes the next change to send, skipping those `skip` says no to: read again from the database right now (so a change
+    /// Undo removed, or one no longer due, is never sent from an old list) and, in the same step, marked as on its way, so
+    /// Undo leaves it alone from here on. The sender clears the mark when Google has answered. Nil when nothing is due.
+    public func claimNext(now: Date, skip: (CalOutboxRow) -> Bool) -> CalOutboxRow? {
+        guard let row = due(now: now).first(where: { !skip($0) }) else { return nil }
+        setInFlight(row.uuid, true)
+        return row
+    }
+
     /// The event a change is for: a create's own id on Google's side (the one later changes to it use), else the event it
     /// changes. An unreadable change stands alone.
     static func eventKey(_ r: CalOutboxRow) -> String {
