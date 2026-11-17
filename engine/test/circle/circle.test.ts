@@ -247,6 +247,8 @@ describe("circle: phone copy and actions", () => {
     expect(stored.data_enc).not.toContain("Kim");
     const got = await (await call("/app/api/circle", { headers: { Cookie: cookie } })).json<any>();
     expect(got.copy.people[0].name).toBe("Kim Example");
+    const me = await (await call("/app/api/me", { headers: { Cookie: cookie } })).json<any>();
+    expect(got.account).toBe(me.account);   // the phone drops an answer that belongs to another account
     expect(got.pending).toBe(0);
     // Refused without the same origin; then accepted, once per id.
     const made = iso(Date.now() - 60_000);

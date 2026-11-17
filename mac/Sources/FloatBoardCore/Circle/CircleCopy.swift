@@ -125,27 +125,45 @@ public struct CirclePhoneAction: Codable, Equatable {
 }
 
 extension CircleStore {
-    public struct PhoneResult { public var applied: [String] = []; public var skipped: [(id: String, reason: String)] = [] }
+    public struct PhoneResult {
+        public var applied: [String] = []
+        public var skipped: [(id: String, reason: String)] = []
+        /// Not written here (the local write failed): not acknowledged, so the engine keeps them and they come again.
+        public var failed: [String] = []
+    }
 
     /// Applies the phone's Circle actions: contacted (outreach at the time made), talked (a conversation), snooze (one
-    /// interval from the time made; a later snooze wins). Unknown people or actions are skipped with a reason.
+    /// interval from the time made; a later snooze wins). Unknown people or actions are skipped with a reason. An action
+    /// counts as applied only once its write has committed; a failed write leaves it `failed` (one Activity error).
     public func applyPhoneActions(_ actions: [CirclePhoneAction], now: Date = Date()) -> PhoneResult {
         var r = PhoneResult()
+        var firstError: Error?
         let isoF = ISO8601DateFormatter(), frac = ISO8601DateFormatter()
         frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         for a in actions {
             guard let pid = livePerson(a.person), let p = people.person(pid) else { r.skipped.append((a.id, "unknown person")); continue }
+            guard ["contacted", "talked", "snooze"].contains(a.action) else { r.skipped.append((a.id, "unknown action")); continue }
             let at = min(isoF.date(from: a.madeAt) ?? frac.date(from: a.madeAt) ?? now, now)
-            switch a.action {
-            case "contacted": contacted(pid, at: at)
-            case "talked": talked(pid, at: at)
-            case "snooze":
-                var d = details(pid)
-                let until = CircleClock.add(CircleClock.interval(tier: p.tier, tags: store.itemTags(p.shortID).all, intervalDays: d.intervalDays), to: at)
-                if (d.snoozedUntil ?? .distantPast) < until { d.snoozedUntil = until; store.perform { try writeDetailsRow(pid, d) } }
-            default: r.skipped.append((a.id, "unknown action")); continue
+            do {
+                try store.performThrowing {
+                    switch a.action {
+                    case "contacted": try manualRow(pid, .outgoing, at)
+                    case "talked": try manualRow(pid, .met, at)
+                    default:
+                        var d = details(pid)
+                        let until = CircleClock.add(CircleClock.interval(tier: p.tier, tags: store.itemTags(p.shortID).all, intervalDays: d.intervalDays), to: at)
+                        if (d.snoozedUntil ?? .distantPast) < until { d.snoozedUntil = until; try writeDetailsRow(pid, d) }
+                    }
+                }
+                r.applied.append(a.id)
+            } catch {
+                firstError = firstError ?? error
+                r.failed.append(a.id)
             }
-            r.applied.append(a.id)
+        }
+        if let e = firstError {
+            store.activity("circle", .error, "Could not apply the phone's Circle changes; they stay queued and are tried again",
+                           detail: "\(r.failed.count) waiting: \(e)")
         }
         return r
     }
