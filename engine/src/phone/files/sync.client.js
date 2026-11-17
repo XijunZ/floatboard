@@ -15,6 +15,20 @@
       // Delete hides the card until the Mac has deleted it; a later restore (Undo after it was sent) shows it again.
       if (a.action === "delete") { hidden[a.card_id] = true; return; }
       if (a.action === "restore") { delete hidden[a.card_id]; return; }
+      if (a.action === "set_tags") {
+        // Shown at once: the first tag is the task's group (its colour from a card already in that group).
+        cards.forEach(function (c) {
+          if (c.id !== a.card_id || c.pending || !Array.isArray(a.tags) || !a.tags.length) return;
+          c.tags = a.tags.slice();
+          if (c.group !== a.tags[0]) {
+            var same = cards.filter(function (x) { return x.group === a.tags[0] && x.color; })[0];
+            c.group = a.tags[0];
+            c.color = same ? same.color : c.color;
+          }
+          c.queued = true;
+        });
+        return;
+      }
       if (a.action === "add") {
         if (addsShown[a.id]) return;
         temp += 1;
@@ -42,6 +56,37 @@
     });
     cards = cards.filter(function (c) { return !hidden[c.id]; });
     return Object.assign({}, board || {}, { cards: cards });
+  }
+
+  // The bottom bar: Board and Plan always; Jots and Circle while their area is on; More always (Settings lives there).
+  function visibleViews(modules) {
+    var m = modules || {};
+    return ["board", "plan"].concat(m.jots ? ["jots"] : [], m.circle ? ["circle"] : [], ["more"]);
+  }
+
+  // More's entries: Decisions and Resolutions while their area is on, then Settings.
+  function moreEntries(modules) {
+    var m = modules || {};
+    return (m.decisions ? ["decisions"] : []).concat(m.resolutions ? ["resolutions"] : [], ["settings"]);
+  }
+
+  // Tags the phone can offer: the groups on the board (a task's group must be one) and every tag seen, sorted.
+  function tagChoices(cards) {
+    var groups = {}, tags = {};
+    (cards || []).forEach(function (c) {
+      if (c.pending) return;
+      if (c.group) { groups[c.group] = true; tags[c.group] = true; }
+      (Array.isArray(c.tags) ? c.tags : []).forEach(function (t) { if (typeof t === "string" && t) tags[t] = true; });
+    });
+    var sort = function (o) { return Object.keys(o).sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0; }); };
+    return { groups: sort(groups), tags: sort(tags) };
+  }
+
+  // The queued action for "Tags" on a task: its group first, then the other tags (each once).
+  function tagsAction(card, group, others, id, nowIso) {
+    var out = [group];
+    (others || []).forEach(function (t) { if (t && out.map(function (x) { return x.toLowerCase(); }).indexOf(t.toLowerCase()) < 0) out.push(t); });
+    return { id: id, made_at: nowIso, card_id: card.id, action: "set_tags", tags: out };
   }
 
   function byteLength(s) {

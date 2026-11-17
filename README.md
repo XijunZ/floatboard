@@ -39,7 +39,10 @@ your Mac's Keychain; nothing goes through anyone else's server.
 - **Ctrl-Opt-N** quick add from anywhere. **Ctrl-Opt-B** show or hide. The menu bar icon has the rest (reset position, export).
 - Drag the grip to move the bar. `+` quick-adds, the expand icon opens the board, `-` minimises, `x` closes.
 - **Board**: drag cards between columns, or hover for arrows, tick, edit and delete. Right-click for more.
-- **Settings › Groups**: add, rename, recolour, reorder and delete groups. **Settings › Bar**: what the bar shows and in which order. The window's tabs are Board, Calendar and Settings; the FloatBoard menu's "Bar…" and "Groups…" open those Settings sections.
+- **Settings › Groups**: add, rename, recolour, reorder and delete groups. **Settings › Bar**: what the bar shows and in which order. The window's tabs are Board, Calendar, the areas that are on (Jots, Circle, Decisions, Resolutions) and Settings; the FloatBoard menu's "Bar…" and "Groups…" open those Settings sections.
+- **Settings › Areas**: switch each area on or off (nothing is deleted; Decisions needs Jots), and set the reminders they share (at most 3 a day by default, with quiet hours).
+- **Tags**: a task's group is its main tag (colour and column); add more tags in the task's editor or on the phone. Every item has an id (`T-` task, `E-` meeting, `J-` jot, `P-` person, `D-` decision, `R-` goal); typing one into a task's notes links it, and ✕ on a link (with Undo) removes it.
+- **Select text, right-click**: Make task (links back to where the text came from) and Copy id link. The bar's ✓ opens the weekly review; the toolbar's search finds every kind of item.
 - **Help** menu: **Guide**, **Activity...** (everything the app did and every problem it hit) and **Restore from backup...**.
 - Menu bar, **Export to CSV** writes cards and history to `~/Downloads`.
 

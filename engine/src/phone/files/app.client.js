@@ -32,8 +32,9 @@
   var failures = 0;
   var retryTimer = 0;
   var tab = "todo";
-  // The screen shown: the Board (always at launch: this is never stored), then Plan (the planning summary).
+  // The screen shown (the bottom bar: Board · Plan · Jots · Circle · More): the Board always at launch (never stored).
   var view = "board";
+  var VIEWS = ["board", "plan", "jots", "circle", "more"];
   var current = "loading";
   var busy = false;
   var sheetOpen = false;
@@ -378,6 +379,7 @@
     var due = dueInfo(c);
     if (due) meta.appendChild(el("span", "due" + (due.late ? " late" : ""), due.label));
     if (c.group) meta.appendChild(el("span", null, c.group));
+    (Array.isArray(c.tags) ? c.tags.slice(1) : []).forEach(function (t) { meta.appendChild(el("span", "tag", t)); });
     var w = waitInfo(c);
     if (w) meta.appendChild(el("span", "wait-" + w.level, w.label));
     if (c.queued) meta.appendChild(el("span", "wait", "Not synced yet"));
@@ -469,15 +471,26 @@
       watch: "Nothing you're waiting on.",
       done: "Nothing done yet today.",
     }[tab];
-    // Board or Plan: the status tabs, list and + belong to the Board.
-    var onPlan = view === "plan";
-    $("plan").hidden = !onPlan;
-    document.querySelector("nav.tabs").hidden = onPlan;
-    list.hidden = onPlan;
-    if (onPlan) $("empty").hidden = true;
-    $("add").hidden = onPlan;
-    ["board", "plan"].forEach(function (v) {
-      document.querySelector('[data-view="' + v + '"]').setAttribute("aria-selected", String(v === view));
+    // The bottom bar follows the areas the Mac has on; a screen whose area went off goes back to the Board.
+    var views = visibleViews(board.modules);
+    if (views.indexOf(view) < 0) view = "board";
+    var onBoard = view === "board";
+    $("plan").hidden = view !== "plan";
+    $("jots").hidden = view !== "jots";
+    $("circle").hidden = view !== "circle";
+    $("more").hidden = view !== "more";
+    var entries = moreEntries(board.modules);
+    $("more-decisions").hidden = entries.indexOf("decisions") < 0;
+    $("more-resolutions").hidden = entries.indexOf("resolutions") < 0;
+    // The status tabs, list and + belong to the Board.
+    document.querySelector("nav.tabs").hidden = !onBoard;
+    list.hidden = !onBoard;
+    if (!onBoard) $("empty").hidden = true;
+    $("add").hidden = !onBoard;
+    VIEWS.forEach(function (v) {
+      var b = document.querySelector('[data-view="' + v + '"]');
+      b.hidden = views.indexOf(v) < 0;
+      b.setAttribute("aria-selected", String(v === view));
     });
   }
 
@@ -527,6 +540,7 @@
     board = { updated: b.updated || null, cards: Array.isArray(b.cards) ? b.cards : [], pending: b.pending || 0 };
     if (Array.isArray(b.events)) board.events = b.events;   // absent from Macs before the calendar
     if (typeof b.time_zone === "string") board.time_zone = b.time_zone;
+    if (b.modules && typeof b.modules === "object") board.modules = b.modules;   // which areas are on (absent from older Macs: none)
     var sup = noticeSuperseded(sentIds, b.superseded);
     sentIds = sup.sentIds;
     store(SENT_KEY, sentIds);
@@ -748,6 +762,13 @@
           sheet.appendChild(b);
         });
       }
+      if (!c.pending) {
+        var tb = el("button", "btn act");
+        tb.appendChild(icon("tag"));
+        tb.appendChild(document.createTextNode("Tags" + (Array.isArray(c.tags) && c.tags.length > 1 ? " (" + (c.tags.length - 1) + ")" : "")));
+        tb.addEventListener("click", function () { tagsSheet(c); });
+        sheet.appendChild(tb);
+      }
       var choice = emailChoice(c);
       if (choice) {
         var eb = el("button", "btn act");
@@ -779,6 +800,50 @@
         sheet.appendChild(del);
       }
       sheet.appendChild(el("p", "sub hint", "Edit details on your Mac."));
+    });
+  }
+
+  // A task's tags: its group (one, decides colour and column) and any other tags the board knows. Saved as one set_tags.
+  function tagsSheet(c) {
+    var choices = tagChoices(shown);
+    var group = c.group;
+    var others = (Array.isArray(c.tags) ? c.tags.slice(1) : []).filter(function (t) { return t !== group; });
+    openSheet(function (sheet) {
+      sheet.appendChild(el("h3", null, "Tags"));
+      sheet.appendChild(el("p", "sub", c.title));
+      sheet.appendChild(el("p", "sub", "Group (colour and column)"));
+      var gbox = el("div", "chips");
+      var tbox = el("div", "chips");
+      function draw() {
+        gbox.replaceChildren();
+        tbox.replaceChildren();
+        choices.groups.forEach(function (g) {
+          var b = el("button", "chip", g);
+          b.type = "button";
+          b.setAttribute("aria-pressed", String(g === group));
+          b.addEventListener("click", function () { group = g; others = others.filter(function (t) { return t !== g; }); draw(); });
+          gbox.appendChild(b);
+        });
+        choices.tags.filter(function (t) { return t !== group; }).forEach(function (t) {
+          var on = others.indexOf(t) >= 0;
+          var b = el("button", "chip", t);
+          b.type = "button";
+          b.setAttribute("aria-pressed", String(on));
+          b.addEventListener("click", function () { others = on ? others.filter(function (x) { return x !== t; }) : others.concat([t]); draw(); });
+          tbox.appendChild(b);
+        });
+      }
+      draw();
+      sheet.appendChild(gbox);
+      sheet.appendChild(el("p", "sub", "Other tags"));
+      sheet.appendChild(tbox);
+      var save = el("button", "btn", "Save tags");
+      save.type = "button";
+      save.addEventListener("click", function () {
+        act(tagsAction(c, group, others, newId(), new Date().toISOString()), "Tags saved. Your Mac will update the task.");
+      });
+      sheet.appendChild(save);
+      sheet.appendChild(el("p", "sub hint", "New tags are made on your Mac."));
     });
   }
 
@@ -1099,16 +1164,18 @@
   STATUSES.forEach(function (s) {
     document.querySelector('[data-tab="' + s + '"]').addEventListener("click", function () { tab = s; render(); window.scrollTo(0, 0); });
   });
-  ["board", "plan"].forEach(function (v) {
+  VIEWS.forEach(function (v) {
     document.querySelector('[data-view="' + v + '"]').addEventListener("click", function () { view = v; render(); window.scrollTo(0, 0); });
   });
+  $("more-settings").addEventListener("click", openSettings);
+  $("more-decisions").addEventListener("click", function () { toast("Decisions arrive here with the Decisions area."); });
+  $("more-resolutions").addEventListener("click", function () { toast("Resolutions arrive here with the Resolutions area."); });
   $("pair-go").addEventListener("click", pair);
   $("pair-skip").addEventListener("click", function () { sessionSet(PAIR_KEY, null); start(); });
   $("signin-go").addEventListener("click", signIn);
   $("retry").addEventListener("click", start);
   $("refresh").addEventListener("click", function () { failures = 0; sync(); });
   $("undo-btn").addEventListener("click", undoLast);
-  $("open-settings").addEventListener("click", openSettings);
   $("close-settings").addEventListener("click", function () { show("board"); render(); });
   $("add").addEventListener("click", addSheet);
   $("notif-on").addEventListener("click", turnOn);

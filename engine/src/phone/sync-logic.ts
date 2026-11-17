@@ -28,6 +28,11 @@
  *   repeating one once, with its label) and the open tasks due then; Today also has `overdue`, the open tasks due before
  *   today, oldest first (shown at its top in red). Bad entries are skipped.
  *
+ * - `visibleViews(modules)`, `moreEntries(modules)`: the bottom bar (Board · Plan · Jots · Circle · More) and More's list,
+ *   following which areas the Mac has on (none when it has not said).
+ * - `tagChoices(cards)`, `tagsAction(card, group, others, id, nowIso)`: "Tags" on a task: the groups and tags the board
+ *   knows, and the queued `set_tags` (group first). `viewBoard` shows a queued one at once.
+ *
  * The functions themselves are in files/sync.client.js (bundled as text).
  */
 import SYNC_SRC from "./files/sync.client.js";
@@ -38,4 +43,4 @@ export const SYNC_JS: string = SYNC_SRC;
 /** Names the tests pull out of SYNC_JS. */
 export const SYNC_EXPORTS = ["viewBoard", "takeBatch", "sendBatch", "afterSend", "rememberSent", "noticeSuperseded", "retryDelay", "statusText",
   "replacedText", "byteLength", "undoFor", "undoLive", "undoText", "undoAction", "cardLinks", "linkLabel", "emailChoice", "linkAction", "hitLines",
-  "dayKey", "planBlocks", "deleteUndoFor", "undoDeleteStep", "markAttempted"];
+  "dayKey", "planBlocks", "deleteUndoFor", "undoDeleteStep", "markAttempted", "visibleViews", "moreEntries", "tagChoices", "tagsAction"];

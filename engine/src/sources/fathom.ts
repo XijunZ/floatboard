@@ -1,4 +1,5 @@
 import { sameSecret } from "../lib/auth";
+import type { Env } from "../env";
 import type { Message } from "./types";
 
 const SHARE = /fathom\.video\/(?:share|calls?|recordings?)\/([A-Za-z0-9_-]+)/i;
@@ -76,4 +77,25 @@ export async function fathomSignatureProblem(secret: string, headers: Headers, r
   const expected = btoa(String.fromCharCode(...mac));
   const ok = sig.split(" ").some((e) => e.startsWith("v1,") && sameSecret(e.slice(3), expected));
   return ok ? null : "signature does not match";
+}
+
+/** What Jots needs to attach meeting notes to their calendar event by code: links, scheduled start, invitees' addresses. */
+export type MeetingMeta = { recap_key: string; fathom_url: string; meeting_url: string; title: string; scheduled_start: string | null; invitees: string[] };
+
+/** The meeting metadata in a Fathom payload (field names vary by plan and version; documented shape, recapture live). */
+export function meetingMeta(p: any, m: Message): MeetingMeta {
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const invitees = (Array.isArray(p?.calendar_invitees) ? p.calendar_invitees : Array.isArray(p?.invitees) ? p.invitees : [])
+    .map((i: any) => str(i?.email).toLowerCase()).filter((e: string) => e.includes("@") && e.length <= 320);
+  const start = str(p?.scheduled_start_time) || str(p?.recording_start_time);
+  return { recap_key: recapKey(m), fathom_url: m.link.slice(0, 2000), meeting_url: (str(p?.meeting_url) || str(p?.video_url) || str(p?.join_url)).slice(0, 2000),
+    title: m.subject.slice(0, 300), scheduled_start: start && !Number.isNaN(Date.parse(start)) ? start : null, invitees: [...new Set<string>(invitees)].slice(0, 100) };
+}
+
+/** Keeps a meeting's metadata (never its summary text); a repeat delivery updates it. */
+export async function recordMeeting(env: Env, userId: string, meta: MeetingMeta): Promise<void> {
+  await env.DB.prepare(`INSERT INTO meetings(user_id,recap_key,fathom_url,meeting_url,title,scheduled_start,invitees,received_at) VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(user_id,recap_key) DO UPDATE SET fathom_url=excluded.fathom_url, meeting_url=excluded.meeting_url, title=excluded.title,
+      scheduled_start=excluded.scheduled_start, invitees=excluded.invitees, received_at=excluded.received_at`)
+    .bind(userId, meta.recap_key, meta.fathom_url, meta.meeting_url, meta.title, meta.scheduled_start, JSON.stringify(meta.invitees), new Date().toISOString()).run();
 }
