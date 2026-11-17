@@ -709,6 +709,8 @@ MainActor.assumeIsolated {
 
 check(GoogleAuthConfig.scopes == ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "openid", "email"]
       && !GoogleAuthConfig.scopes.contains { $0.contains("mail.google") || $0.lowercased().contains("gm" + "ail") }, "google_scopes_calendar_only")
+check(GoogleAuthConfig.gmailScopes == ["https://www.googleapis.com/auth/gmail.modify"] + GoogleAuthConfig.scopes
+      && Set(GoogleAuthConfig.scopes).isSubset(of: Set(GoogleAuthConfig.gmailScopes)), "gmail_sign_in_scopes_are_gmail_plus_calendar")
 
 await connectorChecks(sharedStore!)
 await connectorsTabChecks(sharedStore!)

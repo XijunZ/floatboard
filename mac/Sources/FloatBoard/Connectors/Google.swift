@@ -91,8 +91,9 @@ final class Google: ObservableObject {
     // MARK: Connect an account
 
     /// Gmail screening uses the same Google client as Calendar: the Mac signs in (with Gmail access) and hands the
-    /// sign-in to the engine that screens (docs/architecture.md C9). `gmail` receives (address, refresh token).
-    static let gmailScopes = "https://www.googleapis.com/auth/gmail.modify openid email"
+    /// sign-in to the engine that screens (docs/architecture.md C9). `gmail` receives (address, refresh token). The same
+    /// sign-in also covers Calendar for that account, so it is not done twice.
+    static let gmailScopes = GoogleAuthConfig.gmailScopes.joined(separator: " ")
     private var gmailHandler: ((String, String) async throws -> Void)?
 
     func connectGmail(_ handler: @escaping (String, String) async throws -> Void) {
@@ -160,6 +161,7 @@ final class Google: ObservableObject {
                     .init(name: "code_challenge", value: challenge),
                     .init(name: "code_challenge_method", value: "S256"),
                     .init(name: "access_type", value: "offline"),
+                    .init(name: "include_granted_scopes", value: "true"),
                     .init(name: "prompt", value: "select_account consent"),
                     .init(name: "state", value: state),
                 ]
@@ -184,26 +186,39 @@ final class Google: ObservableObject {
                 fail("Google didn't return what we need: \(json["error_description"] ?? json["error"] ?? "unknown")")
                 return
             }
+            let expires = Double(json["expires_in"] as? Int ?? 3000)
             if let gmail = gmailHandler {
                 gmailHandler = nil
-                do { try await gmail(email, refresh); status = "Gmail \(email) connected." }
-                catch { fail("Signed in to \(email), but the engine didn't take it: \(error)") }
+                // The one consent covers Calendar too: keep it as this account's Calendar sign-in first, so a failed hand-off
+                // to the engine does not lose it.
+                let calendarKept = saveCalendarSignIn(email: email, refresh: refresh, access: access, expiresIn: expires)
+                do {
+                    try await gmail(email, refresh)
+                    status = calendarKept ? "Gmail and Calendar \(email) connected." : "Gmail \(email) connected."
+                } catch { fail("Signed in to \(email), but the engine didn't take it: \(error)") }
                 return
             }
-            guard GoogleCredentials.set(refresh, "refresh:\(email)") else {
-                fail("Signed in, but couldn't save the sign-in on this Mac. Check the Activity log.")
-                return
-            }
-            tokens[email] = (access, Date().addingTimeInterval(Double(json["expires_in"] as? Int ?? 3000) - 60))
-            if !accounts.contains(email) { accounts.append(email) }
-            UserDefaults.standard.set(accounts, forKey: "googleAccounts")
-            status = "Connected \(email)."
-            CalendarListAttempts.forget(email)
-            // Read the account's calendar list and events now, so Settings › Calendar fills in (and a reconnect clears).
-            NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
+            if saveCalendarSignIn(email: email, refresh: refresh, access: access, expiresIn: expires) { status = "Connected \(email)." }
         } catch {
             fail("Sign-in failed: \(error.localizedDescription)", detail: "\(error)")
         }
+    }
+
+    /// Keeps a sign-in as the account's Calendar sign-in and asks the app to read its calendars now. False (reported) when the
+    /// sign-in could not be saved on this Mac.
+    @discardableResult
+    private func saveCalendarSignIn(email: String, refresh: String, access: String, expiresIn: Double) -> Bool {
+        guard GoogleCredentials.set(refresh, "refresh:\(email)") else {
+            fail("Signed in, but couldn't save the sign-in on this Mac. Check the Activity log.")
+            return false
+        }
+        tokens[email] = (access, Date().addingTimeInterval(expiresIn - 60))
+        if !accounts.contains(email) { accounts.append(email) }
+        UserDefaults.standard.set(accounts, forKey: "googleAccounts")
+        CalendarListAttempts.forget(email)
+        // Read the account's calendar list and events now, so Settings › Calendar fills in (and a reconnect clears).
+        NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
+        return true
     }
 
     /// `forceRefresh` drops the saved token first (Google can invalidate one before it expires).
