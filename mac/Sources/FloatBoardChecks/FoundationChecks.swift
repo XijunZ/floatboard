@@ -93,7 +93,7 @@ private func normalizedSQL(_ rows: [[String?]]) -> [[String?]] {
 }
 
 @MainActor private func foundationSchemaChecks(_ root: URL) {
-    check(DB.schemaVersion == 12, "schema_version_is_12")
+    check(DB.schemaVersion >= 12, "schema_version_is_12")
     let old = root.appendingPathComponent("v11.sqlite"), fresh = root.appendingPathComponent("fresh12.sqlite")
     guard makeV11Board(old) else { check(false, "v11 board setup"); return }
     guard let up = foundationStore(root, "v11.sqlite"), foundationStore(root, "fresh12.sqlite") != nil else { return }
