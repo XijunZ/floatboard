@@ -761,6 +761,7 @@ foundationChecks()
 foundationCoreChecks()
 CircleDue.register()
 circleChecks()
+circleMoreChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)
