@@ -11,6 +11,7 @@ import { route } from "../lib/router";
 import { logEvent } from "../lib/runlog";
 import { CHAT_SKILL, SKILL } from "../triage/classify";
 import { ensureFathomHook, upsertGmail } from "./sources";
+import DECISIONS_SKILL from "../skills/decisions.md";
 
 const MAX = 500;
 
@@ -110,5 +111,6 @@ route("GET", "/v2/rulebook", async () => json({
   rulebooks: [
     { key: "email", name: "Email", text: SKILL },
     { key: "chat", name: "WhatsApp and chats", text: CHAT_SKILL },
+    { key: "decisions", name: "Decisions", text: DECISIONS_SKILL },
   ],
 }));

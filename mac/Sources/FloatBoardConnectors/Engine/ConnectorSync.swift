@@ -223,6 +223,9 @@ public enum ConnectorSync {
     /// How often the app polls for phone actions, and how long it waits after a local change before sending the board.
     public static let phonePollInterval: TimeInterval = 120
     public static let phonePushDebounce: TimeInterval = 10
+    /// Areas' own phone steps (Decisions: its copy and actions), run after the board step on each engine with the phone app.
+    /// Each logs its own problems; one failing never stops the others.
+    @MainActor public static var phoneHooks: [(_ connector: String, _ store: Store, _ client: ConnectorClient, _ now: Date) async -> Void] = []
 
     /// Applies and acknowledges phone actions, then sends the board copy when it changed since the engine last accepted
     /// one. A 404 (engine without the phone app) is skipped quietly; other problems are logged once per distinct message
@@ -259,6 +262,7 @@ public enum ConnectorSync {
             if phoneReported.removeValue(forKey: id) != nil {
                 store.activity("connector:\(id)", .info, "The phone's board is in sync again")
             }
+            for hook in phoneHooks { await hook(id, store, client, now) }
         } catch ConnectorError.noPhoneApp {
             phoneSupport[id] = false
             result.supported = false

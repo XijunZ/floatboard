@@ -201,7 +201,7 @@ describe("setup page", () => {
   it("rulebook_is_readable_by_the_app", async () => {
     const u = await newUser("X");
     const r = await (await call("/v2/rulebook", { key: u.key })).json<any>();
-    expect(r.rulebooks.map((b: any) => b.key)).toEqual(["email", "chat"]);
+    expect(r.rulebooks.map((b: any) => b.key)).toEqual(["email", "chat", "decisions"]);
     expect(r.rulebooks[0].text.length).toBeGreaterThan(200);
     expect((await call("/v2/rulebook")).status).toBe(401);
   });

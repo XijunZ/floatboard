@@ -1,0 +1,58 @@
+import { describe, expect, it } from "vitest";
+import { DECISIONS_EXPORTS, DECISIONS_LOGIC_JS, DECISIONS_UI_JS } from "../../src/phone/decisions-client";
+import { APP_JS } from "../../src/phone/client";
+import { PAGE_HTML } from "../../src/phone/page";
+
+/** More › Decisions on the phone: the pure parts, run here on their own (the same text the phone runs). */
+// eslint-disable-next-line no-new-func
+const L: any = new Function(DECISIONS_LOGIC_JS + "\nreturn {" + DECISIONS_EXPORTS.join(",") + "};")();
+
+const d = (n: number, over: Record<string, unknown> = {}) => ({ id: `D-${n}`, text: `Decision ${n}`, quote: "", source: "J-1", recorded: "2026-11-10",
+  decided: "", type: "operational", status: "decided", found_by: "claude", why: "", expected: "", expected_later: false, confidence: "",
+  confidence_later: false, tags: [], people: [], review_due: "2026-12-10", review: "scheduled", this_week: false, ...over });
+const at = "2026-11-15T10:00:00.000Z";
+
+describe("phone decisions", () => {
+  it("is_embedded_in_the_app_script_and_page", () => {
+    expect(APP_JS).toContain(DECISIONS_LOGIC_JS);
+    expect(APP_JS).toContain(DECISIONS_UI_JS);
+    expect(APP_JS).not.toContain("@DECISIONS_");
+    expect(PAGE_HTML).toContain('id="decisions"');
+    expect(APP_JS).not.toContain("Decisions arrive here with the Decisions area.");
+  });
+
+  it("sections_due_this_week_maybe_earlier", () => {
+    const s = L.decisionSections([d(1, { review: "due" }), d(2, { this_week: true }), d(3, { status: "maybe", this_week: true }), d(4)], []);
+    expect([s.due, s.week, s.maybe, s.earlier].map((x: any[]) => x.map((y) => y.id))).toEqual([["D-1"], ["D-2"], ["D-3"], ["D-4"]]);
+  });
+
+  it("queued_actions_show_at_once", () => {
+    const q = [L.reviewAction(d(1), "It worked", "", "act-00000001", at), L.notDecisionAction(d(2), "act-00000002", at)];
+    const s = L.decisionSections([d(1, { review: "due" }), d(2, { this_week: true })], q);
+    expect(s.due).toEqual([]);
+    expect(s.week).toEqual([]);
+    expect(s.earlier.map((x: any) => [x.id, x.review])).toEqual([["D-1", "done"]]);
+  });
+
+  it("actions_have_their_own_id_and_time_and_need_an_answer", () => {
+    expect(L.reviewAction(d(1), "  ", "", "act-00000001", at)).toBeNull();
+    expect(L.reviewAction(d(1), "Went well", "Mostly", "act-00000001", at))
+      .toEqual({ id: "act-00000001", decision: "D-1", action: "review", happened: "Went well", sound: "Mostly", made_at: at });
+    expect(L.notDecisionAction(d(2), "act-00000002", at)).toEqual({ id: "act-00000002", decision: "D-2", action: "not_decision", made_at: at });
+    expect(L.canDismiss(d(2, { this_week: true }))).toBe(true);
+    expect(L.canDismiss(d(3, { status: "maybe" }))).toBe(true);
+    expect(L.canDismiss(d(4))).toBe(false);
+  });
+
+  it("queue_drops_accepted_and_lines_read_well", () => {
+    const q = [{ id: "a" }, { id: "b" }];
+    expect(L.decisionQueueAfter(q, ["a"])).toEqual([{ id: "b" }]);
+    expect(L.decisionDetail(d(1, { type: "strategic", found_by: "you" }))).toBe("Strategic · recorded 2026-11-10");
+    expect(L.decisionDetail(d(1))).toBe("Operational · recorded 2026-11-10 · found by Claude");
+    expect(L.decisionPrediction(d(1))).toBe("Expected outcome: not recorded");
+    expect(L.decisionPrediction(d(1, { expected: "More sales", expected_later: true, confidence: "high", confidence_later: true })))
+      .toBe("Expected outcome: More sales (added later) · Confidence: high (added later)");
+    expect(L.decisionsWaiting(0)).toBe("");
+    expect(L.decisionsWaiting(2)).toBe("2 changes waiting for your Mac");
+  });
+});

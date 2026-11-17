@@ -462,3 +462,14 @@ shown from `floatboard.jots`; both are dropped at sign-out. Routes: `GET`/`POST 
 **Android:** long-press the icon for **New jot** (`/app/?go=jot`) and **Plan** (`/app/?go=plan`); **Share → FloatBoard** from
 any app opens "Save to FloatBoard" with the shared title, text and link, saved as a jot or as a task (manifest `share_target`,
 GET, so no form post and no change to the page's CSP).
+## More › Decisions (built with the Decisions area)
+
+- Read-only list from the Mac's copy (`PUT /v2/decisions`, encrypted on the engine): **Reviews due**, **This week**,
+  **Maybe**, **Earlier**; each opens a sheet with the decision, the exact quote and its source, why, expected outcome and
+  confidence ("not recorded" until added; "added later" when added after recording), tags, people and the review date.
+- Two actions, queued offline with their own id and time and sent when online (`POST /app/api/decisions/action`):
+  **Answer review** (What happened? Was the thinking sound?; the Mac saves it as a jot linked to the decision) and
+  **Not a decision** (this week's and Maybe ones; the Mac adds an example to the Decisions rulebook).
+- Cached per account for offline reading; signing out or another account drops it. Code: `files/decisions-logic.client.js`
+  (pure, tested in `test/decisions/phone-decisions.test.ts`) and `files/decisions.client.js`, put into `/app/app.js` at
+  their markers. Checked in headless Chrome at 360, 390 and 430 px, light and dark, long and Chinese text.

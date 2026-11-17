@@ -56,6 +56,7 @@ struct ExpandedView: View {
         .overlay(alignment: .bottom) { UndoUnlinkBar() }
         .sheet(isPresented: $ui.showReview) { WeeklyReviewView { ui.showReview = false } }
         .sheet(item: $ui.makeTask) { req in MakeTaskForm(request: req) { ui.makeTask = nil } }
+        .decisionSheets()   // Decisions: Make decision form and review sheet
         // A tab whose area was switched off goes back to the board.
         .onChange(of: store.modules) { _, on in if let m = ui.tab.module, !on.contains(m) { ui.tab = .board } }
         .toolbar { toolbarContent }
