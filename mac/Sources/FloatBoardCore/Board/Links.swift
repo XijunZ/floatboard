@@ -20,6 +20,15 @@ public enum ItemLinkKind: String, CaseIterable {
     }
 }
 
+/// What kind of link a typed id makes. Related unless the area that owns the typed id's kind says otherwise (Resolutions:
+/// a task, jot or decision typing a goal's id serves that goal).
+@MainActor public enum MentionKinds {
+    private static var rules: [ItemKind: (Store, ShortID, ShortID) -> ItemLinkKind?] = [:]
+    /// `f(store, typedIn, typedID)`: the kind for an id of `target`'s kind typed into another item's text; nil = related.
+    public static func register(_ target: ItemKind, _ f: @escaping (Store, ShortID, ShortID) -> ItemLinkKind?) { rules[target] = f }
+    static func kind(store: Store, from: ShortID, to: ShortID) -> ItemLinkKind { rules[to.kind]?(store, from, to) ?? .related }
+}
+
 /// Who made a link: code on its own (`auto`), a suggestion the owner accepted (`suggested`), or the owner (`manual`).
 public enum LinkMaker: String, CaseIterable { case auto, suggested, manual }
 
@@ -200,7 +209,7 @@ extension Store {
     func linkMentionsRow(in text: String, previous: String, from item: ShortID, now: Date) throws {
         let before = Set(ShortID.mentions(in: previous))
         for id in ShortID.mentions(in: text) where id != item && !before.contains(id) && itemExists(id) {
-            try linkRow(item, id, kind: .related, madeBy: .manual, actor: .user, now: now)
+            try linkRow(item, id, kind: MentionKinds.kind(store: self, from: item, to: id), madeBy: .manual, actor: .user, now: now)
         }
     }
 

@@ -270,6 +270,7 @@ struct EditCardView: View {
             .font(.system(size: 12))
             LinkedMeetings(taskID: draft.id)
             LinkChips(item: ShortID(kind: .task, number: draft.id), except: [.event])
+            GoalPicker(item: ShortID(kind: .task, number: draft.id))
             emailSection
             if replyDraftCard.canDraftReply { replyDraftSection }
             VStack(alignment: .leading, spacing: 2) {

@@ -767,6 +767,7 @@ circleMoreChecks()
 await circleSyncChecks()
 await circleKeyChecks()
 await decisionsChecks()
+resolutionsChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
 exit(failures.isEmpty ? 0 : 1)
