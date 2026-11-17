@@ -219,7 +219,7 @@ public final class CalendarOutbox {
     /// field groups it set are recorded as FloatBoard's own write.
     @discardableResult
     public func markSent(uuid: String, result: (eventID: String, fields: CalEventFields)?, own: Bool = true, wrote: CalWrite? = nil,
-                         now: Date = Date()) -> Bool {
+                         allDayChanged: (start: Bool, end: Bool)? = nil, now: Date = Date()) -> Bool {
         let row = rows("WHERE uuid=?", [uuid]).first
         do { try store.performThrowing {
             try db.run("UPDATE cal_outbox SET sent=?, last_error='' WHERE uuid=?", [now, uuid])
@@ -237,7 +237,9 @@ public final class CalendarOutbox {
         if let result {
             cache.apply(account: row.account, calendarID: row.calendarID,
                         changes: [GoogleEventChange(eventID: result.eventID, cancelled: false, fields: result.fields)], nextToken: nil)
-            if own, let w = wrote ?? row.write { recordOwnWrite(account: row.account, calendarID: row.calendarID, eventID: result.eventID, w, result.fields) }
+            if own, let w = wrote ?? row.write {
+                recordOwnWrite(account: row.account, calendarID: row.calendarID, eventID: result.eventID, w, result.fields, allDayChanged: allDayChanged)
+            }
         } else if let id = row.write?.eventID {
             cache.apply(account: row.account, calendarID: row.calendarID,
                         changes: [GoogleEventChange(eventID: id, cancelled: true, fields: nil)], nextToken: nil)
@@ -247,10 +249,16 @@ public final class CalendarOutbox {
 
     /// Remembers Google's answer to FloatBoard's own write on the cached event: the fields that write set are now known as
     /// FloatBoard's. A failure is logged; the next change to this event is then decided against the event as queued.
-    private func recordOwnWrite(account: String, calendarID: String, eventID: String, _ w: CalWrite, _ f: CalEventFields) {
+    private func recordOwnWrite(account: String, calendarID: String, eventID: String, _ w: CalWrite, _ f: CalEventFields,
+                                allDayChanged: (start: Bool, end: Bool)? = nil) {
         var setTitle = true, setStart = true, setEnd = true
-        // An all-day move writes both dates (the end defaults to the next day); a timed patch writes only what it carries.
-        if case .patch(_, let t, let s, let e, let d) = w { setTitle = t != nil; setStart = s != nil || d != nil; setEnd = e != nil || d != nil }
+        // An all-day move writes both dates (the end defaults to the next day) but only the date(s) it changed become
+        // FloatBoard's (`allDayChanged`); a timed patch writes only what it carries.
+        if case .patch(_, let t, let s, let e, let d) = w {
+            setTitle = t != nil
+            setStart = s != nil || (d != nil && allDayChanged?.start ?? true)
+            setEnd = e != nil && d == nil || (d != nil && allDayChanged?.end ?? true)
+        }
         guard setTitle || setStart || setEnd else { return }
         var own = ownWrite(account: account, calendarID: calendarID, eventID: eventID) ?? CalOwnWrite()
         if own.time != nil { own.start = own.startAck; own.end = own.endAck; own.time = nil }   // older form, now kept per end
@@ -321,8 +329,7 @@ public final class CalendarOutbox {
             // day, else the day after the first (as `GoogleCalendarAPI.patch` sends it).
             guard current.allDay else { return k }
             if current.startDay == d { k.start = .init(updated: u, value: current.start, allDay: true) }
-            let sentEnd = en.map(Due.dayString) ?? Due.startOfDay(d).flatMap { AppTime.calendar.date(byAdding: .day, value: 1, to: $0) }.map(Due.dayString)
-            if let sentEnd, current.endDay == sentEnd { k.end = .init(updated: u, value: current.end, allDay: true) }
+            if let sentEnd = allDayEndDay(d, end: en), current.endDay == sentEnd { k.end = .init(updated: u, value: current.end, allDay: true) }
         } else if !current.allDay {
             if let st, st == current.start { k.start = .init(updated: u, value: current.start, allDay: false) }
             if let en, en == current.end { k.end = .init(updated: u, value: current.end, allDay: false) }
@@ -428,8 +435,24 @@ public final class CalendarOutbox {
             if start == current.start { start = nil }
             if end == current.end { end = nil }
         }
+        // All-day: the first day and the end day go together; when both are already Google's, nothing is sent for them.
+        if let d = day, current.allDay, current.startDay == d, current.endDay == allDayEndDay(d, end: end) { day = nil; end = nil }
         if title == nil && start == nil && end == nil && day == nil { return nil }
         return .patch(eventID: id, title: title, start: start, end: end, allDayStart: day)
+    }
+
+    /// The (exclusive) end day an all-day patch sends: its end's day, else the day after its first day (as
+    /// `GoogleCalendarAPI.patch` sends it).
+    public static func allDayEndDay(_ day: String, end: Date?) -> String? {
+        end.map(Due.dayString) ?? Due.startOfDay(day).flatMap { AppTime.calendar.date(byAdding: .day, value: 1, to: $0) }.map(Due.dayString)
+    }
+
+    /// For an all-day patch about to be sent against `current`: which of its two dates it changes. Only those become
+    /// FloatBoard's own write when Google accepts it (the other stays as recorded, e.g. Google's newer end). Nil otherwise.
+    public static func allDayChanges(_ w: CalWrite?, current: CalEventFields) -> (start: Bool, end: Bool)? {
+        guard case .patch(_, _, _, let end, let d?)? = w else { return nil }
+        guard current.allDay else { return (true, true) }
+        return (current.startDay != d, current.endDay != allDayEndDay(d, end: end))
     }
 
     /// Seconds to wait after the nth failure: 60, 120, 240 ... capped at 3600.

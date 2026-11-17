@@ -135,6 +135,38 @@ import FloatBoardConnectors
         let both = CalendarOutbox.claimingOwnRetry(CalendarOutbox.observed(prior, base: nil, current: same), attempted: attempted, current: same)
         check(both.start?.external == nil && both.end?.external == nil, "r9b_all_day_retry_claims_the_end_when_it_matches")
     }
+
+    // Round 10, end to end through the sender with an all-day event: the move to 10 Jan (one day) is applied but its answer
+    // is lost; Google then extends the end to the 13th; the retry finds nothing left to change and must not claim the end;
+    // the later move to the 11th keeps Google's length: 11-14 Jan.
+    do {
+        let (store, cache, outbox) = try setup("r10-allday")
+        func day(_ d: String) -> Date { Due.startOfDay(d)! }
+        cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: "r10", cancelled: false,
+            fields: CalEventFields(start: day("2030-01-05"), end: day("2030-01-06"), allDay: true, startDay: "2030-01-05", endDay: "2030-01-06",
+                                   title: "Off-site", googleUpdated: old))], nextToken: nil)
+        let server = StatefulEvent(id: "r10", title: "Off-site", start: day("2030-01-05"), end: day("2030-01-06"), updated: old)
+        server.startDay = "2030-01-05"; server.endDay = "2030-01-06"
+        _ = outbox.enqueue(.patch(eventID: "r10", title: nil, start: nil, end: nil, allDayStart: "2030-01-10"), account: acct, calendarID: acct, now: ago(30))
+        _ = outbox.enqueue(.patch(eventID: "r10", title: nil, start: nil, end: nil, allDayStart: "2030-01-11"), account: acct, calendarID: acct, now: ago(20))
+        server.loseNextPatchAnswer = true
+        let sender = CalendarSender(store: store, apiFor: { _ in server.api() }, isOnline: { true })
+        await sender.drain()
+        let applied = server.startDay == "2030-01-10" && server.endDay == "2030-01-11"
+        server.externalEdit(endDay: "2030-01-13", at: ago(10))
+        store.performForTest("UPDATE cal_outbox SET next_try=0")
+        await sender.drain()
+        await sender.drain()
+        let ok = applied && server.startDay == "2030-01-11" && server.endDay == "2030-01-14" && outbox.rows(unsent: true).isEmpty
+        if !ok { print("  r10: applied \(applied), server \(server.startDay ?? "nil") - \(server.endDay ?? "nil"), unsent \(outbox.rows(unsent: true).count)") }
+        check(ok, "r10_all_day_lost_answer_retry_keeps_googles_newer_end")
+        // Only one date changing: the pair is sent, and only the changed date becomes FloatBoard's own.
+        let cur = CalEventFields(start: day("2030-01-10"), end: day("2030-01-13"), allDay: true, startDay: "2030-01-10", endDay: "2030-01-13",
+                                 title: "Off-site", googleUpdated: old)
+        let longer = CalendarOutbox.allDayChanges(.patch(eventID: "r10", title: nil, start: nil, end: day("2030-01-15"), allDayStart: "2030-01-10"), current: cur)
+        let moved = CalendarOutbox.allDayChanges(.patch(eventID: "r10", title: nil, start: nil, end: day("2030-01-13"), allDayStart: "2030-01-09"), current: cur)
+        check(longer.map { !$0.start && $0.end } == true && moved.map { $0.start && !$0.end } == true, "r10_all_day_pair_acknowledges_only_changed_dates")
+    } catch { check(false, "r10: \(error)") }
 }
 
 /// R7-2: each instance's original start (Google's originalStartTime) is kept and sent to the phone; the column is part of
