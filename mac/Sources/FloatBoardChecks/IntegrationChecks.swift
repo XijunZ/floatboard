@@ -15,6 +15,7 @@ import SQLite3
     integrationBudgetChecks(root)
     integrationPhoneMakeChecks(root)
     integrationUpgradeRehearsal(root)
+    if let proof = ProcessInfo.processInfo.environment["FLOATBOARD_INTEGRATION_PROOF"] { integrationUpgradeProof(URL(fileURLWithPath: proof), root: root) }
 }
 
 @MainActor private func integrationStore(_ root: URL, _ name: String) -> Store? {
@@ -185,4 +186,57 @@ import SQLite3
     print("REHEARSAL v11->\(DB.schemaVersion): cards \(before.cards)->\(after.cards) (live \(before.live)->\(after.live)), links \(before.links)->\(after.links), "
           + "calendar events \(before.events)->\(after.events), history \(before.history)->\(after.history), meta \(before.meta)->\(after.meta), "
           + "board tasks shown \(live.count), groups \(store.areas.count), tags \(store.tags.count), modules on \(store.modules.count)")
+}
+
+// MARK: Upgrade proof on a copy of a real board (FLOATBOARD_INTEGRATION_PROOF=<copy>; never the live board)
+
+/// Upgrades the copy the way the app's launch does (pre-migrate backup into the scratch folder, then open) and prints COUNTS
+/// ONLY, before and after: never a title, name, note or any other content.
+@MainActor private func integrationUpgradeProof(_ url: URL, root: URL) {
+    guard !url.path.contains("/Library/Application Support/") else { check(false, "proof refused: not a scratch copy"); return }
+    func one(_ q: String) -> String {
+        var h: OpaquePointer?, st: OpaquePointer?
+        defer { sqlite3_finalize(st); sqlite3_close(h) }
+        guard sqlite3_open_v2(url.path, &h, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, sqlite3_prepare_v2(h, q, -1, &st, nil) == SQLITE_OK,
+              sqlite3_step(st) == SQLITE_ROW, let c = sqlite3_column_text(st, 0) else { return "n/a" }
+        return String(cString: c)
+    }
+    func facts() -> [(String, String)] {
+        let hasKind = rawColumns(url, "links").contains("kind")
+        return [("user_version", one("PRAGMA user_version")), ("integrity", one("PRAGMA integrity_check")),
+                ("cards", one("SELECT count(*) FROM cards")), ("cards live", one("SELECT count(*) FROM cards WHERE deleted=0 AND withdrawn=0")),
+                ("cards deleted", one("SELECT count(*) FROM cards WHERE deleted=1")), ("history events", one("SELECT count(*) FROM events")),
+                ("links", one("SELECT count(*) FROM links")),
+                ("links by kind", hasKind ? one("SELECT group_concat(k || '=' || n, ', ') FROM (SELECT kind || '/' || made_by AS k, count(*) AS n FROM links GROUP BY kind, made_by ORDER BY k)") : "no kinds yet"),
+                ("links by ends", one("SELECT group_concat(k || '=' || n, ', ') FROM (SELECT from_type || '>' || to_type AS k, count(*) AS n FROM links GROUP BY from_type, to_type ORDER BY k)")),
+                ("calendar events", one("SELECT count(*) FROM cal_events")), ("calendars", one("SELECT count(*) FROM cal_calendars")),
+                ("settings (meta rows)", one("SELECT count(*) FROM meta")), ("connectors", one("SELECT count(*) FROM connectors")),
+                ("tags (areas rows)", one("SELECT count(*) FROM areas")),
+                ("item tag rows", one("SELECT count(*) FROM sqlite_master WHERE name='item_tags'") == "1" ? one("SELECT count(*) FROM item_tags") : "no table yet"),
+                ("kept event records", one("SELECT count(*) FROM sqlite_master WHERE name='cal_kept'") == "1" ? one("SELECT count(*) FROM cal_kept") : "no table yet"),
+                ("outbox", one("SELECT count(*) FROM outbox"))]
+    }
+    let before = facts()
+    let cardSum = { one("SELECT sum(length(title) + length(notes)) || '/' || sum(id) FROM cards") }   // compared, never printed
+    let sumBefore = cardSum()
+    var backedUp = false
+    if Backups.migrationCheck(url).needed {
+        do { _ = try Backups(dbURL: url, dir: root.appendingPathComponent("proof-bk")).snapshot(reason: "pre-migrate"); backedUp = true }
+        catch { check(false, "proof backup: \(type(of: error))"); return }
+    }
+    let store: Store
+    do { store = Store(db: try DB(url: url)) } catch { check(false, "proof upgrade failed: \(type(of: error))"); return }
+    let after = facts()
+    let live = store.cards
+    let primaryOK = live.filter { store.itemTags(ShortID(kind: .task, number: $0.id)).primary == $0.area }.count
+    let groups = Set(live.map(\.area)).count
+    print("PROOF before: " + before.map { "\($0.0) \($0.1)" }.joined(separator: "; "))
+    print("PROOF after:  " + after.map { "\($0.0) \($0.1)" }.joined(separator: "; "))
+    print("PROOF app: pre-migrate backup \(backedUp), tasks on the board \(live.count), live tasks whose primary tag is their group \(primaryOK), "
+          + "groups in use \(groups), board groups \(store.areas.count), tags \(store.tags.count), modules on \(store.modules.count) of \(Module.allCases.count)")
+    let get = { (f: [(String, String)], k: String) in f.first { $0.0 == k }?.1 ?? "" }
+    check(get(after, "integrity") == "ok" && get(after, "user_version") == String(DB.schemaVersion) && cardSum() == sumBefore
+          && ["cards", "cards live", "cards deleted", "history events", "links", "calendar events", "calendars", "connectors", "outbox"].allSatisfy { get(after, $0) == get(before, $0) }
+          && Int(get(after, "settings (meta rows)")) ?? 0 >= Int(get(before, "settings (meta rows)")) ?? 0
+          && primaryOK == live.count && store.modules == Set(Module.allCases), "real_board_copy_upgrades_to_16_keeping_everything")
 }
