@@ -25,9 +25,10 @@
  * - The queue logic is in src/phone/sync-logic.ts (pure functions, tested on their own).
  *
  * The script itself is files/app.client.js (bundled as text); the queue logic (files/sync.client.js) goes in at
- * the @SYNC_JS@ marker.
+ * the @SYNC_JS@ marker, the Jots screen (files/jots.client.js) at the @JOTS_JS@ marker.
  */
 import { SYNC_JS } from "./sync-logic";
+import { JOTS_JS } from "./jots-logic";
 import APP_SRC from "./files/app.client.js";
 
-export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS);
+export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS).replace("/*@JOTS_JS@*/", () => JOTS_JS);

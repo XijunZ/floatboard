@@ -35,6 +35,7 @@ struct AreasSection: View {
         }
         .onAppear { budget = ReminderBudget(store: store).settings }
         .onChange(of: budget) { _, new in if new != ReminderBudget(store: store).settings { ReminderBudget(store: store).save(new) } }
+        if store.isOn(.jots) { JotsSettings() }   // Jots: nudge and daily files
     }
 
     static func hour(_ h: Int) -> String { String(format: "%02d:00", h) }

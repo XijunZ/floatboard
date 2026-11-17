@@ -6,6 +6,29 @@
 export const THEME_LIGHT = "#f2f3f7";
 export const THEME_DARK = "#0f1115";
 
+/** The Jots screen (docs/superpowers/specs/2026-11-17-jots-design.md §5). */
+const JOTS_CSS = `
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.jot-compose{background:var(--surface);border-radius:16px;padding:10px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.jot-box,#jot-text{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg);
+color:var(--text);font:inherit;font-size:17px;line-height:1.4}
+.jot-row{display:flex;align-items:center;gap:8px}
+.jot-row .btn{width:auto;min-height:44px;padding:8px 16px;font-size:16px}
+.jot-row .grow{flex:1;min-width:0;color:var(--muted);font-size:13px}
+.jot-find{display:flex;gap:8px}
+.jot-find input{flex:1;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--surface)}
+.jot-find select{flex:none;max-width:42%;min-height:44px;border:1px solid var(--line);border-radius:12px;padding:8px;background:var(--surface)}
+#jot-list{display:flex;flex-direction:column;gap:8px}
+.jot-day{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:10px 4px 0}
+.card.jot .t{font-size:16px;white-space:pre-line}
+.tag.untagged{font-style:italic;opacity:.8}
+.jot-full{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text;background:var(--surface);border-radius:12px;
+padding:12px;font-size:16px;line-height:1.45}
+.jot-compare{display:flex;flex-direction:column;gap:8px}
+.jot-label{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 4px 4px}
+@media (min-width:420px){.jot-compare{flex-direction:row}.jot-side{flex:1;min-width:0}}
+`;
+
 const CSS = `
 :root{--bg:${THEME_LIGHT};--surface:#fff;--surface2:#e8eaf0;--text:#1c1c1e;--muted:#6b6f7b;--line:rgba(0,0,0,.08);
 --accent:#2f5be0;--accent-text:#fff;--danger:#d93025;--shadow:0 6px 24px rgba(20,30,60,.12);color-scheme:light dark}
@@ -124,7 +147,7 @@ background:var(--text);color:var(--bg);padding:12px 16px;border-radius:14px;text
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.sheet,.spin{animation:none}}
-`;
+${JOTS_CSS}`;
 
 const ICONS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true">
 <symbol id="i-todo" viewBox="0 0 24 24"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/></symbol>
@@ -191,7 +214,14 @@ const BODY = `${ICONS}
 <div id="list" class="list" role="tabpanel"></div>
 <p id="empty" class="empty" hidden></p>
 <section id="plan" class="plan" role="tabpanel" hidden><div id="today" class="today"></div><p id="plan-empty" class="empty" hidden>Nothing planned for today, the rest of this week or next week.</p></section>
-<section id="jots" class="area" role="tabpanel" hidden><div class="placeholder">Jots arrive here with the Jots area: a writing box and your last 30 days of notes.</div></section>
+<section id="jots" class="area" role="tabpanel" hidden>
+<div class="jot-compose"><label for="jot-text" class="sr">New jot</label>
+<textarea id="jot-text" rows="3" maxlength="20000" placeholder="Write a jot. Tap the keyboard's microphone to speak."></textarea>
+<div class="jot-row"><span id="jot-wait" class="grow" role="status"></span><button id="jot-clean" class="btn secondary" type="button">Clean up</button><button id="jot-save" class="btn" type="button">Save</button></div></div>
+<div class="jot-find"><input id="jot-search" type="search" placeholder="Search jots" aria-label="Search jots"><select id="jot-tag" aria-label="Filter by tag"></select></div>
+<div id="jot-list"></div>
+<p id="jot-empty" class="empty" hidden></p>
+</section>
 <section id="circle" class="area" role="tabpanel" hidden><div class="placeholder">Circle arrives here with the Circle area: who is due, and each person's card.</div></section>
 <section id="more" class="area" role="tabpanel" hidden>
 <button id="more-decisions" class="btn row-btn" type="button">Decisions<span class="sub">Coming with the Decisions area</span></button>
@@ -248,6 +278,12 @@ export const MANIFEST = JSON.stringify({
     { src: "/app/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
     { src: "/app/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
   ],
+  // Jots: long-press the icon for "New jot" and "Plan"; Share → FloatBoard from any app (a GET share, no form posts).
+  shortcuts: [
+    { name: "New jot", short_name: "Jot", url: "/app/?go=jot", icons: [{ src: "/app/icon-192.png", sizes: "192x192", type: "image/png" }] },
+    { name: "Plan", short_name: "Plan", url: "/app/?go=plan", icons: [{ src: "/app/icon-192.png", sizes: "192x192", type: "image/png" }] },
+  ],
+  share_target: { action: "/app/", method: "GET", params: { title: "share_title", text: "share_text", url: "share_url" } },
 });
 
 export const PAGE_HTML = `<!doctype html>

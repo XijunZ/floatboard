@@ -5,6 +5,7 @@ import { processRecap, recapKnown } from "../triage/recap";
 import { Budget, BudgetExhausted } from "../lib/budget";
 import { fathomToMessage, meetingMeta, recapKeys, recordMeeting } from "./fathom";
 import { log } from "../triage/run";
+import { recordMeetingNotes } from "../jots/copies";
 
 /**
  * Second layer behind the Fathom webhook: every hour, ask Fathom's API for meetings created since the last check and
@@ -67,6 +68,7 @@ export async function catchUpFathom(env: Env, userId: string, calls: Budget, fet
       }
       const msg = fathomToMessage(m, src.id);
       await recordMeeting(env, userId, meetingMeta(m, msg));
+      await recordMeetingNotes(env, userId, msg); // Jots J9
       const known = await recapKnown(env, userId, recapKeys(msg));
       if (!known) {
         calls.take(1); // the summary call to Claude

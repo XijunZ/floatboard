@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 12
+    public static let schemaVersion = 13
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -206,6 +206,10 @@ public final class DB {
 
             """ + v12Tables
         }
+        if version < 13 {
+            // 12 -> 13: Jots (docs/superpowers/specs/2026-11-17-jots-design.md). The same text builds a new board.
+            sql += v13Jots
+        }
         return sql
     }
 
@@ -248,6 +252,35 @@ public final class DB {
     END;
     CREATE TRIGGER cal_events_keep AFTER UPDATE ON cal_events WHEN NEW.gone=0 AND EXISTS (SELECT 1 FROM cal_kept WHERE short_id=NEW.short_id) BEGIN
         UPDATE cal_kept SET title=NEW.title, start=NEW.start, "end"=NEW."end", all_day=NEW.all_day, video_link=NEW.video_link WHERE short_id=NEW.short_id;
+    END;
+
+    """
+
+    /// Version 13 (Jots): a task note's task, where a jot arrived from, meeting notes' Fathom details, Claude's tag
+    /// suggestions, and what the engine holds of each jot.
+    static let v13Jots = """
+    ALTER TABLE jots ADD COLUMN task_id INTEGER;
+    ALTER TABLE jots ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+    CREATE INDEX jots_task ON jots(task_id);
+    CREATE UNIQUE INDEX jots_origin ON jots(origin) WHERE origin<>'';
+    -- Meeting notes: Fathom's details of the meeting and how the notes were attached to their event (link | time | suggested | '').
+    CREATE TABLE jot_meetings(
+        jot_id INTEGER PRIMARY KEY, recap_key TEXT NOT NULL, fathom_url TEXT NOT NULL DEFAULT '', meeting_url TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL DEFAULT '', scheduled_start REAL, invitees TEXT NOT NULL DEFAULT '[]',
+        matched_by TEXT NOT NULL DEFAULT '', received REAL NOT NULL
+    );
+    -- Claude's tag suggestions per jot: open, accepted or dismissed.
+    CREATE TABLE jot_suggestions(
+        jot_id INTEGER NOT NULL, tag TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'open', at REAL NOT NULL, PRIMARY KEY(jot_id, tag)
+    );
+    -- What the engine holds of each jot (the `updated` it last accepted) and whether Claude was asked for its tags.
+    CREATE TABLE jot_sync(jot_id INTEGER PRIMARY KEY, pushed REAL, tags_asked INTEGER NOT NULL DEFAULT 0);
+    -- A task note is the task's notes: its edits, delete and restore reach cards.notes (every write path, so none can miss it).
+    CREATE TRIGGER jots_task_note_text AFTER UPDATE OF text ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted=0 BEGIN
+        UPDATE cards SET notes=NEW.text, updated=NEW.updated WHERE id=NEW.task_id AND notes<>NEW.text;
+    END;
+    CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN
+        UPDATE cards SET notes=CASE WHEN NEW.deleted=1 THEN '' ELSE NEW.text END, updated=NEW.updated WHERE id=NEW.task_id;
     END;
 
     """
@@ -410,7 +443,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables
+    """ + v12Tables + v13Jots
 
     func exec(_ sql: String) throws {
         if sqlite3_exec(handle, sql, nil, nil, nil) != SQLITE_OK { throw DBError.sql(lastMessage) }
