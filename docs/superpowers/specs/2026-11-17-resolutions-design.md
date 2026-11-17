@@ -53,7 +53,7 @@ the yearly review and its earlier text must not be lost; ordinary goals use the 
 
 ## 3. Nudges (R4, §9 "outside the budget, at most one per period")
 
-`ResolutionNudges.due(store, now)` → the reviews due now: a **quarter** review when the current time is in the last 7 days
+`ResolutionNudges.due(store, now)` → the reviews due now: a **quarter** review when the current time is in the last 14 days
 of a quarter or the first 21 days of the next (builder's call), and the ending quarter has an active goal. The **yearly**
 review the same for the year (with the year's active goals, or the five-year picture's period ending). Each kind fires at
 most once per period: the period key is saved in `meta` (`resolutions_nudged_quarter` / `_year`). Not inside quiet hours

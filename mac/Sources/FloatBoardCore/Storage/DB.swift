@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 12
+    public static let schemaVersion = 16
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -206,6 +206,11 @@ public final class DB {
 
             """ + v12Tables
         }
+        if version < 16 {
+            // 15 -> 16: Resolutions (docs/superpowers/specs/2026-11-17-resolutions-design.md). Jots (13), Circle (14) and
+            // Decisions (15) add their own blocks before this one; this one depends on none of them.
+            sql += v16Tables
+        }
         return sql
     }
 
@@ -249,6 +254,25 @@ public final class DB {
     CREATE TRIGGER cal_events_keep AFTER UPDATE ON cal_events WHEN NEW.gone=0 AND EXISTS (SELECT 1 FROM cal_kept WHERE short_id=NEW.short_id) BEGIN
         UPDATE cal_kept SET title=NEW.title, start=NEW.start, "end"=NEW."end", all_day=NEW.all_day, video_link=NEW.video_link WHERE short_id=NEW.short_id;
     END;
+
+    """
+
+    /// The tables version 16 adds (Resolutions): goals and the earlier wordings of each.
+    static let v16Tables = """
+    -- Goals (R-n). level: five_year | year | quarter; period: '2026-2030' | '2027' | '2027-Q1'. status: active, or how its
+    -- review ended (kept | changed | dropped; never edited after). carried_from: the previous period's goal it carries on.
+    CREATE TABLE resolutions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, level TEXT NOT NULL, period TEXT NOT NULL, title TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', carried_from INTEGER,
+        position REAL NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'typed',
+        added REAL NOT NULL, updated REAL NOT NULL, reviewed REAL, deleted INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX resolutions_period ON resolutions(level, period);
+    -- Earlier wordings of a goal or of the five-year picture, oldest first.
+    CREATE TABLE resolution_history(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, title TEXT NOT NULL, notes TEXT NOT NULL, at REAL NOT NULL
+    );
+    CREATE INDEX resolution_history_goal ON resolution_history(goal_id);
 
     """
 
@@ -410,7 +434,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables
+    """ + v12Tables + v16Tables
 
     func exec(_ sql: String) throws {
         if sqlite3_exec(handle, sql, nil, nil, nil) != SQLITE_OK { throw DBError.sql(lastMessage) }
