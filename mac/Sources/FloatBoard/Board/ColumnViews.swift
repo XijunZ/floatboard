@@ -49,7 +49,7 @@ struct Column: View {
 
     var body: some View {
         let sort = ColumnSort.forColumn(status, saved: ui.columnSorts[status.rawValue])
-        let cards = sort.apply(store.cards(in: status), groupOrder: store.areas.map(\.name))
+        let cards = sort.apply(GoalFilter.apply(ui.goalFilter, store.cards(in: status), store: store), groupOrder: store.areas.map(\.name))
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(status.title).font(.system(size: 12, weight: .semibold))

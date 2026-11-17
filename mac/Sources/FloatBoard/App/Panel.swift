@@ -58,6 +58,10 @@ final class UIState: ObservableObject {
     }
     /// Loads the saved bar settings once the store exists (so a problem can be logged).
     func loadBar(store: Store) { logStore = store; bar = BarConfig.load(store: store) }
+    /// Resolutions: the board shows only this goal's tasks (R5); nil shows every task.
+    @Published var goalFilter: ShortID?
+    /// Resolutions: the goal to open in the Resolutions tab (from search or a link).
+    @Published var focusGoal: ShortID?
     /// Board search (highlights matching tasks).
     @Published var search = ""
     /// The match Enter / ⇧Enter has moved to (scrolled into view, outlined more strongly).

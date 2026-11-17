@@ -28,6 +28,7 @@ struct ExpandedView: View {
             switch ui.tab {
             case .board:
                 addRow
+                if ui.goalFilter != nil { GoalFilterChip() }
                 HStack(alignment: .top, spacing: 10) {
                     ForEach(Status.allCases) { Column(status: $0) }
                 }
@@ -162,7 +163,7 @@ struct ExpandedView: View {
     /// Matching tasks in board order: To do, Doing, Done, top to bottom.
     private var orderedMatches: [Int64] {
         guard !ui.search.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return Status.allCases.flatMap { store.cards(in: $0) }.filter { Search.matches($0, ui.search) }.map(\.id)
+        return Status.allCases.flatMap { GoalFilter.apply(ui.goalFilter, store.cards(in: $0), store: store) }.filter { Search.matches($0, ui.search) }.map(\.id)
     }
 
     private var addRow: some View {

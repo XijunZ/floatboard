@@ -414,6 +414,12 @@ public struct GoalProgress: Equatable {
             noteJot = j.shortID
         }
         let openTasks = Set(progressOwnOpenTasks(id))
+        // Goals already carried into the new period whose earlier version sat under this one, and that have no parent yet
+        // (their review came first): they move under this goal's continuation.
+        let adopt = outcome == .dropped || g.level.parentLevel == nil ? [] : GoalLevel.allCases.filter { $0.parentLevel == g.level }
+            .flatMap { goals(level: $0) }
+            .filter { c in c.status == .active && np.contains(c.period) && parent(of: c.id) == nil
+                && c.carriedFrom.flatMap { parent(of: $0)?.id } == id }
         var newID: Int64?
         store.perform {
             try store.db.run("UPDATE resolutions SET status=?, reviewed=?, updated=? WHERE id=?", [outcome.status.rawValue, now, now, id])
@@ -424,6 +430,9 @@ public struct GoalProgress: Equatable {
                     INSERT OR IGNORE INTO item_tags(item, tag_id, is_primary, added) SELECT ?, tag_id, is_primary, ? FROM item_tags WHERE item=?
                     """, [new.text, now, g.shortID.text])
                 if let newParent { try store.linkRow(new, ShortID(kind: .resolution, number: newParent), kind: .serves, madeBy: .auto, actor: .user, now: now) }
+                for c in adopt {
+                    try store.linkRow(c.shortID, new, kind: .serves, madeBy: .auto, actor: .user, now: now)
+                }
                 for t in openTasks.sorted() {
                     try store.linkRow(ShortID(kind: .task, number: t), new, kind: .serves, madeBy: .auto, actor: .user, now: now)
                 }
