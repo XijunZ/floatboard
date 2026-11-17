@@ -85,13 +85,14 @@ public final class CalendarSender {
                 // the rest is sent only if the event is still as read (If-Match; 412 otherwise, see below).
                 let read = try await api.getForUpdate(calendarID: row.calendarID, eventID: eventID)
                 let base = row.base ?? cache.event(account: row.account, calendarID: row.calendarID, eventID: eventID).map(CalPatchBase.init)
-                let toSend = CalendarOutbox.withoutNewerGoogleFields(write, queuedAt: row.created, base: base, current: read.fields)
+                let own = outbox.ownWrite(account: row.account, calendarID: row.calendarID, eventID: eventID)
+                let toSend = CalendarOutbox.withoutNewerGoogleFields(write, queuedAt: row.created, base: base, own: own, current: read.fields)
                 if toSend != write {
                     store.activity("calendar", .info, "Google had a newer change to an event (\(row.account)); kept it instead of the older one from the board",
                                    detail: "\"\(read.fields.title)\"", trace: row.uuid)
                 }
                 guard case .patch(_, let title, let start, let end, let allDayStart)? = toSend else {
-                    saved = outbox.markSent(uuid: row.uuid, result: (read.eventID, read.fields))   // nothing left to send
+                    saved = outbox.markSent(uuid: row.uuid, result: (read.eventID, read.fields), own: false)   // nothing left to send
                     break
                 }
                 saved = outbox.markSent(uuid: row.uuid, result: try await api.patch(calendarID: row.calendarID, eventID: eventID, title: title,
