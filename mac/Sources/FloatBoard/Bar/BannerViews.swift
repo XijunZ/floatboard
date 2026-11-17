@@ -75,6 +75,9 @@ struct BannerView: View {
             if !ui.quickAdding {
                 BarButton("plus", "Quick add a task here (⌃⌥N)") { ui.openAdd() }
             }
+            if !ui.quickAdding {
+                BarButton("checklist.checked", "Weekly review") { ui.mode = .expanded; ui.showReview = true }
+            }
             BarButton("rectangle.expand.vertical", "Open full board (due dates, importance, history)") { ui.mode = .expanded }
             BarButton("xmark", "Close (⌃⌥B or menu bar icon to reopen)") { ui.mode = .hidden }
         }

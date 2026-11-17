@@ -107,6 +107,9 @@ extension Store {
         if let removed { lastUnlinked = UnlinkedLink(row: removed) }
     }
 
+    /// Hides the Undo for the last ✕ (its time is up).
+    public func clearUnlinkUndo() { lastUnlinked = nil }
+
     /// Puts back the link the last ✕ removed, as it was (kind, maker, date).
     public func undoUnlink() {
         guard let u = lastUnlinked else { return }

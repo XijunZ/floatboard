@@ -19,7 +19,7 @@ extension Color {
 }
 
 extension Store {
-    func color(_ area: String) -> Color { areas.first { $0.name == area }?.color ?? .gray }
+    func color(_ area: String) -> Color { tags.first { $0.name == area }?.color ?? .gray }
 }
 
 extension Search {

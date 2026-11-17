@@ -220,6 +220,34 @@ enum Snapshot {
             store.setDefaultCalendarAccount(b)
             save(page([a, b]), "settings-calendar-two-reconnect.png", CGSize(width: 640, height: 420))
         }
+        // The assistant foundation: tabs, an area placeholder, tags in the task editor, Make task, the weekly review, search
+        // everything and Settings › Areas. Only on a scratch database (it switches areas on and adds made-up items).
+        if ProcessInfo.processInfo.environment["FLOATBOARD_FOUNDATIONSHOTS"] != nil, LocalData.isScratchDatabase {
+            for m in Module.allCases { store.setModule(m, on: true) }
+            saveLive(TabPicker(tab: .constant(.board), tabs: UIState.Tab.visible(store.modules)).padding(10), "foundation-tabs.png", CGSize(width: 640, height: 44))
+            store.setModule(.circle, on: false)
+            saveLive(TabPicker(tab: .constant(.board), tabs: UIState.Tab.visible(store.modules)).padding(10), "foundation-tabs-circle-off.png", CGSize(width: 640, height: 44))
+            saveLive(JotsTab(), "foundation-jots-placeholder.png", CGSize(width: 700, height: 300))
+            store.add(title: "Send the revised budget", area: store.areas.first?.name ?? "Personal", importance: .high, due: nil)
+            if let t = store.cards.last {
+                let id = ShortID(kind: .task, number: t.id)
+                store.setTags(id, primary: t.area, others: [TagRules.investor] + store.areas.dropFirst().prefix(1).map(\.name))
+                let jot = JotStore(store: store).create(text: "Budget: send the revised numbers to the team by Friday")
+                if let jot { store.link(id, jot.shortID, kind: .source, actor: .user) }
+                var withNotes = store.card(t.id) ?? t
+                withNotes.aiSummary = "From the meeting: agree the revised budget numbers and send them to the team."
+                saveLive(EditCardView(draft: withNotes) {}, "foundation-editor-tags.png", CGSize(width: 420, height: 560))
+                saveLive(MakeTaskForm(request: MakeTaskRequest(selection: "Send the revised budget to the team\nwith the new numbers", source: jot?.shortID)) {},
+                         "foundation-make-task.png", CGSize(width: 440, height: 300))
+            }
+            saveLive(WeeklyReviewView {}, "foundation-review-empty.png", CGSize(width: 520, height: 420))
+            WeeklyReview.register(ReviewSection(id: "sample.decisions", title: "Decisions recorded this week", module: nil, order: 10) { _, _ in
+                [ReviewItem(id: "1", item: ShortID(kind: .decision, number: 4), title: "Move the offsite to March", detail: "from J-12"),
+                 ReviewItem(id: "2", item: ShortID(kind: .decision, number: 5), title: "Hire a second designer", detail: "from meeting notes")] })
+            saveLive(WeeklyReviewView {}, "foundation-review.png", CGSize(width: 520, height: 420))
+            saveLive(GlobalSearchView(initialQuery: "budget"), "foundation-search.png", CGSize(width: 440, height: 300))
+            saveLive(VStack(alignment: .leading, spacing: 14) { AreasSection() }.padding(12), "foundation-settings-areas.png", CGSize(width: 700, height: 420))
+        }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so each Settings section is drawn directly.
         for s in SettingsSection.allCases {
@@ -229,6 +257,7 @@ enum Snapshot {
                 case .general: GeneralSection()
                 case .bar: BarSettingsView()
                 case .groups: GroupsView()
+                case .areas: AreasSection()
                 case .mode: ModeSection()
                 case .connections: ConnectionsSection()
                 case .rules: RulesSection()

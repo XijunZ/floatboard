@@ -89,6 +89,23 @@ public struct BudgetReminder: Equatable {
         }
     }
 
+    /// What the phone's copy carries: reminders not yet shown, and those left to the phone in the last day (the engine sends
+    /// each once; one the Mac showed is dropped, so the engine never sends it).
+    public func forPhone(now: Date = Date()) -> [BudgetReminder] {
+        do {
+            return try store.db.query("""
+                SELECT id, kind, item, text, fire_at, delivered FROM reminders
+                WHERE delivered IS NULL OR (delivered_by='phone' AND fire_at>?) ORDER BY fire_at, id
+                """, [now.addingTimeInterval(-86400)]) { s in
+                BudgetReminder(id: DB.text(s, 0), kind: DB.text(s, 1), item: DB.text(s, 2), text: DB.text(s, 3), fireAt: DB.date(s, 4) ?? Date(),
+                               delivered: DB.date(s, 5))
+            }
+        } catch {
+            store.activity("reminders", .error, "Could not read the reminders for the phone", detail: "\(error)")
+            return []
+        }
+    }
+
     /// Records that a reminder was shown ("mac") or left to the phone ("phone"). It is then never shown again.
     public func markDelivered(_ id: String, by: String, at: Date = Date()) {
         store.perform { try store.db.run("UPDATE reminders SET delivered=?, delivered_by=? WHERE id=? AND delivered IS NULL", [at, by, id]) }
