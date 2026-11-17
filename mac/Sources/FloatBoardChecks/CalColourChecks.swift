@@ -60,6 +60,14 @@ import FloatBoardConnectors
             }
             return (#"{"items":[],"nextSyncToken":"T"}"#, 200)
         }
+        await CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [a] }).refreshCalendars()
+        let shown = cache.calendars().filter { $0.account == a }.map(\.shown)
+        if shown != [true, true, true] { print("  cal2 shown: \(cache.calendars().map { "\($0.name)=\($0.shown)" })") }
+        check(shown == [true, true, true], "cal2_all_listed_calendars_start_shown")
+        _ = cache.setShown(account: a, calendarID: "team#y", false)
+        await CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [a] }).refreshCalendars()
+        check(cache.calendars().first { $0.calendarID == "team#y" }?.shown == false, "cal2_a_calendar_switched_off_stays_off")
+
         // The phone gets the account's colour with each meeting (not the calendar's).
         cache.upsertCalendars(account: a, [CalCalendar(account: a, calendarID: "a@example.com", name: "Me", color: "#111111", owned: true, shown: true, primary: true)])
         let start = AppTime.calendar.date(byAdding: .hour, value: 2, to: Date())!

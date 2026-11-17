@@ -48,8 +48,9 @@ public final class CalendarSync {
         await syncOnce()
     }
 
-    /// Reads each connected account's calendar list. New owned calendars and each account's main one start shown; others hidden
-    /// (the user chooses in Settings). A known calendar keeps its choice.
+    /// Reads each connected account's calendar list. Every new calendar, owned or subscribed (shared, family, team), starts
+    /// shown, merged into the same day and week in its account's colour; the user switches any off in Settings. A known
+    /// calendar keeps its choice.
     public func refreshCalendars() async {
         lastListed = now()
         await refreshCalendars(only: accounts())
@@ -61,7 +62,7 @@ public final class CalendarSync {
             do {
                 let found = try await apiFor(account).listCalendars()
                 cache.upsertCalendars(account: account, found.map {
-                    CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned, shown: $0.owned || $0.primary,
+                    CalCalendar(account: account, calendarID: $0.id, name: $0.name, color: $0.color, owned: $0.owned, shown: true,
                                 primary: $0.primary)
                 })
                 lastProblem[key] = nil
