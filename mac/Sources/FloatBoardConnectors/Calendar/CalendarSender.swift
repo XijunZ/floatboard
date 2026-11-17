@@ -80,9 +80,22 @@ public final class CalendarSender {
                     made = try await api.get(calendarID: row.calendarID, eventID: id)
                 }
                 saved = outbox.markSent(uuid: row.uuid, result: made)
-            case .patch(let eventID, let title, let start, let end, let allDayStart):
+            case .patch(let eventID, _, _, _, _):
+                // Read the event first: a field Google changed after this change was queued keeps Google's newer value (C4), and
+                // the rest is sent only if the event is still as read (If-Match; 412 otherwise, see below).
+                let read = try await api.getForUpdate(calendarID: row.calendarID, eventID: eventID)
+                let base = row.base ?? cache.event(account: row.account, calendarID: row.calendarID, eventID: eventID).map(CalPatchBase.init)
+                let toSend = CalendarOutbox.withoutNewerGoogleFields(write, queuedAt: row.created, base: base, current: read.fields)
+                if toSend != write {
+                    store.activity("calendar", .info, "Google had a newer change to an event (\(row.account)); kept it instead of the older one from the board",
+                                   detail: "\"\(read.fields.title)\"", trace: row.uuid)
+                }
+                guard case .patch(_, let title, let start, let end, let allDayStart)? = toSend else {
+                    saved = outbox.markSent(uuid: row.uuid, result: (read.eventID, read.fields))   // nothing left to send
+                    break
+                }
                 saved = outbox.markSent(uuid: row.uuid, result: try await api.patch(calendarID: row.calendarID, eventID: eventID, title: title,
-                                                                                    start: start, end: end, allDayStart: allDayStart))
+                                                                                    start: start, end: end, allDayStart: allDayStart, ifMatch: read.etag))
             case .delete(let eventID):
                 try await api.delete(calendarID: row.calendarID, eventID: eventID)
                 saved = outbox.markSent(uuid: row.uuid, result: nil)
@@ -98,6 +111,9 @@ public final class CalendarSender {
             setReconnect(account, true)
             store.activity("calendar", .warning, "\(account) is not connected any more; its calendar changes wait until it is connected again",
                            trace: row.uuid)
+        } catch GoogleCalendarError.http(let status, _) where status == 412 {
+            // The event changed in Google between the read and the change: the next run reads it again and decides again.
+            // Not a failure: no wait, no warning.
         } catch where Self.isPermanent(error) {
             outbox.markDead(uuid: row.uuid, error: "\(error)")
             warned[row.uuid] = nil
