@@ -1,0 +1,70 @@
+import { describe, expect, it } from "vitest";
+import { CIRCLE_EXPORTS, CIRCLE_JS, CIRCLE_LOGIC_JS } from "../../src/phone/circle-client";
+import { APP_JS } from "../../src/phone/client";
+import { SW_JS } from "../../src/phone/sw";
+import { PAGE_HTML } from "../../src/phone/page";
+
+/** The phone's Circle logic: the exact text embedded in /app/app.js, run here on its own. */
+// eslint-disable-next-line no-new-func
+const L: any = new Function(CIRCLE_LOGIC_JS + "\nreturn {" + CIRCLE_EXPORTS.join(",") + "};")();
+const NOW = Date.parse("2026-11-18T12:00:00Z");
+
+const copy = { due: ["P-1", "P-2"], people: [
+  { id: "P-1", name: "Kim Example", company: "Northwind", tags: ["Investor"], due: true, wa: "447700900777" },
+  { id: "P-2", name: "José Example", company: "", tags: [], due: true, email: "jose@example.com" },
+  { id: "P-3", name: "王美玲", company: "华夏科技", tags: [], due: false },
+  { name: "no id" },
+] };
+
+describe("phone Circle", () => {
+  it("is_embedded_in_the_app_script_and_page", () => {
+    expect(APP_JS).toContain(CIRCLE_JS);
+    expect(APP_JS).not.toContain("/*@CIRCLE_JS@*/");
+    expect(PAGE_HTML).toContain('id="circle-list"');
+    expect(PAGE_HTML).toContain('id="plan-circle"');
+  });
+
+  it("view_takes_queued_taps_off_the_due_list_at_once", () => {
+    const v = L.circleView(copy, [L.circleAction("P-1", "contacted", "a1", "2026-11-18T12:00:00Z")], NOW);
+    expect(v.due.map((p: any) => p.id)).toEqual(["P-2"]);
+    expect(v.people).toHaveLength(3);
+    expect(v.people[0]).toMatchObject({ id: "P-1", due: false, waiting: "contacted" });
+    expect(L.circleView(null, [], NOW)).toEqual({ people: [], due: [] });
+  });
+
+  it("search_matches_names_companies_tags_accents_and_chinese", () => {
+    expect(L.circleSearch(copy.people.slice(0, 3), "jose").map((p: any) => p.id)).toEqual(["P-2"]);
+    expect(L.circleSearch(copy.people.slice(0, 3), "north investor").map((p: any) => p.id)).toEqual(["P-1"]);
+    expect(L.circleSearch(copy.people.slice(0, 3), "华夏").map((p: any) => p.id)).toEqual(["P-3"]);
+  });
+
+  it("badge_counts_overdue_tasks_and_due_people", () => {
+    const cards = [
+      { status: "todo", due: "2026-11-10", has_time: false },
+      { status: "todo", due: "2026-11-18T09:00:00Z", has_time: true },
+      { status: "done", due: "2026-11-01", has_time: false },
+      { status: "todo", due: "2026-12-01", has_time: false },
+    ];
+    expect(L.badgeCount(cards, 2, NOW)).toBe(4);
+    expect(L.badgeCount([], 0, NOW)).toBe(0);
+  });
+
+  it("draft_opens_whatsapp_or_gmail_with_the_text", () => {
+    expect(L.draftLink(copy.people[0], "Hi Kim & co")).toBe("https://wa.me/447700900777?text=Hi%20Kim%20%26%20co");
+    expect(L.draftLink(copy.people[1], "Hola")).toBe("https://mail.google.com/mail/?view=cm&to=jose%40example.com&body=Hola");
+    expect(L.draftLink(copy.people[2], "x")).toBeNull();
+  });
+
+  it("notification_button_fallback_and_ages", () => {
+    expect(L.circleHash("#circle=contacted:P-12")).toEqual({ action: "contacted", person: "P-12" });
+    expect(L.circleHash("#circle=dance:P-12")).toBeNull();
+    expect(L.circleAgo(null, NOW)).toBe("never");
+    expect(L.circleAgo("2026-11-15T12:00:00Z", NOW)).toBe("3 days ago");
+  });
+
+  it("service_worker_adds_contacted_and_snooze_to_circle_alerts", () => {
+    expect(SW_JS).toContain('action: "contacted", title: "Contacted"');
+    expect(SW_JS).toContain('action: "snooze", title: "Snooze"');
+    expect(SW_JS).toContain("/app/api/circle/action");
+  });
+});

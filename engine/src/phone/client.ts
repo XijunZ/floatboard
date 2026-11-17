@@ -29,5 +29,6 @@
  */
 import { SYNC_JS } from "./sync-logic";
 import APP_SRC from "./files/app.client.js";
+import { CIRCLE_JS } from "./circle-client";
 
-export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS);
+export const APP_JS: string = APP_SRC.replace("/*@SYNC_JS@*/", () => SYNC_JS).replace("/*@CIRCLE_JS@*/", () => CIRCLE_JS);

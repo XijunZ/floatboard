@@ -63,13 +63,16 @@ self.addEventListener("push", (event) => {
   const title = typeof data.title === "string" && data.title ? data.title : "FloatBoard";
   const body = typeof data.body === "string" ? data.body : "";
   const url = typeof data.url === "string" ? data.url : "/app/";
+  // A Circle due reminder names its person: the alert gets "Contacted" and "Snooze" (features §10).
+  const circle = typeof data.circle === "string" && /^P-\d{1,12}$/.test(data.circle) ? data.circle : null;
   event.waitUntil(self.registration.showNotification(title, {
     body,
     icon: "/app/icon-192.png",
     badge: "/app/badge-96.png",
     tag: tagFor(title + "\n" + url),
     renotify: true,
-    data: { url },
+    data: { url, circle },
+    ...(circle ? { actions: [{ action: "contacted", title: "Contacted" }, { action: "snooze", title: "Snooze" }] } : {}),
   }));
 });
 
@@ -105,8 +108,24 @@ self.addEventListener("pushsubscriptionchange", (event) => {
   event.waitUntil(resubscribe(event).catch(() => { /* the app shows "Notifications are off" and offers Turn on */ }));
 });
 
+// "Contacted" / "Snooze" on a Circle alert: sent straight away (the session cookie goes with it); offline or signed out, the
+// app opens and queues it from its address (#circle=contacted:P-12).
+function circleButton(event) {
+  const person = event.notification.data && event.notification.data.circle;
+  const action = event.action;
+  const id = "nb-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+  const body = JSON.stringify({ actions: [{ id, person, action, made_at: new Date().toISOString() }] });
+  return fetch("/app/api/circle/action", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body })
+    .then((r) => { if (!r.ok) throw new Error("not sent"); })
+    .catch(() => self.clients.openWindow("/app/#circle=" + action + ":" + person));
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  if ((event.action === "contacted" || event.action === "snooze") && event.notification.data && event.notification.data.circle) {
+    event.waitUntil(circleButton(event));
+    return;
+  }
   const app = new URL("/app/", self.location.origin).href;
   let target = app;
   try {
