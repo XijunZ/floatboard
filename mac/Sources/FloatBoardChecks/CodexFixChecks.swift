@@ -343,6 +343,7 @@ import FloatBoardConnectors
 
     await codexRound2Checks(setup: setup, at: { at($0, $1, plusDays: $2) }, newTask: newTask, linkTask: { linkTask($0, $1, event: $2) })
     await codexRound6Checks(setup: setup, at: { at($0, $1, plusDays: $2) }, newTask: newTask, linkTask: { linkTask($0, $1, event: $2) })
+    await codexRound7Checks(setup: setup, at: { at($0, $1, plusDays: $2) })
 }
 
 /// A Google event as the API returns it.
@@ -541,6 +542,8 @@ final class StatefulEvent: @unchecked Sendable {
     func externalEdit(title: String) { self.title = title; tick() }
     func externalEdit(location: String) { self.location = location; tick() }
     func externalEdit(start: Date) { self.start = start; tick() }
+    /// A change made in Google at a given time (its `updated` stamp is that time).
+    func externalEdit(start: Date, at: Date) { self.start = start; updated = at; version += 1 }
     func api() -> GoogleCalendarAPI {
         GoogleCalendarAPI(token: { _ in "tok" }, http: { [self] req in
             var status = 200

@@ -29,16 +29,25 @@ public struct CalPatchBase: Equatable {
     public init(_ e: CalEvent) { self.init(title: e.title, start: e.start, end: e.end, allDay: e.allDay) }
 }
 
-/// FloatBoard's own last accepted writes to an event, kept per field (the title; the start; the end, each with all-day): for
-/// each, Google's `updated` stamp on the answer to the write that last set it, and the value then. Up to that stamp a change
-/// to that field is FloatBoard's own doing, never one made in Google (C4). A field FloatBoard did not write keeps its own
-/// (older) record, so Google's change to it made meanwhile still counts as Google's (a write of only the end leaves the
-/// start's record alone).
+/// What FloatBoard knows Google had for each linked field of an event (the title; the start; the end, each with all-day):
+/// the value, the `updated` stamp of the moment it was known, and whether the value was put there by someone else in
+/// Google (`external`) rather than by FloatBoard's own write. It is updated when FloatBoard writes a field (only the fields
+/// that write set: an end-only write leaves the start's record alone), when it reads the event before sending a change,
+/// and when a calendar sync brings the event in. A field counts as changed in Google by its VALUE: when Google's current
+/// value differs from the one recorded; the stamp then only says when, for newest-wins against a queued edit (C4).
 public struct CalOwnWrite: Equatable, Codable {
-    public struct Title: Equatable, Codable { public var updated: Date; public var title: String }
-    /// One end of the event's time as FloatBoard last wrote it.
-    public struct Edge: Equatable, Codable { public var updated: Date; public var value: Date; public var allDay: Bool }
-    /// Saved before start and end were kept apart: both ends at once. Read as both; never written any more.
+    public struct Title: Equatable, Codable {
+        public var updated: Date; public var title: String; public var external: Bool?
+        public init(updated: Date, title: String, external: Bool? = nil) { self.updated = updated; self.title = title; self.external = external }
+    }
+    /// One end of the event's time.
+    public struct Edge: Equatable, Codable {
+        public var updated: Date; public var value: Date; public var allDay: Bool; public var external: Bool?
+        public init(updated: Date, value: Date, allDay: Bool, external: Bool? = nil) {
+            self.updated = updated; self.value = value; self.allDay = allDay; self.external = external
+        }
+    }
+    /// Saved before start and end were kept apart: both ends at once, FloatBoard's own write. Read as both; never written.
     public struct Time: Equatable, Codable { public var updated: Date; public var start: Date; public var end: Date; public var allDay: Bool }
     public var title: Title?
     public var start: Edge?
@@ -233,8 +242,8 @@ public final class CalendarOutbox {
         return true
     }
 
-    /// Remembers Google's answer to FloatBoard's own write (`CalOwnWrite`) on the cached event. A failure is logged; the next
-    /// patch to this event then compares with the event as queued, as before.
+    /// Remembers Google's answer to FloatBoard's own write on the cached event: the fields that write set are now known as
+    /// FloatBoard's. A failure is logged; the next change to this event is then decided against the event as queued.
     private func recordOwnWrite(account: String, calendarID: String, eventID: String, _ w: CalWrite, _ f: CalEventFields) {
         var setTitle = true, setStart = true, setEnd = true
         // An all-day move writes both dates (the end defaults to the next day); a timed patch writes only what it carries.
@@ -245,12 +254,38 @@ public final class CalendarOutbox {
         if setTitle { own.title = .init(updated: f.googleUpdated, title: f.title) }
         if setStart { own.start = .init(updated: f.googleUpdated, value: f.start, allDay: f.allDay) }
         if setEnd { own.end = .init(updated: f.googleUpdated, value: f.end, allDay: f.allDay) }
+        saveKnown(account: account, calendarID: calendarID, eventID: eventID, own)
+    }
+
+    /// Saves what is known of the event in Google (`CalOwnWrite`). A failure is logged.
+    public func saveKnown(account: String, calendarID: String, eventID: String, _ known: CalOwnWrite) {
         do {
-            let json = String(decoding: try JSONEncoder().encode(own), as: UTF8.self)
+            let json = String(decoding: try JSONEncoder().encode(known), as: UTF8.self)
             try db.run("UPDATE cal_events SET own_write=? WHERE account=? AND calendar_id=? AND event_id=?", [json, account, calendarID, eventID])
         } catch {
-            store.activity("calendar", .error, "Could not note a calendar change as sent by FloatBoard", detail: "\(error)")
+            store.activity("calendar", .error, "Could not note what Google has for an event", detail: "\(error)")
         }
+    }
+
+    /// What is known after reading `current` from Google: a field whose value is still the recorded one keeps its record;
+    /// one that differs was changed in Google (external) and is recorded with Google's stamp now. A field with no record yet
+    /// is compared with `base` (the event as cached when the change was queued): the same value is known, not a change in
+    /// Google; without either it counts as changed in Google.
+    public static func observed(_ known: CalOwnWrite?, base: CalPatchBase?, current: CalEventFields) -> CalOwnWrite {
+        var k = known ?? CalOwnWrite()
+        if k.time != nil { k.start = k.startAck; k.end = k.endAck; k.time = nil }
+        let u = current.googleUpdated
+        if k.title?.title != current.title {
+            k.title = .init(updated: u, title: current.title, external: k.title == nil && base?.title == current.title ? nil : true)
+        }
+        func edge(_ e: CalOwnWrite.Edge?, _ value: Date, _ baseValue: Date?) -> CalOwnWrite.Edge {
+            if let e, e.value == value, e.allDay == current.allDay { return e }
+            let known = e == nil && baseValue == value && base?.allDay == current.allDay
+            return .init(updated: u, value: value, allDay: current.allDay, external: known ? nil : true)
+        }
+        k.start = edge(k.start, current.start, base?.start)
+        k.end = edge(k.end, current.end, base?.end)
+        return k
     }
 
     /// FloatBoard's own last accepted write to this event, if one is known.
@@ -308,33 +343,26 @@ public final class CalendarOutbox {
         }
     }
 
-    /// A queued patch, about to be sent, against the event as Google has it now (`current`, just read). Per field group (the
-    /// title; the time), Google changed it when its `updated` is after the change was queued and after FloatBoard's own last
-    /// accepted write to that group (`own`: Google's stamp from that write is FloatBoard's doing), and the value differs from
-    /// the one FloatBoard last knew (its own write to the group when that came after the change was queued, else `base`, the
-    /// event as seen when queued; without either, it counts as changed). Fields Google changed keep Google's newer value: they
-    /// are dropped from the patch (C4, newer change wins). Returns the patch to send, or nil when nothing is left to send.
-    /// Anything other than a patch is returned as it is.
+    /// A queued patch, about to be sent, against the event as Google has it now (`current`, just read). Per field (title,
+    /// start, end), Google changed it when its value differs from what FloatBoard knew Google had (`own`, else `base`, the
+    /// event as cached when queued; see `observed`) and from what this change sends. Such a field keeps Google's value when
+    /// Google's change is newer than this change (newest wins, C4); an older one is overwritten by this change. Returns the
+    /// patch to send, or nil when nothing is left to send. Anything other than a patch is returned as it is.
     public static func withoutNewerGoogleFields(_ w: CalWrite, queuedAt: Date, base: CalPatchBase?, own: CalOwnWrite? = nil,
                                                 current: CalEventFields) -> CalWrite? {
         guard case .patch(let id, var title, var start, var end, var day) = w else { return w }
-        let titleAck = own?.title, startAck = own?.startAck, endAck = own?.endAck
-        let titleNewer = current.googleUpdated > max(queuedAt, titleAck?.updated ?? .distantPast)
-        // Start and end are acknowledged one by one: a write of only the end says nothing about the start.
-        let startNewer = current.googleUpdated > max(queuedAt, startAck?.updated ?? .distantPast)
-        let endNewer = current.googleUpdated > max(queuedAt, endAck?.updated ?? .distantPast)
-        let knownTitle = titleAck.flatMap { $0.updated > queuedAt ? $0.title : nil } ?? base?.title
-        let ownStart = startAck.flatMap { $0.updated > queuedAt ? $0 : nil }, ownEnd = endAck.flatMap { $0.updated > queuedAt ? $0 : nil }
-        let knownStart = ownStart?.value ?? base?.start, knownEnd = ownEnd?.value ?? base?.end
-        let knownAllDay = [ownStart, ownEnd].compactMap { $0 }.max { $0.updated < $1.updated }?.allDay ?? base?.allDay
-        if titleNewer, knownTitle.map({ $0 != current.title }) ?? true { title = nil }
-        if startNewer || endNewer, start != nil || end != nil || day != nil {
-            // Start and end are merged one by one; a switch between all-day and timed keeps them together.
-            let startChanged = startNewer && (knownStart.map { $0 != current.start } ?? true)
-            let endChanged = endNewer && (knownEnd.map { $0 != current.end } ?? true)
-            let kindChanged = knownAllDay.map { $0 != current.allDay } ?? true
+        let seen = observed(own, base: base, current: current)
+        func googleNewer(_ external: Bool?, _ at: Date?) -> Bool { external == true && (at ?? .distantFuture) > queuedAt }
+        if let t = title, t != current.title, googleNewer(seen.title?.external, seen.title?.updated) { title = nil }
+        if start != nil || end != nil || day != nil {
+            // Start and end are merged one by one; a switch between all-day and timed keeps them together. Sending the
+            // value Google already has is no conflict.
+            let sameStart = day == nil && start == current.start && !current.allDay
+            let sameEnd = day == nil && end == current.end && !current.allDay
+            let startChanged = !sameStart && googleNewer(seen.start?.external, seen.start?.updated)
+            let endChanged = !sameEnd && googleNewer(seen.end?.external, seen.end?.updated)
             let converts = (day != nil) != current.allDay
-            if kindChanged || (startChanged && endChanged) || (converts && (startChanged || endChanged)) || (day != nil && startChanged) {
+            if (startChanged && endChanged) || (converts && (startChanged || endChanged)) || (day != nil && startChanged) {
                 start = nil; end = nil; day = nil
             } else if let d = day, endChanged {
                 // All-day, Google changed only the length: the board's new first day keeps Google's new length in days.
