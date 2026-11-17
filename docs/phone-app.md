@@ -397,8 +397,10 @@ events in the board copy it already sends.
 
 ### Changed: planning summary (Calendar, 17 Nov 2026; replaces the Today list)
 
-Above the board the phone now shows a **planning summary** in three blocks, in the Mac's time zone: **Today**, **Rest
-of this week** (tomorrow to Sunday; left out on a Sunday) and **Next week** (Monday to Sunday). Each block lists its
+The phone shows a **planning summary** on its own **Plan** screen, the second after **Board** (navigation order: Board,
+Plan, later Jots and Circle; the app always opens on the Board, the choice is never stored). It has three blocks, in
+the Mac's time zone: **Today**, **Rest of this week** (tomorrow to Sunday; left out on a Sunday) and **Next week**
+(Monday to Sunday). Open tasks due before today lead the Today block in red, labelled "Overdue", oldest first. Each block lists its
 meetings, one line each (Today: the time or "All day"; the other blocks: the day and time, "Fri 14:00"), with the
 tasks linked to a meeting under it, then the open tasks due in that block. Empty blocks are not shown.
 
