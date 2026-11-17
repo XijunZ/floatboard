@@ -42,10 +42,22 @@ describe("jots on the phone: logic", () => {
     const q = [{ id: "a1", op: "add", text: "x", made_at: iso(now) }, { id: "a2", op: "add", text: "y", made_at: iso(now) }];
     const b = L.takeJotBatch(q, iso(now));
     expect(b).toEqual({ sent_at: iso(now), actions: q });
-    expect(L.afterJotSend(q, { accepted: ["a1"], dropped: [{ id: "a2", reason: "superseded" }] })).toEqual([]);
+    expect(L.afterJotSend(q, { accepted: ["a1"], dropped: [{ id: "a2", reason: "text is required" }] })).toEqual([]);
     expect(L.afterJotSend(q, { accepted: ["a1"], dropped: [] })).toEqual([q[1]]);
+    // Never dropped for a reason the engine may get past later (only malformed actions leave the queue).
+    expect(L.afterJotSend(q, { accepted: [], dropped: [{ id: "a1", reason: "unknown jot" }, { id: "a2", reason: "bad id" }] })).toEqual([q[0]]);
     expect(L.jotWaitingText(2)).toBe("2 jots waiting to sync");
     expect(L.jotWaitingText(1)).toBe("1 jot waiting to sync");
+  });
+
+  it("undo_of_a_delete_already_sent_queues_a_restore", () => {
+    const del = { id: "d1", op: "delete", key: "J-1", made_at: iso(now) };
+    // Not sent yet: taken out of the queue.
+    expect(L.undoJotDelete([del], del)).toEqual({ queue: [], restore: false });
+    // Sent (its answer may have been lost): it stays queued (sent again, applied once) and a restore follows it.
+    const sent = L.markJotsAttempted([del], ["d1"]);
+    expect(sent[0].sent).toBe(true);
+    expect(L.undoJotDelete(sent, sent[0])).toEqual({ queue: sent, restore: true });
   });
 
   it("share_and_shortcuts_open_the_right_place", () => {

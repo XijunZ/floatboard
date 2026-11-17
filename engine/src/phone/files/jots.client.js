@@ -75,12 +75,31 @@
   // The next request for POST /app/api/jots: the whole queue (it is small: at most 100 actions).
   function takeJotBatch(queue, sentAt) { return { sent_at: sentAt, actions: (queue || []).slice(0, 100) }; }
 
-  // Drops what the engine took (accepted) or will never take (dropped) from the queue.
+  // Only malformed actions leave the queue without being taken; anything else stays queued and is sent again.
+  var JOT_PERMANENT = { "bad id": true, "bad key": true, "unknown op": true, "text is required": true, "text too long": true };
+  // Drops what the engine took (accepted) or can never take (malformed) from the queue.
   function afterJotSend(queue, result) {
     var done = {};
     (result.accepted || []).forEach(function (id) { done[id] = true; });
-    (result.dropped || []).forEach(function (d) { if (d && d.id) done[d.id] = true; });
+    (result.dropped || []).forEach(function (d) { if (d && d.id && JOT_PERMANENT[d.reason]) done[d.id] = true; });
     return (queue || []).filter(function (a) { return !done[a.id]; });
+  }
+
+  // Actions about to be sent are marked: if the answer is lost, Undo must not assume they never arrived.
+  function markJotsAttempted(queue, ids) {
+    var sent = {};
+    (ids || []).forEach(function (id) { sent[id] = true; });
+    return (queue || []).map(function (a) { return sent[a.id] && !a.sent ? Object.assign({}, a, { sent: true }) : a; });
+  }
+
+  // Undo of a delete: one never sent is taken out of the queue; one sent (or being sent; its answer may be lost) stays and a
+  // restore made after it is queued, so the jot always comes back.
+  function undoJotDelete(queue, del) {
+    var q = queue || [];
+    var i = -1;
+    q.forEach(function (a, n) { if (a.id === del.id) i = n; });
+    if (i >= 0 && !q[i].sent) return { queue: q.slice(0, i).concat(q.slice(i + 1)), restore: false };
+    return { queue: q, restore: true };
   }
 
   function jotWaitingText(n) { return n === 1 ? "1 jot waiting to sync" : n + " jots waiting to sync"; }
@@ -149,11 +168,13 @@
         var r;
         if (queue.length) {
           var body = takeJotBatch(queue, new Date().toISOString());
+          queue = markJotsAttempted(queue, body.actions.map(function (a) { return a.id; }));
+          saveQueue();
           r = await h.api("/app/api/jots", { method: "POST", body: body });
           queue = afterJotSend(queue, r);
           saveQueue();
-          var lost = (r.dropped || []).filter(function (d) { return d.reason === "superseded"; }).length;
-          if (lost) h.toast(lost === 1 ? "A newer change on your Mac replaced one edit." : "Newer changes on your Mac replaced " + lost + " edits.");
+          var lost = (r.superseded || []).length;
+          if (lost) h.toast(lost === 1 ? "Your Mac had a newer version; your edit is kept in the jot's history." : "Your Mac had newer versions; your " + lost + " edits are kept in the jots' history.");
         } else {
           r = await h.api("/app/api/jots");
         }
@@ -209,7 +230,7 @@
       });
       h.$("jot-empty").hidden = rows.length > 0;
       h.$("jot-empty").textContent = all.length ? "No jots match." : "No jots in the last 30 days. Write one above.";
-      var waiting = queue.filter(function (a) { return a.op === "add" || a.op === "edit"; }).length;
+      var waiting = queue.length;
       h.$("jot-wait").textContent = waiting ? jotWaitingText(waiting) : "";
     }
 
@@ -337,8 +358,10 @@
       var undo = function () {
         btn.removeEventListener("click", undo, true);
         bar.hidden = true;
-        var i = queue.indexOf(a);
-        if (i >= 0 && !syncing) { queue.splice(i, 1); saveQueue(); render(); } else queueAction({ op: "restore", key: j.key });
+        var cur = queue.filter(function (x) { return x.id === a.id; })[0] || a;
+        var step = undoJotDelete(queue, cur.sent || syncing ? Object.assign({}, cur, { sent: true }) : cur);
+        if (step.restore) queueAction({ op: "restore", key: j.key });
+        else { queue = step.queue; saveQueue(); render(); }
       };
       btn.addEventListener("click", undo, true);
       clearTimeout(undoTimer);

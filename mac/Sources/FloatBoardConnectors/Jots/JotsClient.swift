@@ -55,7 +55,11 @@ extension ConnectorClient {
             }
             return EngineJot(key: key, macID: (r["mac_id"] as? NSNumber)?.int64Value, text: text, kind: kind, source: r["source"] as? String ?? "phone",
                              tags: r["tags"] as? [String] ?? [], added: added, updated: updated, deleted: r["deleted"] as? Bool ?? false, rev: rev,
-                             ref: r["ref"] as? String, meeting: meeting)
+                             ref: r["ref"] as? String, meeting: meeting,
+                             versions: (r["versions"] as? [[String: Any]] ?? []).compactMap { v in
+                                 guard let t = v["text"] as? String, let at = (v["at"] as? String).flatMap(Self.parseISODate) else { return nil }
+                                 return EarlierText(text: t, at: at)
+                             })
         }
     }
 
