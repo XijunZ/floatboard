@@ -427,6 +427,25 @@ final class GatedGoogle: @unchecked Sendable {
         check(server.title == "Draft (theirs)" && outbox.rows(unsent: true).isEmpty, "n1_external_change_after_own_write_still_wins")
     } catch { check(false, "n1: \(error)") }
 
+    // N2. Google changed only the end; the board moved the start: the board's start goes, with Google's new length.
+    do {
+        let base = CalPatchBase(title: "Call", start: at(10, 0, 0), end: at(11, 0, 0), allDay: false)
+        let current = CalEventFields(start: at(10, 0, 0), end: at(12, 0, 0), title: "Call", googleUpdated: Date())
+        let w = CalendarOutbox.withoutNewerGoogleFields(.patch(eventID: "c", title: nil, start: at(14, 0, 0), end: at(14, 30, 0), allDayStart: nil),
+                                                        queuedAt: Date().addingTimeInterval(-60), base: base, current: current)
+        var kept = false
+        if case .patch(_, nil, let st?, let en, nil)? = w { kept = st == at(14, 0, 0) && en == at(16, 0, 0) }
+        // Google changed only the start; the board changed only the end: the end goes.
+        let current2 = CalEventFields(start: at(9, 30, 0), end: at(11, 0, 0), title: "Call", googleUpdated: Date())
+        let w2 = CalendarOutbox.withoutNewerGoogleFields(.patch(eventID: "c", title: nil, start: nil, end: at(11, 30, 0), allDayStart: nil),
+                                                         queuedAt: Date().addingTimeInterval(-60), base: base, current: current2)
+        // Turning a timed event all-day while Google changed its time: Google's newer time is kept whole.
+        let w3 = CalendarOutbox.withoutNewerGoogleFields(.patch(eventID: "c", title: nil, start: nil, end: nil, allDayStart: "2030-01-02"),
+                                                         queuedAt: Date().addingTimeInterval(-60), base: base, current: current)
+        check(kept && w2 == .patch(eventID: "c", title: nil, start: nil, end: at(11, 30, 0), allDayStart: nil) && w3 == nil,
+              "n2_start_and_end_are_merged_independently")
+    }
+
 }
 
 /// A fake Google holding one event: GET returns it, PATCH changes it and moves `updated` on (as Google does).
