@@ -1,5 +1,6 @@
 import Foundation
 import FloatBoardCore
+import SQLite3
 
 /// The four areas together (integration of Jots, Circle, Decisions and Resolutions): typed ids in a decision link it, a
 /// decision can serve a goal, the screening reads task notes and meeting notes, one reminder budget for Circle's due people
@@ -12,6 +13,7 @@ import FloatBoardCore
     integrationLinkChecks(root)
     integrationScreeningChecks(root)
     integrationBudgetChecks(root)
+    integrationUpgradeRehearsal(root)
 }
 
 @MainActor private func integrationStore(_ root: URL, _ name: String) -> Store? {
@@ -83,4 +85,58 @@ import FloatBoardCore
           "circle_and_decision_reminders_share_one_daily_limit")
     let ids = WeeklyReview.sections(store: s, now: decisionsNow).map(\.0.id)
     check(ids.contains("circle.due") && ids.contains(DecisionReviews.reviewsSection), "weekly_review_shows_circle_and_decisions")
+}
+
+// MARK: Upgrade rehearsal (v11 -> 16)
+
+/// A synthetic v11 board shaped like a real one (90 tasks in four groups, done and deleted ones, history, calendar events
+/// linked to tasks, task-to-task links, settings) upgraded to the current version: nothing lost, groups become primary tags,
+/// all four areas on. Prints the counts.
+@MainActor private func integrationUpgradeRehearsal(_ root: URL) {
+    let url = root.appendingPathComponent("rehearsal-v11.sqlite")
+    let groups = ["Work", "Personal", "Family", "Side project"]
+    let statuses = ["todo", "doing", "watch", "done"]
+    var sql = groups.enumerated().map { "INSERT INTO areas(name,color,position) VALUES('\($0.1)','#0A84FF',\($0.0));" }.joined(separator: "\n")
+    for i in 1...90 {
+        let g = groups[i % 4], st = statuses[i % 4], deleted = i % 15 == 0 ? 1 : 0
+        let due = i % 3 == 0 ? "\(1_794_391_200 + i * 86400)" : "NULL", day = i % 3 == 0 ? "'2026-11-\(String(format: "%02d", 11 + i % 18))'" : "NULL"
+        sql += "\nINSERT INTO cards(id,title,notes,area,status,created,updated,deleted,due,due_day) VALUES(\(i),'Task \(i)','\(i % 5 == 0 ? "Notes for task \(i), see T-\(i % 90 + 1)" : "")','\(g)','\(st)',\(1_790_000_000 + i),\(1_790_000_000 + i),\(deleted),\(due),\(day));"
+        sql += "\nINSERT INTO events(card_id,at,kind,actor,uuid) VALUES(\(i),\(1_790_000_000 + i),'created','user','u\(i)');"
+    }
+    for e in 1...20 {
+        sql += "\nINSERT INTO cal_events(short_id,account,calendar_id,event_id,start,end,all_day,title,google_updated) VALUES(\(e),'a@example.com','a@example.com','ev\(e)',\(1_794_391_200 + e * 3600),\(1_794_394_800 + e * 3600),0,'Meeting \(e)',1);"
+    }
+    for e in 1...15 { sql += "\nINSERT INTO links(from_type,from_id,to_type,to_id,created,actor) VALUES('E','\(e)','T','\(e * 5)',1,'user');" }
+    for t in 1...10 { sql += "\nINSERT INTO links(from_type,from_id,to_type,to_id,created,actor) VALUES('T','\(t)','T','\(t + 40)',1,'user');" }
+    sql += "\nINSERT INTO meta(key,value) VALUES('time_zone','Europe/London'),('quiet_start','22:00'),('first_launch_at','1790000000');"
+    guard makeV11Schema(url, extra: sql) else { check(false, "rehearsal v11 board"); return }
+    func raw(_ q: String) -> Int64 {
+        var h: OpaquePointer?, st: OpaquePointer?
+        defer { sqlite3_finalize(st); sqlite3_close(h) }
+        guard sqlite3_open_v2(url.path, &h, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, sqlite3_prepare_v2(h, q, -1, &st, nil) == SQLITE_OK,
+              sqlite3_step(st) == SQLITE_ROW else { return -1 }
+        return sqlite3_column_int64(st, 0)
+    }
+    let before = (cards: raw("SELECT count(*) FROM cards"), live: raw("SELECT count(*) FROM cards WHERE deleted=0"), links: raw("SELECT count(*) FROM links"),
+                  events: raw("SELECT count(*) FROM cal_events"), history: raw("SELECT count(*) FROM events"), meta: raw("SELECT count(*) FROM meta"),
+                  titles: raw("SELECT sum(length(title) + length(notes)) FROM cards"))
+    let store: Store
+    do { store = Store(db: try DB(url: url)) } catch { check(false, "rehearsal upgrade: \(error)"); return }
+    let after = (cards: raw("SELECT count(*) FROM cards"), live: raw("SELECT count(*) FROM cards WHERE deleted=0"), links: raw("SELECT count(*) FROM links"),
+                 events: raw("SELECT count(*) FROM cal_events"), history: raw("SELECT count(*) FROM events"), meta: raw("SELECT count(*) FROM meta"),
+                 titles: raw("SELECT sum(length(title) + length(notes)) FROM cards"))
+    let oldMeta = ["time_zone", "quiet_start", "first_launch_at"].allSatisfy { k in raw("SELECT count(*) FROM meta WHERE key='\(k)'") == 1 }
+    check(raw("PRAGMA user_version") == Int64(DB.schemaVersion) && before.cards == 90 && after.cards == before.cards && after.live == before.live
+          && after.titles == before.titles && after.history >= before.history && after.events == before.events && after.links >= before.links
+          && after.meta >= before.meta && oldMeta, "rehearsal_v11_upgrade_loses_no_card_link_event_or_setting")
+    // The 25 links made above, each found again by its two ends.
+    check(raw("SELECT count(*) FROM links WHERE (from_type='E' AND to_type='T' AND CAST(to_id AS INTEGER)=CAST(from_id AS INTEGER)*5) OR (from_type='T' AND to_type='T' AND CAST(to_id AS INTEGER)=CAST(from_id AS INTEGER)+40)") == 25,
+          "rehearsal_every_link_kept")
+    let live = store.cards
+    check(!live.isEmpty && live.allSatisfy { store.itemTags(ShortID(kind: .task, number: $0.id)).primary == $0.area }
+          && store.areas.map(\.name) == groups, "rehearsal_groups_become_primary_tags")
+    check(store.modules == Set(Module.allCases), "rehearsal_all_four_areas_on")
+    print("REHEARSAL v11->\(DB.schemaVersion): cards \(before.cards)->\(after.cards) (live \(before.live)->\(after.live)), links \(before.links)->\(after.links), "
+          + "calendar events \(before.events)->\(after.events), history \(before.history)->\(after.history), meta \(before.meta)->\(after.meta), "
+          + "board tasks shown \(live.count), groups \(store.areas.count), tags \(store.tags.count), modules on \(store.modules.count)")
 }
