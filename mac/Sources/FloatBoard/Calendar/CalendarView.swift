@@ -160,12 +160,14 @@ struct CalendarView: View {
         let _ = tick
         VStack(alignment: .leading, spacing: 10) {
             header
+            MainOnlyBanner(tick: tick)
             HStack(alignment: .top, spacing: 12) {
                 if span == .day { DayView(day: anchor, snapshotHours: snapshotHours) }
                 else { WeekView(anchor: anchor, snapshotHours: snapshotHours) }
                 DueSoonList()
                     .frame(width: 200)
             }
+            AccountLegend(tick: tick)
         }
         .environmentObject(edits)
         .environment(\.calendarSnapshot, snapshotHours != nil)
@@ -211,5 +213,93 @@ struct CalendarView: View {
 
     private func step(_ by: Int) {
         anchor = AppTime.calendar.date(byAdding: .day, value: span == .day ? by : 7 * by, to: anchor) ?? anchor
+    }
+}
+
+/// Bottom left of the Calendar page: a colour dot and the email of each connected account (its events' colour). Clicking
+/// one hides that account's events on this page, or shows them again.
+struct AccountLegend: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.calendarSnapshot) private var snapshot
+    var tick = 0
+    @State private var changed = 0
+
+    var body: some View {
+        let _ = (tick, changed)
+        let accounts = CalendarCache(store: store).connectedAccountList()
+        let colours = store.accountColors(for: accounts)
+        let hidden = store.hiddenCalendarAccounts()
+        if !accounts.isEmpty {
+            HStack(spacing: 14) {
+                ForEach(accounts, id: \.self) { a in
+                    let off = hidden.contains(a)
+                    let label = HStack(spacing: 5) {
+                        Circle().fill(off ? Color.clear : Color(hex: colours[a] ?? AccountColors.fallback))
+                            .overlay(Circle().strokeBorder(Color(hex: colours[a] ?? AccountColors.fallback), lineWidth: 1.5))
+                            .frame(width: 9, height: 9)
+                        Text(Self.short(a)).font(.system(size: 11)).lineLimit(1).fixedSize()
+                            .foregroundStyle(off ? .tertiary : .secondary)
+                    }
+                    if snapshot { label } else {
+                        Button {
+                            store.setCalendarAccountHidden(a, !off)
+                            changed += 1
+                            NotificationCenter.default.post(name: .floatBoardCalendarNow, object: nil)
+                        } label: { label }
+                        .buttonStyle(.plain)
+                        .help(off ? "Show \(a)'s events" : "Hide \(a)'s events")
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// A long email cut in the middle ("sam.longer…@example.org"), so the legend stays one line.
+    static func short(_ email: String, limit: Int = 30) -> String {
+        guard email.count > limit else { return email }
+        let keep = limit - 1, head = keep / 2
+        return String(email.prefix(head)) + "…" + String(email.suffix(keep - head))
+    }
+}
+
+/// Under the Calendar header, one line per account shown with its main calendar only (its sign-in cannot list calendars):
+/// "Showing main calendars only for <email>. Show all calendars…" runs that account's sign-in again, which grants the list;
+/// × closes the line for that account (Settings › Outputs › Calendar still offers the sign-in).
+struct MainOnlyBanner: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var google: Google
+    @Environment(\.calendarSnapshot) private var snapshot
+    var tick = 0
+    @State private var closed = 0
+
+    var body: some View {
+        let _ = (tick, closed)
+        let cache = CalendarCache(store: store)
+        let accounts = CalendarSettings.mainOnlyBanner(connected: cache.connectedAccountList(), calendars: cache.calendars(),
+                                                      outcome: { CalendarListAttempts.outcome($0) }, dismissed: store.dismissedCalendarBanners())
+        let colours = store.accountColors(for: cache.connectedAccountList())
+        if !accounts.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(accounts, id: \.self) { a in
+                    HStack(spacing: 6) {
+                        Circle().fill(Color(hex: colours[a] ?? AccountColors.fallback)).frame(width: 8, height: 8)
+                        Text("Showing main calendars only for \(AccountLegend.short(a, limit: 40)).").font(.system(size: 12)).lineLimit(1)
+                        if snapshot {
+                            Text("Show all calendars…").font(.system(size: 12)).foregroundStyle(Color.accentColor)
+                        } else {
+                            Button("Show all calendars…") { google.connect(loginHint: a) }
+                                .buttonStyle(.link).font(.system(size: 12))
+                                .disabled(!google.isConfigured || google.busy)
+                        }
+                        Spacer(minLength: 0)
+                        Button { store.dismissCalendarBanner(a); closed += 1 } label: { Image(systemName: "xmark").font(.system(size: 10)) }
+                            .buttonStyle(.borderless).help("Hide this line (Settings › Outputs › Calendar still offers it)")
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.08)))
+                }
+            }
+        }
     }
 }
