@@ -428,7 +428,8 @@ private func dueMentionChecks() {
     let r = await JotsSync.tick(connector: "jt", store: store, client: client)
     let cap = js.jot(origin: "phone:cap-1")
     check(cap?.text == "Idea on the bus" && cap?.source == .phone && cap?.added == ISO8601DateFormatter.fb(iso(t0 + 60)), "phone_capture_becomes_a_mac_jot")
-    check(js.jot(mine.id)?.text == "Budget notes on the Mac", "older_phone_edit_is_not_applied")
+    check(js.jot(mine.id)?.text == "Budget notes on the Mac" && js.history(mine.id).map(\.text) == ["Stale phone edit"],
+          "older_phone_edit_is_not_applied_but_kept_in_history")
     let notes = js.jot(origin: "fathom:abc")
     check(notes?.kind == .meetingNotes && js.meetingInfo(notes?.id ?? 0)?.meta.fathomURL == "https://fathom.video/share/abc", "meeting_notes_taken_in_with_details")
     let task = store.cards.first { $0.title == "Send Ann the budget by 21 November 2099" }
@@ -453,11 +454,26 @@ private func dueMentionChecks() {
     engine.waiting = [["key": "J-\(mine.id)", "mac_id": mine.id, "text": "Budget notes, edited on the phone", "kind": "jot", "source": "typed", "tags": [],
                        "added": iso(t0), "updated": iso(Date()), "deleted": false, "rev": 3]]
     await JotsSync.tick(connector: "jt", store: store, client: client)
-    check(js.jot(mine.id)?.text == "Budget notes, edited on the phone" && js.history(mine.id).first?.text == "Budget notes on the Mac", "newer_phone_edit_applied_with_history")
+    check(js.jot(mine.id)?.text == "Budget notes, edited on the phone" && js.history(mine.id).map(\.text).contains("Budget notes on the Mac"), "newer_phone_edit_applied_with_history")
     engine.waiting = [["key": "J-\(mine.id)", "mac_id": mine.id, "text": "Budget notes, edited on the phone", "kind": "jot", "source": "typed", "tags": [],
                        "added": iso(t0), "updated": iso(Date().addingTimeInterval(1)), "deleted": true, "rev": 4]]
     await JotsSync.tick(connector: "jt", store: store, client: client)
     check(js.jot(mine.id)?.deleted == true, "phone_delete_applied")
+    // J-A: earlier texts the engine kept (a replaced or older phone edit) go into the jot's history; nothing is lost.
+    guard let kept = js.add("Kept text on the Mac", now: t0) else { return }
+    engine.waiting = [["key": "J-\(kept.id)", "mac_id": kept.id, "text": "Kept text on the Mac", "kind": "jot", "source": "typed", "tags": [],
+                       "added": iso(t0), "updated": iso(t0), "deleted": false, "rev": 5,
+                       "versions": [["text": "Older phone words", "at": iso(t0 - 60)], ["text": "Kept text on the Mac", "at": iso(t0)]]],
+                      // J-C: a delete of a jot this Mac never had, and an edit of a capture the engine lost: nothing waits forever.
+                      ["key": "phone:gone-1", "mac_id": NSNull(), "text": "", "kind": "jot", "source": "phone", "tags": [], "added": iso(t0),
+                       "updated": iso(t0), "deleted": true, "rev": 1],
+                      ["key": "phone:gone-2", "mac_id": NSNull(), "text": "Edit of a lost capture", "kind": "jot", "source": "phone", "tags": [],
+                       "added": iso(t0), "updated": iso(t0), "deleted": false, "rev": 1]]
+    engine.acked = []
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(js.history(kept.id).map(\.text) == ["Older phone words"] && js.jot(kept.id)?.text == "Kept text on the Mac", "engine_kept_texts_go_to_the_jot_history")
+    check(engine.waiting.isEmpty && Set(engine.acked.compactMap { $0["key"] as? String }) == ["J-\(kept.id)", "phone:gone-1", "phone:gone-2"]
+          && js.jot(origin: "phone:gone-2")?.text == "Edit of a lost capture", "changes_to_unknown_jots_are_taken_not_left_waiting")
     // Tags: asked once, in one call; a 409 (no Claude key) stops asking on that engine.
     let tagStore = jotsStore(root, "synctags.sqlite")!
     tagStore.setModule(.jots, on: true)

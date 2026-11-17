@@ -24,6 +24,18 @@ CREATE TABLE jot_copies (
 );
 CREATE UNIQUE INDEX jot_copies_mac ON jot_copies(user_id, mac_id) WHERE mac_id IS NOT NULL;
 CREATE INDEX jot_copies_waiting ON jot_copies(user_id, waiting);
+-- Earlier texts of a jot's copy that the Mac has not saved yet (J-A): the text a phone edit replaced, a phone edit older than the
+-- Mac's version, a waiting phone edit a newer Mac version replaced. Sent with the row for the jot's history on the Mac and
+-- removed when the Mac acks that version (rev), so no text is ever lost on the engine.
+CREATE TABLE jot_copy_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  rev INTEGER NOT NULL,
+  text_enc TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE INDEX jot_copy_versions_key ON jot_copy_versions(user_id, key, rev);
 -- Phone jot action ids already applied (a repeat is applied once); kept 7 days.
 CREATE TABLE jot_actions_seen (
   user_id TEXT NOT NULL,
