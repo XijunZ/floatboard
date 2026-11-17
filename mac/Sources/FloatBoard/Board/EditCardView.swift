@@ -193,11 +193,37 @@ struct EditCardView: View {
         }
     }
 
+    /// The notes field: editable text with the selection actions; "Jot about this" next to it while Jots is on (J8).
+    private var notesEditor: some View {
+        let note = store.isOn(.jots) ? JotStore(store: store).taskNote(forTask: draft.id) : nil
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text("Notes").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                if let note { Text(note.shortID.text).font(.system(size: 10)).foregroundStyle(.tertiary).monospacedDigit().help("These notes are jot \(note.shortID.text)") }
+                Spacer()
+                if store.isOn(.jots) {
+                    Button { save(); finished = false; CaptureController.shared?.show(task: draft.id) } label: { Label("Jot about this", systemImage: "square.and.pencil") }
+                        .buttonStyle(.borderless).font(.system(size: 11)).help("Write a jot linked to this task, with its tags")
+                }
+            }
+            ScrollView {
+                SelectableTextEditor(text: $draft.notes, source: note?.shortID ?? ShortID(kind: .task, number: draft.id))
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
+            }
+            .frame(minHeight: 54, maxHeight: CGFloat(130 + extraHeight / 2))
+            .padding(5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.15)))
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("Title", text: $draft.title).textFieldStyle(.roundedBorder)
-            TextField("Notes", text: $draft.notes, axis: .vertical)
-                .lineLimit(3...(8 + Int(extraHeight / 16))).textFieldStyle(.roundedBorder)
+            // Notes are the task's note jot once they reach 10 characters (Jots J10): selectable, with Make task / Make decision /
+            // Copy id link on right-click (the source is the note jot when there is one).
+            notesEditor
+            TaskMeetingNotes(taskID: draft.id, maxHeight: CGFloat(110 + extraHeight / 2))
             if !draft.aiSummary.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("From the email or meeting (AI)").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)

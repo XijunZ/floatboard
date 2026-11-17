@@ -280,6 +280,9 @@ enum Snapshot {
             saveLive(GlobalSearchView(initialQuery: "budget"), "foundation-search.png", CGSize(width: 440, height: 300))
             saveLive(VStack(alignment: .leading, spacing: 14) { AreasSection() }.padding(12), "foundation-settings-areas.png", CGSize(width: 700, height: 420))
         }
+        if ProcessInfo.processInfo.environment["FLOATBOARD_JOTSHOTS"] != nil, LocalData.isScratchDatabase {
+            JotsSnapshots.run(dir: dir, store: store, ui: ui, google: google)   // Jots pictures, light and dark
+        }
         save(GuideView().content, "guide.png", CGSize(width: 440, height: 760))
         // ScrollView doesn't render here, so each Settings section is drawn directly.
         for s in SettingsSection.allCases {

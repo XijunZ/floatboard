@@ -203,6 +203,7 @@ public final class Store: ObservableObject {
                 if old.area != card.area { try stampTagsRow([card.id], now: now) }   // the group is the primary tag
                 // Ids typed into the notes link the task to them (new ones only; one unlinked with ✕ stays unlinked).
                 try linkMentionsRow(in: card.notes, previous: oldNotes, from: ShortID(kind: .task, number: card.id), now: now) }
+            try saveTaskNoteRow(cardID: card.id, old: oldNotes, new: card.notes, now: now)   // Jots J10: the notes are a jot
         }
     }
 
