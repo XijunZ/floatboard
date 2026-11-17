@@ -1,0 +1,165 @@
+  // ------------------------------------------------------------ Decisions (More › Decisions): the screen
+  // Read-only list from the Mac's copy (cached for offline reading, per account), plus two actions: answer a review and
+  // "Not a decision". Actions queue in localStorage with their own id and time and are sent when online.
+
+  var DEC_KEY = "floatboard.decisions";          // { account, decisions, updated }
+  var DEC_QUEUE_KEY = "floatboard.decisions.queue"; // { account, actions }
+  var decisions = null;
+  var decQueue = { account: null, actions: [] };
+  var decisionsShown = false;
+  var decWaiting = 0;
+
+  function decAccount() { return (me && me.account) || shownAccount || null; }
+
+  function loadDecisionCache() {
+    var acc = decAccount();
+    var c = load(DEC_KEY);
+    decisions = c && c.account === acc ? c : null;
+    var q = load(DEC_QUEUE_KEY);
+    decQueue = q && q.account === acc ? q : { account: acc, actions: [] };
+  }
+
+  function saveDecQueue() { store(DEC_QUEUE_KEY, decQueue.actions.length ? decQueue : null); }
+
+  // Signing out or another account: drop what this phone holds for Decisions.
+  function dropDecisions() {
+    decisions = null;
+    decQueue = { account: null, actions: [] };
+    store(DEC_KEY, null);
+    store(DEC_QUEUE_KEY, null);
+  }
+
+  // Shows or hides the Decisions screen inside More (called by render()).
+  function decisionsView(moreOn) {
+    if (!moreOn) decisionsShown = false;
+    $("more").hidden = !moreOn || decisionsShown;
+    $("decisions").hidden = !moreOn || !decisionsShown;
+  }
+
+  async function openDecisions() {
+    decisionsShown = true;
+    loadDecisionCache();
+    render();
+    renderDecisions();
+    window.scrollTo(0, 0);
+    await syncDecisions();
+  }
+
+  async function syncDecisions() {
+    try {
+      if (decQueue.actions.length) {
+        var sent = decQueue.actions.slice(0, 50);
+        var r = await api("/app/api/decisions/action", { method: "POST", body: { actions: sent } });
+        decQueue.actions = decisionQueueAfter(decQueue.actions, r.accepted || []);
+        saveDecQueue();
+      }
+      var b = await api("/app/api/decisions");
+      decisions = { account: decAccount(), decisions: Array.isArray(b.decisions) ? b.decisions : [], updated: b.updated || null };
+      decWaiting = b.waiting || 0;
+      if (decisions.account) store(DEC_KEY, decisions);
+    } catch (e) {
+      if (e instanceof SignedOut) { showSignIn(); return; }
+      if (e && e.status === 400 && decQueue.actions.length) {   // a malformed action would block the queue: drop it
+        decQueue.actions = decQueue.actions.slice(1);
+        saveDecQueue();
+      }
+    }
+    renderDecisions();
+  }
+
+  function queueDecision(a) {
+    if (!a) return;
+    decQueue.account = decAccount();
+    decQueue.actions.push(a);
+    saveDecQueue();
+    renderDecisions();
+    syncDecisions();
+  }
+
+  function renderDecisions() {
+    var box = $("decisions-list");
+    if (!box) return;
+    box.replaceChildren();
+    var list = decisions ? decisions.decisions : [];
+    var s = decisionSections(list, decQueue.actions);
+    var status = [decisions && decisions.updated ? "From your Mac, " + new Date(decisions.updated).toLocaleString() : "Waiting for your Mac to send Decisions.",
+      decisionsWaiting(decQueue.actions.length + decWaiting)].filter(Boolean).join(" · ");
+    $("decisions-status").textContent = status;
+    var any = false;
+    [["Reviews due", s.due], ["This week", s.week], ["Maybe", s.maybe], ["Earlier", s.earlier]].forEach(function (pair) {
+      if (!pair[1].length) return;
+      any = true;
+      box.appendChild(el("h2", "dec-h", pair[0]));
+      pair[1].forEach(function (d) { box.appendChild(decisionRow(d)); });
+    });
+    if (!any) box.appendChild(el("p", "empty", "No decisions yet. Your Mac finds them in your jots each Sunday."));
+  }
+
+  function decisionRow(d) {
+    var b = el("button", "dec-row");
+    b.type = "button";
+    var top = el("span", "dec-top");
+    top.appendChild(el("span", "dec-id", d.id));
+    top.appendChild(el("span", "dec-text", d.text));
+    b.appendChild(top);
+    b.appendChild(el("span", "dec-sub", (d.status === "maybe" ? "Maybe · " : "") + decisionDetail(d)));
+    b.addEventListener("click", function () { decisionSheet(d); });
+    return b;
+  }
+
+  function decisionSheet(d) {
+    openSheet(function (sheet) {
+      sheet.appendChild(el("h3", null, d.text));
+      sheet.appendChild(el("p", "sub", d.id + " · " + decisionDetail(d) + " · " + (d.status === "maybe" ? "Maybe" : d.status)));
+      sheet.appendChild(el("p", "sub", "Decided: " + (d.decided || "unknown")));
+      if (d.quote) sheet.appendChild(el("p", "dec-quote", "“" + d.quote + "” (" + d.source + ")"));
+      sheet.appendChild(el("p", "sub", "Why: " + (d.why || "not recorded")));
+      sheet.appendChild(el("p", "sub", decisionPrediction(d)));
+      if (d.tags && d.tags.length) sheet.appendChild(el("p", "sub", "Tags: " + d.tags.join(", ")));
+      if (d.people && d.people.length) sheet.appendChild(el("p", "sub", "People: " + d.people.join(", ")));
+      if (d.review === "due") {
+        var r = el("button", "btn", "Answer review");
+        r.addEventListener("click", function () { reviewSheet(d); });
+        sheet.appendChild(r);
+      } else if (d.review_due && d.review === "scheduled") {
+        sheet.appendChild(el("p", "sub", "Review " + d.review_due));
+      }
+      if (canDismiss(d)) {
+        var n = el("button", "btn secondary", "Not a decision");
+        n.addEventListener("click", function () {
+          queueDecision(notDecisionAction(d, newId(), new Date().toISOString()));
+          closeSheet();
+          toast("Marked not a decision. Your Mac adds it to the Decisions rulebook.");
+        });
+        sheet.appendChild(n);
+      }
+      sheet.appendChild(el("p", "sub hint", "Edit decisions on your Mac."));
+    });
+  }
+
+  function reviewSheet(d) {
+    openSheet(function (sheet) {
+      sheet.appendChild(el("h3", null, "Review " + d.id));
+      sheet.appendChild(el("p", "dec-quote", d.text));
+      sheet.appendChild(el("p", "dec-expected", decisionPrediction(d)));
+      var form = el("form", "dec-form");
+      var label1 = el("label", null, "What happened?");
+      var a1 = el("textarea"); a1.rows = 3; a1.maxLength = 4000; a1.id = "dec-happened"; label1.htmlFor = "dec-happened";
+      var label2 = el("label", null, "Was the thinking sound?");
+      var a2 = el("textarea"); a2.rows = 3; a2.maxLength = 4000; a2.id = "dec-sound"; label2.htmlFor = "dec-sound";
+      var save = el("button", "btn", "Save review"); save.type = "submit";
+      [label1, a1, label2, a2, save].forEach(function (x) { form.appendChild(x); });
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var act = reviewAction(d, a1.value, a2.value, newId(), new Date().toISOString());
+        if (!act) { toast("Write what happened first."); return; }
+        queueDecision(act);
+        closeSheet();
+        toast("Review saved. Your Mac keeps it as a jot.");
+      });
+      sheet.appendChild(form);
+    });
+  }
+
+  $("more-decisions").addEventListener("click", openDecisions);
+  $("decisions-back").addEventListener("click", function () { decisionsShown = false; render(); window.scrollTo(0, 0); });

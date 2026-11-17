@@ -124,6 +124,21 @@ background:var(--text);color:var(--bg);padding:12px 16px;border-radius:14px;text
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.sheet,.spin{animation:none}}
+/* Decisions (More › Decisions) */
+.dec-head{display:flex;align-items:center;gap:4px}
+.dec-head h2{margin:0}
+.dec-list{display:flex;flex-direction:column;gap:6px}
+.dec-list .dec-h{margin:14px 4px 2px}
+.dec-row{display:flex;flex-direction:column;align-items:stretch;gap:3px;text-align:left;background:var(--surface);border-radius:14px;padding:12px 14px;min-height:50px}
+.dec-row:active{opacity:.6}
+.dec-top{display:flex;gap:8px;align-items:baseline;min-width:0}
+.dec-id{color:var(--muted);font-variant-numeric:tabular-nums;flex:none;font-size:14px}
+.dec-text{font-weight:500;overflow-wrap:anywhere;min-width:0}
+.dec-sub{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.dec-quote{margin:0 4px;padding:10px 12px;border-radius:12px;background:var(--surface);overflow-wrap:anywhere;font-size:15px}
+.dec-expected{margin:0 4px;padding:10px 12px;border-radius:12px;background:var(--surface2);font-size:14px;overflow-wrap:anywhere}
+.dec-form{display:flex;flex-direction:column;gap:6px}
+.dec-form textarea{width:100%;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text);padding:10px 12px;font:inherit;resize:vertical}
 `;
 
 const ICONS = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -194,9 +209,14 @@ const BODY = `${ICONS}
 <section id="jots" class="area" role="tabpanel" hidden><div class="placeholder">Jots arrive here with the Jots area: a writing box and your last 30 days of notes.</div></section>
 <section id="circle" class="area" role="tabpanel" hidden><div class="placeholder">Circle arrives here with the Circle area: who is due, and each person's card.</div></section>
 <section id="more" class="area" role="tabpanel" hidden>
-<button id="more-decisions" class="btn row-btn" type="button">Decisions<span class="sub">Coming with the Decisions area</span></button>
+<button id="more-decisions" class="btn row-btn" type="button">Decisions<span class="sub">Reviews and this week</span></button>
 <button id="more-resolutions" class="btn row-btn" type="button">Resolutions<span class="sub">Coming with the Resolutions area</span></button>
 <button id="more-settings" class="btn row-btn" type="button">${icon("gear")}Settings</button>
+</section>
+<section id="decisions" class="area" role="tabpanel" hidden>
+<div class="dec-head"><button id="decisions-back" class="icon-btn" type="button" aria-label="Back to More">${icon("back")}</button><h2>Decisions</h2></div>
+<p id="decisions-status" class="muted small"></p>
+<div id="decisions-list" class="dec-list"></div>
 </section>
 <button id="add" class="fab" aria-label="Add a task">${icon("plus")}</button>
 <nav class="views" role="tablist" aria-label="Screens">${view("board", "Board", "board", true)}${view("plan", "Plan", "calendar")}${view("jots", "Jots", "jot")}${view("circle", "Circle", "people")}${view("more", "More", "more")}</nav>

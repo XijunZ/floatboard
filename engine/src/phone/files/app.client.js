@@ -1,6 +1,7 @@
 "use strict";
 (function () {
 /*@SYNC_JS@*/
+/*@DECISIONS_LOGIC@*/
 
   var $ = function (id) { return document.getElementById(id); };
   var SCREENS = ["loading", "pair", "signin", "board", "settings"];
@@ -479,6 +480,7 @@
     $("jots").hidden = view !== "jots";
     $("circle").hidden = view !== "circle";
     $("more").hidden = view !== "more";
+    decisionsView(view === "more");   // Decisions: its screen inside More (files/decisions.client.js)
     var entries = moreEntries(board.modules);
     $("more-decisions").hidden = entries.indexOf("decisions") < 0;
     $("more-resolutions").hidden = entries.indexOf("resolutions") < 0;
@@ -515,6 +517,7 @@
     store(BOARD_KEY, null);
     store(QUEUE_KEY, null);
     store(SENT_KEY, null);
+    dropDecisions();   // Decisions' cached copy and queue (files/decisions.client.js)
   }
 
   // /app/api/me answered: the session's account. Any board or queue of another account is dropped, never shown or sent.
@@ -1168,7 +1171,7 @@
     document.querySelector('[data-view="' + v + '"]').addEventListener("click", function () { view = v; render(); window.scrollTo(0, 0); });
   });
   $("more-settings").addEventListener("click", openSettings);
-  $("more-decisions").addEventListener("click", function () { toast("Decisions arrive here with the Decisions area."); });
+/*@DECISIONS_UI@*/
   $("more-resolutions").addEventListener("click", function () { toast("Resolutions arrive here with the Resolutions area."); });
   $("pair-go").addEventListener("click", pair);
   $("pair-skip").addEventListener("click", function () { sessionSet(PAIR_KEY, null); start(); });
