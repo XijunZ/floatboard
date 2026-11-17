@@ -301,4 +301,74 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
 
 // MARK: Engine calls (stubbed; no live AI)
 
-@MainActor private func decisionEngineChecks(_ root: URL) async {}
+@MainActor private func decisionEngineChecks(_ root: URL) async {
+    guard let s = decisionsStore(root, "engine.sqlite") else { return }
+    do { try s.upsertConnector(id: "eng", name: "Engine", baseURL: "https://engine.test") } catch { check(false, "engine connector: \(error)"); return }
+    s.reload()
+    let js = JotStore(store: s)
+    guard let a = js.create(text: "We agreed to hire Sam as designer from January.", now: decisionsNow.addingTimeInterval(-2 * 86400)),
+          let _ = PeopleStore(store: s).create(name: "Sam") else { check(false, "engine setup"); return }
+    _ = js.create(text: "Groceries.", now: decisionsNow.addingTimeInterval(-86400))
+    // A dismissed decision waits as a rulebook example; the screening writes it into the copy first (built-in text known).
+    RulebookSync.setBase("# Decisions rulebook", "eng", DecisionRulebook.settingsKey, store: s)
+    if let x = DecisionStore(store: s).record(DecisionDraft(text: "Maybe a trip", quote: "maybe a trip")) { DecisionStore(store: s).notADecision(x.id) }
+    var screenBodies = 0
+    let engine = FakeEngine { method, path, body in
+        switch (method, path) {
+        case ("POST", "/v2/decisions/screen"):
+            screenBodies += 1
+            let jots = ((try JSONSerialization.jsonObject(with: body) as? [String: Any])?["jots"] as? [[String: Any]]) ?? []
+            let results = jots.map { j -> [String: Any] in
+                let ref = j["ref"] as? String ?? ""
+                let text = j["text"] as? String ?? ""
+                return ["ref": ref, "ok": true, "decisions": text.contains("hire Sam")
+                    ? [["quote": "We agreed to hire Sam as designer from January.", "decision": "Hire Sam as designer", "type": "strategic",
+                        "why": NSNull(), "decided_on": NSNull(), "sure": true]] : []]
+            }
+            return (200, String(decoding: try JSONSerialization.data(withJSONObject: ["results": results]), as: UTF8.self))
+        case ("POST", "/v2/decisions/supersedes"): return (200, #"{"results":[]}"#)
+        case ("POST", "/v2/decisions/tell-ask"):
+            let items = ((try JSONSerialization.jsonObject(with: body) as? [String: Any])?["items"] as? [[String: Any]]) ?? []
+            let id = items.first?["id"] as? String ?? ""
+            let person = ((items.first?["people"] as? [[String: Any]])?.first?["id"] as? String) ?? ""
+            return (200, #"{"results":[{"id":"\#(id)","suggestions":[{"person":"\#(person)","kind":"tell","title":"Tell Sam he is hired"}]}]}"#)
+        case ("POST", "/v2/decisions/fill"):
+            return (200, #"{"decision":"Hire Sam","why":"not recorded","expected":"","confidence":null,"type":"strategic","alternatives":""}"#)
+        case ("GET", "/v2/decision-actions"):
+            return (200, #"{"server_time":"2026-11-11T10:00:00Z","actions":[{"id":"act-00000001","decision":"D-999","action":"review","happened":"x","sound":"y"}]}"#)
+        case ("POST", "/v2/decision-actions/ack"), ("PUT", "/v2/decisions"): return (200, #"{"ok":true}"#)
+        default: return (404, "{}")
+        }
+    }
+    let client = engine.client()
+    let out = await DecisionsEngine.screenIfDue(store: s, connector: "eng", client: client, now: decisionsNow)
+    check(out?.recorded.count == 1 && screenBodies == 1 && engine.bodies("/v2/decisions/screen").first.map { (($0["jots"] as? [Any])?.count ?? 0) == 2 } == true,
+          "screening_sends_the_weeks_jots_in_one_batch_and_records")
+    let d = DecisionStore(store: s).all().first { $0.text == "Hire Sam as designer" }
+    check(d?.foundByClaude == true && d?.sourceItem == a.shortID && DecisionStore(store: s).people(of: d?.id ?? 0).map(\.name) == ["Sam"],
+          "screened_decision_linked_to_jot_and_person")
+    check(DecisionStore(store: s).suggestions(d?.id ?? 0).map(\.text) == ["Tell Sam he is hired"], "tell_ask_suggested_after_screening")
+    check((s.connectors.first { $0.id == "eng" }?.settings[DecisionRulebook.settingsKey] as? String)?.contains("maybe a trip") == true
+          && DecisionRulebook.pending(store: s).isEmpty, "screening_writes_waiting_examples_into_the_rulebook_first")
+    let again = await DecisionsEngine.screenIfDue(store: s, connector: "eng", client: client, now: decisionsNow.addingTimeInterval(3600))
+    check(again == nil && screenBodies == 1, "screening_runs_once_a_week")
+    s.setModule(.decisions, on: false)
+    let off = await DecisionsEngine.screenIfDue(store: s, connector: "eng", client: client, now: decisionsNow.addingTimeInterval(8 * 86400))
+    check(off == nil && screenBodies == 1, "screening_skipped_while_decisions_off")
+    s.setModule(.decisions, on: true)
+    // A failed request marks nothing and the run stays due.
+    _ = js.create(text: "We chose the blue logo.", now: decisionsNow.addingTimeInterval(7 * 86400))
+    let broken = FakeEngine { _, _, _ in (500, "{}") }
+    let failed = await DecisionsEngine.screenIfDue(store: s, connector: "eng", client: broken.client(), now: decisionsNow.addingTimeInterval(8 * 86400))
+    check(failed == nil && DecisionScreening.isDue(now: decisionsNow.addingTimeInterval(8 * 86400), lastRun: DecisionScreening.lastRun(store: s))
+          && s.recentActivity(limit: 5).contains { $0.component == "decisions" && $0.level == .warning }, "screening_failure_logged_and_stays_due")
+    // Form filling.
+    let fill = try? await client.fillDecision(selection: "We agreed to hire Sam", context: a.text) // try?-ok: nil fails the check
+    check(fill?.decision == "Hire Sam" && fill?.type == .strategic && fill?.confidence == nil && fill?.why == "not recorded", "fill_form_answer_read")
+    // Phone step: actions applied (unknown ones skipped but acked), copy sent once while unchanged.
+    await DecisionsEngine.phoneStep(connector: "eng", store: s, client: client, now: decisionsNow)
+    let puts = engine.requests.filter { $0.path == "/v2/decisions" }.count
+    check(puts == 1 && engine.requests.contains { $0.path == "/v2/decision-actions/ack" }, "phone_step_acks_actions_and_sends_copy")
+    await DecisionsEngine.phoneStep(connector: "eng", store: s, client: client, now: decisionsNow)
+    check(engine.requests.filter { $0.path == "/v2/decisions" }.count == 1, "phone_copy_sent_only_when_changed")
+}
