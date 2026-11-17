@@ -160,8 +160,9 @@ public final class CalendarSync {
         let key = "series:" + c.account + "|" + c.calendarID
         for id in cache.seriesToRead(account: c.account, calendarID: c.calendarID, readBefore: refresh ? started : nil) {
             do {
-                let lines = try await api.recurrence(calendarID: c.calendarID, seriesID: id)
-                cache.saveSeries(account: c.account, calendarID: c.calendarID, seriesID: id, rule: lines.joined(separator: "\n"), now: started)
+                let r = try await api.recurrence(calendarID: c.calendarID, seriesID: id)
+                cache.saveSeries(account: c.account, calendarID: c.calendarID, seriesID: id, rule: r.lines.joined(separator: "\n"),
+                                 masterStart: r.start, masterZone: r.zone, now: started)
             } catch where CalendarSender.isPermanent(error) {
                 cache.saveSeries(account: c.account, calendarID: c.calendarID, seriesID: id, rule: "", now: started)
             } catch {

@@ -153,7 +153,7 @@
   "table",
   "cal_series",
   "cal_series",
-  "CREATE TABLE cal_series(\n    account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',\n    read_at REAL NOT NULL,\n    PRIMARY KEY(account, calendar_id, series_id)\n)"
+  "CREATE TABLE cal_series(\n    account TEXT NOT NULL, calendar_id TEXT NOT NULL, series_id TEXT NOT NULL, rule TEXT NOT NULL DEFAULT '',\n    read_at REAL NOT NULL, master_start REAL, master_zone TEXT,\n    PRIMARY KEY(account, calendar_id, series_id)\n)"
  ],
  [
   "table",
