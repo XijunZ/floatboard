@@ -446,6 +446,31 @@ final class GatedGoogle: @unchecked Sendable {
               "n2_start_and_end_are_merged_independently")
     }
 
+    // N3. Re-keying the "primary" stand-in when the same event is already kept under the real id: links to the stand-in's
+    //     E-n move to the surviving one.
+    do {
+        let (store, cache, _) = try setup("n3-links")
+        let who = "dup@example.com"
+        cache.upsertCalendars(account: who, [CalCalendar(account: who, calendarID: CalendarCache.primaryAlias, name: "Main calendar",
+                                                         color: "#9aa0a6", owned: true, shown: true, primary: true)])
+        func put(_ cal: String, _ id: String) {
+            cache.apply(account: who, calendarID: cal, changes: [GoogleEventChange(eventID: id, cancelled: false,
+                fields: CalEventFields(start: at(10, 0, 0), end: at(11, 0, 0), title: id, googleUpdated: old))], nextToken: nil)
+        }
+        put(CalendarCache.primaryAlias, "dupev"); put("real-id", "dupev"); put(CalendarCache.primaryAlias, "other")
+        guard let alias = cache.event(account: who, calendarID: CalendarCache.primaryAlias, eventID: "dupev"),
+              let real = cache.event(account: who, calendarID: "real-id", eventID: "dupev"),
+              let other = cache.event(account: who, calendarID: CalendarCache.primaryAlias, eventID: "other") else { check(false, "n3 setup"); return }
+        let task = newTask(store, "Prep", nil, false)
+        store.link(alias.id, ShortID(kind: .task, number: task), actor: .user)
+        store.link(alias.id, other.id, actor: .user)
+        store.link(alias.id, real.id, actor: .user)   // becomes a link to itself: dropped
+        cache.upsertCalendars(account: who, [CalCalendar(account: who, calendarID: "real-id", name: "Main", color: "#111111", owned: true, shown: true, primary: true)])
+        let survivors = Set(store.links(of: real.id))
+        check(store.links(of: alias.id).isEmpty && survivors == [ShortID(kind: .task, number: task), other.id]
+              && store.links(of: other.id) == [real.id], "n3_rekey_collision_moves_links_to_the_surviving_event")
+    } catch { check(false, "n3: \(error)") }
+
 }
 
 /// A fake Google holding one event: GET returns it, PATCH changes it and moves `updated` on (as Google does).
