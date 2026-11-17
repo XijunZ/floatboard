@@ -72,8 +72,27 @@ public final class CalendarOutbox {
     }
 
     /// Unsent changes whose wait is over, oldest first. Changes Google refused for good are never due again.
+    /// Per event only the oldest unsent change can be due: a later one (a delete after a create, a second edit) waits while
+    /// an earlier one for the same event is backing off, so Google always gets an event's changes in the order they were made.
     public func due(now: Date) -> [CalOutboxRow] {
-        rows("WHERE sent IS NULL AND failed_at IS NULL AND next_try<=? ORDER BY created, rowid", [now])
+        var seen = Set<String>()
+        var out: [CalOutboxRow] = []
+        for r in rows("WHERE sent IS NULL AND failed_at IS NULL ORDER BY created, rowid", []) {
+            if seen.insert(Self.eventKey(r)).inserted, r.nextTry <= now { out.append(r) }
+        }
+        return out
+    }
+
+    /// The event a change is for: a create's own id on Google's side (the one later changes to it use), else the event it
+    /// changes. An unreadable change stands alone.
+    static func eventKey(_ r: CalOutboxRow) -> String {
+        let event: String
+        switch r.write {
+        case .create?: event = googleEventID(forUUID: r.uuid)
+        case let w?: event = w.eventID ?? "row:" + r.uuid
+        case nil: event = "row:" + r.uuid
+        }
+        return r.account + "|" + r.calendarID + "|" + event
     }
 
     /// All unsent changes, oldest first (for showing what is waiting), including ones Google refused for good (`failedAt`).
