@@ -391,7 +391,7 @@
     return statusText({ waiting: queue.actions.length, offline: isOffline, lastSync: lastSync, now: Date.now() }) || "Syncing…";
   }
 
-  // ---- Today: meetings and tasks due today, in the zone the Mac sent (the device's when absent)
+  // ---- Planning summary: Today, Rest of this week, Next week, in the zone the Mac sent (the device's when absent)
 
   function zoneOf() {
     var z = board && board.time_zone;
@@ -399,47 +399,17 @@
     try { new Intl.DateTimeFormat("en", { timeZone: z }); return z; } catch (e) { return undefined; }
   }
 
-  /** "YYYY-MM-DD" of a time on the calendar of the zone. */
-  function dayKey(ms, zone) {
-    var p = {};
-    new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" })
-      .formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
-    return p.year + "-" + p.month + "-" + p.day;
-  }
-
-  function todayEvents(zone, today) {
-    var list = board && Array.isArray(board.events) ? board.events : [];
-    return list.filter(function (e) {
-      var s = Date.parse(e.start), n = Date.parse(e.end);
-      if (isNaN(s) || isNaN(n)) return false;
-      return dayKey(s, zone) <= today && today <= dayKey(n > s ? n - 1 : s, zone);
-    }).sort(function (a, b) { return (b.all_day ? 1 : 0) - (a.all_day ? 1 : 0) || Date.parse(a.start) - Date.parse(b.start); });
-  }
-
-  function dueToday(zone, today) {
-    return shown.filter(function (c) {
-      if (c.status === "done" || typeof c.due !== "string") return false;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(c.due)) return c.due === today;
-      var t = Date.parse(c.due);
-      return !isNaN(t) && dayKey(t, zone) === today;
-    });
-  }
-
-  function eventRow(e, zone) {
+  /** One meeting line: when, the title (a repeating meeting: "Standup · weekdays 09:00"), its linked tasks, Join. */
+  function meetingRow(m, byId) {
     var row = el("div", "ev");
-    var when = e.all_day ? "All day" : new Intl.DateTimeFormat(undefined, { timeZone: zone, hour: "2-digit", minute: "2-digit" }).format(new Date(e.start));
-    row.appendChild(el("span", "when", when));
+    row.appendChild(el("span", "when", m.when));
     var body = el("span", "body");
-    body.appendChild(el("span", "t", e.title));
-    var byId = {};
-    shown.forEach(function (c) { byId[c.id] = c; });
-    (Array.isArray(e.tasks) ? e.tasks : []).forEach(function (id) {
-      if (byId[id]) body.appendChild(el("div", "task", byId[id].title));
-    });
+    body.appendChild(el("span", "t", m.label ? m.title + " · " + m.label : m.title));
+    m.tasks.forEach(function (id) { if (byId[id]) body.appendChild(el("div", "task", byId[id].title)); });
     row.appendChild(body);
-    if (typeof e.video === "string" && /^https:\/\//.test(e.video)) {
+    if (m.video) {
       var a = el("a", "join", "Join");
-      a.href = e.video;
+      a.href = m.video;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
       row.appendChild(a);
@@ -450,24 +420,20 @@
   function renderToday() {
     var box = $("today");
     box.replaceChildren();
-    var zone = zoneOf();
-    var cards = [];
-    var events = [];
+    var any = false;
     try {
-      var tz = zone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-      var today = dayKey(Date.now(), tz);
-      events = todayEvents(tz, today);
-      cards = dueToday(tz, today);
-      if (events.length) {
-        box.appendChild(el("h2", null, "Today"));
-        events.forEach(function (e) { box.appendChild(eventRow(e, tz)); });
-      }
-      if (cards.length) {
-        box.appendChild(el("h2", null, "Due today"));
-        cards.forEach(function (c) { box.appendChild(cardButton(c)); });
-      }
-    } catch (err) { console.error("Today list failed", err); box.replaceChildren(); events = []; cards = []; }
-    box.hidden = !(events.length || cards.length);
+      var tz = zoneOf() || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      var byId = {};
+      shown.forEach(function (c) { byId[c.id] = c; });
+      planBlocks(board && Array.isArray(board.events) ? board.events : [], shown, Date.now(), tz).forEach(function (b) {
+        if (!b.meetings.length && !b.tasks.length) return;
+        any = true;
+        box.appendChild(el("h2", null, b.title));
+        b.meetings.forEach(function (m) { box.appendChild(meetingRow(m, byId)); });
+        b.tasks.forEach(function (c) { box.appendChild(cardButton(c)); });
+      });
+    } catch (err) { console.error("Planning summary failed", err); box.replaceChildren(); any = false; }
+    box.hidden = !any;
   }
 
   function render() {

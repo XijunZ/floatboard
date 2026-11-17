@@ -29,7 +29,8 @@ import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
 import { GMAIL_ID, ownGmail } from "../email/search";
 
 export const MAX_CARDS = 500;
-export const MAX_EVENTS = 50;
+export const MAX_EVENTS = 200;   // two weeks of meetings (the planning summary: today through the end of next week)
+const MAX_REPEAT = 80;
 const MAX_EVENT_TASKS = 20;
 export const MAX_UNTAKEN_ACTIONS = 200;
 export const MAX_BATCH = 100;
@@ -65,8 +66,13 @@ export type Card = {
   /** Watch only: whom it waits on, how to recognise their reply ("email:<address>", "wa:<chat id>" or ""), and since when. */
   watch?: CardWatch;
 };
-/** A calendar event for the phone's Today list: ISO UTC times, `tasks` = ids of the cards linked to it. */
-export type BoardEvent = { id: string; title: string; start: string; end: string; all_day: boolean; video: string | null; color: string; tasks: number[] };
+/**
+ * A calendar event for the phone's planning summary: ISO UTC times, `tasks` = ids of the cards linked to it. A repeating
+ * meeting's instances share `series` (an opaque "S-" key) and carry `repeat` (its rule in a few words, "weekdays 09:00"),
+ * so the phone lists it once per block; both are absent for a one-off event.
+ */
+export type BoardEvent = { id: string; title: string; start: string; end: string; all_day: boolean; video: string | null; color: string; tasks: number[];
+  series?: string; repeat?: string };
 export type CardWatch = { person: string; contact: string; since: string };
 /** The email a `link_email` action attaches (sent_at as the search gave it). */
 export type LinkedEmail = { message_id: string; gmail_id: string; account: string; sent_at: string | null };
@@ -185,7 +191,12 @@ export function parseEvents(body: any): BoardEvent[] | undefined {
     if (!Array.isArray(e.tasks) || e.tasks.length > MAX_EVENT_TASKS || !e.tasks.every((t: unknown) => Number.isSafeInteger(t) && (t as number) > 0)) {
       throw new Error(`${at}.tasks must be a list of up to ${MAX_EVENT_TASKS} positive integers`);
     }
-    return { id: e.id, title, start: e.start, end: e.end, all_day: e.all_day, video, color: e.color, tasks: e.tasks };
+    // Like the link: a bad series key or label is left out (the meeting is then listed like a one-off), never a refused push.
+    const series = typeof e.series === "string" && /^S-[0-9a-f]{1,32}$/.test(e.series) ? e.series : undefined;
+    const rep = typeof e.repeat === "string" ? e.repeat.trim() : "";
+    const repeat = rep && rep.length <= MAX_REPEAT && !/[\u0000-\u001f\u007f]/.test(rep) ? rep : undefined;
+    return { id: e.id, title, start: e.start, end: e.end, all_day: e.all_day, video, color: e.color, tasks: e.tasks,
+      ...(series ? { series } : {}), ...(repeat ? { repeat } : {}) };
   });
 }
 
