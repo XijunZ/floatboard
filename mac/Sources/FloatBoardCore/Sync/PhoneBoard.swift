@@ -260,7 +260,7 @@ public enum PhoneBoard {
     /// The extras for the copy: modules and waiting reminders.
     @MainActor
     public static func extras(store: Store, now: Date) -> BoardExtras {
-        BoardExtras(modules: store.modules, reminders: reminders(store: store, now: now), goals: nil)
+        BoardExtras(modules: store.modules, reminders: reminders(store: store, now: now), goals: Resolutions.phoneGoals(store: store, now: now))
     }
 
     public static func card(for c: Card, color: String?, calendar: Calendar) -> BoardCard {
