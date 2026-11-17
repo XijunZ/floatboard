@@ -19,6 +19,8 @@ import SQLite3
     resolutionReviewChecks(root)
     resolutionNudgeChecks(root)
     resolutionSearchPhoneChecks(root)
+    resolutionTypedIDKeepsLinksChecks(root)
+    resolutionOverdueChecks(root)
 }
 
 /// 12:00 on a day in the app's zone.
@@ -333,4 +335,43 @@ private func makeV12Schema(_ url: URL) -> Bool {
     store.setModule(.resolutions, on: false)
     check(PhoneBoard.extras(store: store, now: now).goals == nil && GlobalSearch.run("studio", store: store).allSatisfy { $0.0 != .resolution },
           "goals_hidden_while_area_off")
+}
+
+// MARK: Codex review fixes
+
+/// RS-A: typing an id never replaces a link the two items already have (a reviewed goal keeps its record).
+@MainActor private func resolutionTypedIDKeepsLinksChecks(_ root: URL) {
+    guard let store = goalsStore(root, "typed.sqlite") else { return }
+    let r = ResolutionStore(store: store)
+    guard let q = make(r, .quarter, "2026-Q4", "Reviewed later") else { return }
+    let t = task(store, "Served the goal", done: true)
+    _ = r.linkWork(t, to: q.id, now: nov17)
+    _ = r.review(q.id, outcome: .dropped, note: "", newTitle: nil, now: nov17)
+    if var c = store.card(t.number) { c.notes = "This was for \(q.shortID.text)"; store.update(c, now: nov17) }
+    check(store.itemLinks(of: t).first { $0.other == q.shortID }?.kind == .serves && r.progress(q.id).done == [t.number],
+          "typed_reviewed_goal_id_keeps_serves_link")
+    // Generic: a jot made from a task keeps its `source` link when the task's id is typed into it.
+    let t2 = task(store, "Source task")
+    guard let j = JotStore(store: store).create(text: "Notes", now: nov17) else { check(false, "typed jot"); return }
+    store.link(j.shortID, t2, kind: .source, actor: .user, now: nov17)
+    JotStore(store: store).update(j.id, text: "Notes about \(t2.text)", now: nov17)
+    check(store.itemLinks(of: j.shortID).first { $0.other == t2 }?.kind == .source, "typed_id_never_replaces_another_link_kind")
+}
+
+/// RS-B: a period whose review window was missed can still be reviewed; the continuation goes to the current period.
+@MainActor private func resolutionOverdueChecks(_ root: URL) {
+    guard let store = goalsStore(root, "overdue.sqlite") else { return }
+    let r = ResolutionStore(store: store)
+    guard let old = make(r, .quarter, "2026-Q2", "Missed review"), let oldY = make(r, .year, "2025", "Missed year") else { return }
+    let reviews = ResolutionNudges.openReviews(store: store, now: nov17).map(\.key)
+    check(reviews.contains("2026-Q2") && reviews.contains("2025") && r.goal(old.id)?.reviewOverdue(now: nov17) == true
+          && r.goal(oldY.id)?.reviewOverdue(now: nov17) == true, "missed_review_stays_open_as_overdue")
+    check(ResolutionNudges.due(store: store, now: nov17).isEmpty, "overdue_review_is_not_nudged_again_outside_its_window")
+    guard case .success(let next?) = r.review(old.id, outcome: .kept, note: "", newTitle: nil, now: nov17) else {
+        check(false, "overdue_review_rolls_over_into_the_current_period"); return
+    }
+    check(next.period.key == "2026-Q4" && r.goal(old.id)?.status == .kept && r.goal(old.id)?.period.key == "2026-Q2"
+          && r.rolloverPeriod(of: GoalPeriod.parse(level: .quarter, key: "2026-Q4")!, now: day(2026, 12, 20)).key == "2027-Q1",
+          "overdue_review_rolls_over_into_the_current_period")
+    check(!ResolutionNudges.openReviews(store: store, now: nov17).map(\.key).contains("2026-Q2"), "reviewed_overdue_period_closes")
 }
