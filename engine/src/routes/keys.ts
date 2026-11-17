@@ -16,10 +16,11 @@ const MAX = 500;
 
 /** Which keys this engine holds for the user (never the keys themselves). */
 export async function keyStatus(env: Env, userId: string) {
-  const u = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(userId).first<{ anthropic_key_enc: string | null }>();
+  const u = await env.DB.prepare("SELECT anthropic_key_enc, companies_house_key_enc FROM users WHERE id=?").bind(userId)
+    .first<{ anthropic_key_enc: string | null; companies_house_key_enc: string | null }>();
   const g = await env.DB.prepare("SELECT client_id FROM google_clients WHERE user_id=?").bind(userId).first<{ client_id: string }>();
   const f = await env.DB.prepare("SELECT 1 AS x FROM sources WHERE user_id=? AND kind='fathom' AND fathom_key_enc IS NOT NULL").bind(userId).first();
-  return { claude: !!u?.anthropic_key_enc, google_client_id: g?.client_id ?? null, fathom: !!f };
+  return { claude: !!u?.anthropic_key_enc, google_client_id: g?.client_id ?? null, fathom: !!f, companies_house: !!u?.companies_house_key_enc };
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : undefined);
@@ -64,7 +65,14 @@ route("PUT", "/v2/keys", async (req, env, user) => {
     stmts.push(env.DB.prepare("UPDATE sources SET fathom_key_enc=?, last_error=NULL WHERE user_id=? AND kind='fathom'").bind(k ? await encrypt(env, k) : null, user.id));
     changed.push(k ? "Fathom key saved" : "Fathom key removed");
   }
-  if (!stmts.length) return json({ error: "nothing to change: send claude_key, google_client and/or fathom_key" }, 400);
+  if ("companies_house_key" in body) {
+    // Circle's What's new: UK Companies House officers and appointments (free key from developer.company-information.service.gov.uk).
+    const k = str(body.companies_house_key);
+    if (k === undefined || k.length > 200 || /\s/.test(k)) return json({ error: "companies_house_key must be the key Companies House gave you" }, 400);
+    stmts.push(env.DB.prepare("UPDATE users SET companies_house_key_enc=? WHERE id=?").bind(k ? await encrypt(env, k) : null, user.id));
+    changed.push(k ? "Companies House key saved" : "Companies House key removed");
+  }
+  if (!stmts.length) return json({ error: "nothing to change: send claude_key, google_client, fathom_key and/or companies_house_key" }, 400);
   stmts.push(logEvent(env, { run_id: "keys", user_id: user.id, decision: "keys", detail: changed.join("; ") }));
   await env.DB.batch(stmts);
   return json({ ok: true, keys: await keyStatus(env, user.id) });
