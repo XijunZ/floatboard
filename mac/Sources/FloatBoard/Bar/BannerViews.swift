@@ -75,6 +75,9 @@ struct BannerView: View {
             if !ui.quickAdding {
                 BarButton("plus", "Quick add a task here (⌃⌥N)") { ui.openAdd() }
             }
+            if !ui.quickAdding && store.isOn(.jots) {
+                BarButton("square.and.pencil", "New jot (⌃⌥J)") { CaptureController.shared?.show(task: nil) }
+            }
             if !ui.quickAdding {
                 BarButton("checklist.checked", "Weekly review") { ui.mode = .expanded; ui.showReview = true }
             }

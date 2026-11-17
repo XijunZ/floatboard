@@ -66,6 +66,7 @@ public struct DailyFilesSettings: Codable, Equatable {
         let since = last.map(Date.init(timeIntervalSince1970:)) ?? .distantPast
         let changed = JotStore(store: store).changed(since: since)
         let days = Dictionary(grouping: changed, by: { Self.dayKey($0.added) }).compactMapValues { $0.first?.added }
+        if days.isEmpty && last != nil { return [] }   // nothing changed: no write (so the pass never feeds itself)
         var done: [String] = []
         do {
             try FileManager.default.createDirectory(at: s.url, withIntermediateDirectories: true)

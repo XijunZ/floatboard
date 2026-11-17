@@ -116,6 +116,7 @@ final class ConnectorRunner {
             phoneRunning.insert(id)
             Task { @MainActor in
                 let r = await ConnectorSync.phoneTick(connector: id, store: store, client: client, now: Date())
+                if r.supported { await JotsSync.tick(connector: id, store: store, client: client) }   // Jots: the phone's copy and captures
                 phoneRunning.remove(id)
                 if r.queuedEvents { trigger("phone", only: [id]) }
             }

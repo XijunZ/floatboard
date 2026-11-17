@@ -51,10 +51,11 @@ public struct JotAck: Equatable {
 
     /// Jots added in the last 30 days that changed since the engine last accepted them (deleted ones too), oldest change first.
     public func toPush(now: Date = Date(), limit: Int = 200) -> [PushJot] {
-        let rows = (try? store.db.query("""
+        let sql = """
             SELECT j.id FROM jots j LEFT JOIN jot_sync s ON s.jot_id=j.id
             WHERE j.added>=? AND (s.pushed IS NULL OR j.updated>s.pushed) ORDER BY j.updated, j.id LIMIT ?
-            """, [now.addingTimeInterval(-Self.window), limit]) { DB.int($0, 0) }) ?? [] // try?-ok: unreadable = nothing sent this time; the next pass sends it
+            """
+        let rows = (try? store.db.query(sql, [now.addingTimeInterval(-Self.window), limit]) { DB.int($0, 0) }) ?? [] // try?-ok: unreadable = nothing sent this time; the next pass sends it
         let js = JotStore(store: store)
         return rows.compactMap { js.jot($0) }.map {
             PushJot(id: $0.id, text: $0.text, kind: $0.kind, source: $0.source, tags: store.itemTags($0.shortID).all, added: $0.added,

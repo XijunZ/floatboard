@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var reminderSync: ReminderSync?
     private var reminderWatch: AnyCancellable?
     private var assistantTicker: AssistantTicker?
+    private var capture: CaptureController?
+    private var jotsTicker: JotsTicker?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before migration touches the real file: snapshot it, but only if it exists and needs migrating.
@@ -143,6 +145,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         assistantTicker = AssistantTicker(store: store, ui: ui, show: { [weak self] r in self?.reminders?.schedule(r) },
                                           pushBoard: { [weak self] in self?.connectors.trigger("reminder shown") })
         assistantTicker?.start()
+        // Jots: search, the capture window (⌃⌥J), the daily nudge and daily files.
+        JotsArea.register()
+        GlobalSearchOpen.handlers[.jot] = { OpenJot.go($0.number) }
+        OpenJot.ui = ui
+        capture = CaptureController(store: store, ui: ui)
+        jotsTicker = JotsTicker(store: store, show: { [weak self] r in self?.reminders?.schedule(r) },
+                                pushBoard: { [weak self] in self?.connectors.trigger("jot nudge shown") })
+        jotsTicker?.start()
         // A new time zone (chosen in Settings, or the Mac's own when following it) re-reads the board, so every screen
         // and the reminders redraw in it.
         for name in [AppTime.didChange, .NSSystemTimeZoneDidChange] {
@@ -172,6 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ctrlOpt = controlKey | optionKey
         HotKeys.register(id: 1, keyCode: kVK_ANSI_B, modifiers: ctrlOpt) { [weak self] in self?.toggleVisible() }
         HotKeys.register(id: 2, keyCode: kVK_ANSI_N, modifiers: ctrlOpt) { [weak self] in self?.ui.openAdd() }
+        HotKeys.register(id: 3, keyCode: kVK_ANSI_J, modifiers: ctrlOpt) { [weak self] in self?.capture?.show(task: nil) }
 
         // Dev aid: FLOATBOARD_START_MODE=expanded|minimized to check layout without clicking.
         switch ProcessInfo.processInfo.environment["FLOATBOARD_START_MODE"] {
