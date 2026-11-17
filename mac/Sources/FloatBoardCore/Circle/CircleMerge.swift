@@ -11,6 +11,8 @@ extension CircleStore {
         var tags: [String] = []
         var primaryTag: String?
         var fields: [String] = []
+        /// What each moved field held at the merge; a split clears it only while it still holds that (owner edits stay).
+        var values: [String: String]?
         var updates: [Int64] = []
         var officers: [String] = []
     }
@@ -77,6 +79,7 @@ extension CircleStore {
                 let md = details(merged)
                 for (name, path) in Self.textFields where kd[keyPath: path].isEmpty && !md[keyPath: path].isEmpty {
                     kd[keyPath: path] = md[keyPath: path]; moved.fields.append(name)
+                    moved.values = (moved.values ?? [:]).merging([name: md[keyPath: path]]) { $1 }
                 }
                 try writeDetailsRow(kept, kd)
                 // The merged person goes (its links have moved, so nothing is hidden).
@@ -121,8 +124,8 @@ extension CircleStore {
         store.perform {
             let db = store.db
             try db.run("UPDATE people SET deleted=0, updated=? WHERE id=?", [now, merged])
-            for id in moved.handles { try db.run("UPDATE person_handles SET person_id=? WHERE id=?", [merged, id]) }
-            for id in moved.exchanges { try db.run("UPDATE circle_exchanges SET handle=? WHERE id=?", [String(merged), id]) }
+            for id in moved.handles { try db.run("UPDATE person_handles SET person_id=? WHERE id=? AND person_id=?", [merged, id, kept]) }
+            for id in moved.exchanges { try db.run("UPDATE circle_exchanges SET handle=? WHERE id=? AND handle=?", [String(merged), id, String(kept)]) }
             for id in moved.updates { try db.run("UPDATE circle_updates SET person_id=? WHERE id=?", [merged, id]) }
             for o in moved.officers { try db.run("UPDATE OR IGNORE officer_candidates SET person_id=? WHERE person_id=? AND officer_id=?", [merged, kept, o]) }
             for l in moved.links {
@@ -146,7 +149,9 @@ extension CircleStore {
                 try store.setTagsRow(k, primary: primary, others: left.filter { $0 != primary }, now: now)
             }
             var kd = details(kept)
-            for (name, path) in Self.textFields where moved.fields.contains(name) { kd[keyPath: path] = "" }
+            // A field the owner changed after the merge is theirs now: it stays on the kept person (the merged person keeps
+            // its own copy, untouched by the merge). Only a field still holding what the merge brought is cleared.
+            for (name, path) in Self.textFields where moved.fields.contains(name) && moved.values?[name] == kd[keyPath: path] { kd[keyPath: path] = "" }
             try writeDetailsRow(kept, kd)
             try db.run("UPDATE circle_merges SET split=? WHERE id=?", [now, mergeID])
         }
