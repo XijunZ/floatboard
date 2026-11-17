@@ -134,3 +134,56 @@ public struct BudgetReminder: Equatable {
         return date
     }
 }
+
+/// Whether this Mac may show a budget reminder: the engine's answer to "I am showing this id" (one id, shown once across Mac
+/// and phone). `mine`: shown here; `phones`: the engine already sent it to the phone; `unreachable`: ask again next minute;
+/// `noEngine`: no engine serves a phone (Board only, Mac only), so this Mac is the only place it can show.
+public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine }
+
+/// Shows the budget reminders that are due on this Mac (called once a minute). A reminder counts as delivered only once
+/// macOS has taken it (`schedule` returned); a refusal leaves it waiting, retried next minute, with one Activity error per
+/// reminder. Past the Mac's grace it is the phone's and is never shown here.
+@MainActor public final class ReminderDelivery {
+    let store: Store
+    let claim: (String) async -> ReminderClaim
+    let schedule: (DueReminder) async throws -> Void
+    private var inFlight = Set<String>()
+    private var reported = Set<String>()
+
+    public init(store: Store, claim: @escaping (String) async -> ReminderClaim, schedule: @escaping (DueReminder) async throws -> Void) {
+        self.store = store; self.claim = claim; self.schedule = schedule
+    }
+
+    /// Returns true when a reminder changed state (the board copy for the phone should be sent again).
+    @discardableResult
+    public func tick(now: Date = Date()) async -> Bool {
+        let budget = ReminderBudget(store: store)
+        var changed = false
+        for r in budget.pending() where !inFlight.contains(r.id) {
+            if ReminderBudget.phoneTakesOver(r, now: now) {
+                budget.markDelivered(r.id, by: "phone", at: now); changed = true; continue
+            }
+            guard ReminderBudget.macShows(r, now: now) else { continue }
+            inFlight.insert(r.id)
+            defer { inFlight.remove(r.id) }
+            switch await claim(r.id) {
+            case .phones:
+                budget.markDelivered(r.id, by: "phone", at: now); changed = true
+            case .unreachable:
+                continue
+            case .mine, .noEngine:
+                let title = ShortID.parse(r.item).flatMap { store.item($0)?.title } ?? "FloatBoard"
+                do {
+                    try await schedule(DueReminder(id: r.id, cardID: 0, title: title, body: r.text, fireAt: now.addingTimeInterval(1)))
+                    budget.markDelivered(r.id, by: "mac", at: now); changed = true
+                    reported.remove(r.id)
+                } catch {
+                    if reported.insert(r.id).inserted {
+                        store.activity("reminders", .error, "Could not show a reminder; will try again", detail: "\(error)", trace: r.id)
+                    }
+                }
+            }
+        }
+        return changed
+    }
+}
