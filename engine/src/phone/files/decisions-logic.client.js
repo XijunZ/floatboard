@@ -53,3 +53,8 @@
   }
 
   function decisionsWaiting(n) { return n > 0 ? n + (n === 1 ? " change" : " changes") + " waiting for your Mac" : ""; }
+
+  // The queue goes out only once /app/api/me has confirmed the signed-in account and it is the account the queue was made under.
+  function decisionQueueSendable(queue, confirmed) {
+    return !!(queue && confirmed && queue.account === confirmed && Array.isArray(queue.actions) && queue.actions.length);
+  }
