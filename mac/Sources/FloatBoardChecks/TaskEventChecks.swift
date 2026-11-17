@@ -184,7 +184,11 @@ import FloatBoardConnectors
         let meetingBefore = cache.nextMeeting(after: at(d1, 9))?.eventID
         googleChange(cache, "old1", "Old style", start: at(d1, 15), updated: ago(60))
         TaskEventRules.reconcile(store: store, cache: cache, now: t)
-        check(link(store, id).calendar == cal && store.card(id)?.due == at(d1, 15) && unsent(outbox).isEmpty, "old_card_reconciled_after_backfill")
+        // The first sync after the upgrade can't tell which side changed last: it keeps both (Codex F3); a later change wins.
+        let firstKept = link(store, id).calendar == cal && store.card(id)?.due == at(d1, 10) && unsent(outbox).isEmpty
+        googleChange(cache, "old1", "Old style", start: at(d1, 16), updated: t.addingTimeInterval(30))
+        TaskEventRules.reconcile(store: store, cache: cache, now: t.addingTimeInterval(60))
+        check(firstKept && store.card(id)?.due == at(d1, 16) && unsent(outbox).isEmpty, "old_card_reconciled_after_backfill")
         check(meetingBefore == nil && cache.nextMeeting(after: at(d1, 9)) == nil, "old_card_event_is_not_a_bar_meeting")
         store.performForTest("UPDATE cards SET gcal_calendar='' WHERE id=\(id2)")   // deleted before any reconcile has filled it in
         store.delete(store.card(id2)!)

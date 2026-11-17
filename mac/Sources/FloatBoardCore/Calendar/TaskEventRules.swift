@@ -67,7 +67,40 @@ struct LinkedCard {
     var cardID: Int64
     var link: EventLink
     var syncedAt: Date?
+    /// `CalendarBaseline.pending`, a saved baseline, or "" (none).
+    var baseline: String = ""
 }
+
+/// A task linked to its event by version 10, whose history cannot tell which side changed last ("edited" rows only):
+/// the first sync after the upgrade records what both sides hold and changes neither. After that, a field that differs is
+/// settled by which side moved away from this record (both moved: the newer change wins), until the two agree again.
+struct CalendarBaseline: Codable, Equatable {
+    /// Set by the upgrade's backfill: the next sync takes the record.
+    static let pending = "pending"
+    var at: Double
+    var title: String
+    var due: Double?
+    var timed: Bool
+    var googleTitle: String
+    var googleStart: Double
+    var googleTimed: Bool
+
+    init(card: Card, event ev: CalEvent, now: Date) {
+        at = now.timeIntervalSince1970; title = card.title; due = card.due?.timeIntervalSince1970; timed = card.dueHasTime
+        googleTitle = ev.title; googleStart = ev.start.timeIntervalSince1970; googleTimed = !ev.allDay
+    }
+
+    var json: String { (try? JSONEncoder().encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? "" } // try?-ok: plain fields always encode; "" means no record, the plain rule applies
+    static func decode(_ s: String) throws -> CalendarBaseline? {
+        guard !s.isEmpty, s != pending else { return nil }
+        return try JSONDecoder().decode(CalendarBaseline.self, from: Data(s.utf8))
+    }
+    var dueDate: Date? { due.map { Date(timeIntervalSince1970: $0) } }
+    var googleStartDate: Date { Date(timeIntervalSince1970: googleStart) }
+}
+
+/// Who wins a field that differs between a task and its event.
+enum FieldWinner { case google, board, neither, newer }
 
 extension Store {
     // MARK: Putting a task on the calendar
@@ -207,11 +240,11 @@ extension Store {
 
     func linkedCards() throws -> [LinkedCard] {
         try db.query("""
-            SELECT id, gcal_account, gcal_calendar, gcal_event, gcal_synced_at FROM cards
+            SELECT id, gcal_account, gcal_calendar, gcal_event, gcal_synced_at, gcal_baseline FROM cards
             WHERE deleted=0 AND gcal_event<>'' AND gcal_calendar<>'' ORDER BY id
             """) { s in
             LinkedCard(cardID: DB.int(s, 0), link: EventLink(account: DB.text(s, 1), calendar: DB.text(s, 2), event: DB.text(s, 3)),
-                       syncedAt: DB.date(s, 4))
+                       syncedAt: DB.date(s, 4), baseline: DB.text(s, 5))
         }
     }
 
@@ -241,13 +274,14 @@ extension Store {
         return try resolveCalendar(account)?.1
     }
 
-    /// Tasks linked by the first version have no calendar saved: save it, so nothing else has to special-case them.
+    /// Tasks linked by the first version have no calendar saved: save it, so nothing else has to special-case them. Their
+    /// first sync records both sides instead of changing either (`CalendarBaseline`).
     func backfillOldLinks() throws {
         let old = try db.query("SELECT id, gcal_account, gcal_event FROM cards WHERE deleted=0 AND gcal_event<>'' AND gcal_calendar='' AND gcal_account<>''")
             { (DB.int($0, 0), DB.text($0, 1), DB.text($0, 2)) }
         for (id, account, event) in old {
             guard let cal = try oldLinkCalendar(account: account, event: event) else { continue }
-            try performThrowing { try db.run("UPDATE cards SET gcal_calendar=? WHERE id=?", [cal, id]) }
+            try performThrowing { try db.run("UPDATE cards SET gcal_calendar=?, gcal_baseline=? WHERE id=?", [cal, CalendarBaseline.pending, id]) }
         }
     }
 
@@ -323,16 +357,50 @@ extension Store {
                      [cardID, kind, TaskEventRules.actor.stored]) { DB.date($0, 0) }.first ?? nil
     }
 
+    /// The first sync of a task linked by version 10: records both sides, changes neither, and says once when they differ.
+    private func takeBaseline(_ card: Card, _ ev: CalEvent, now: Date) throws {
+        let differ = (!ev.title.isEmpty && ev.title != card.title) || !Store.sameDue(card.due, card.dueHasTime, ev.start, !ev.allDay)
+        try performThrowing {
+            try db.run("UPDATE cards SET gcal_baseline=?, gcal_synced_at=? WHERE id=?",
+                       [differ ? CalendarBaseline(card: card, event: ev, now: now).json : "", now, card.id])
+        }
+        if differ {
+            activity("calendar", .info, "\(ShortID(kind: .task, number: card.id).text) and its Google event differ; kept both",
+                     detail: "Task: \"\(card.title)\", \(card.due.map { Fmt.due($0, hasTime: card.dueHasTime) } ?? "no due"). "
+                        + "Google: \"\(ev.title)\", \(Fmt.due(ev.start, hasTime: !ev.allDay)). A later change on either side wins.")
+        }
+    }
+
+    /// For a field that differs, given the version-10 record (if any): the side that moved away from it wins; neither moved
+    /// keeps both; both moved (or no record) means the newer change wins.
+    private func winner(_ base: CalendarBaseline?, boardMoved: (CalendarBaseline) -> Bool, googleMoved: (CalendarBaseline) -> Bool) -> FieldWinner {
+        guard let base else { return .newer }
+        switch (boardMoved(base), googleMoved(base)) {
+        case (false, false): return .neither
+        case (true, false): return .board
+        case (false, true): return .google
+        case (true, true): return .newer
+        }
+    }
+
     /// Brings one task and its live event in step. Returns true when something was applied or queued.
     func align(_ card: Card, with ev: CalEvent, link l: LinkedCard, cache: CalendarCache, now: Date) throws -> Bool {
+        if l.baseline == CalendarBaseline.pending { try takeBaseline(card, ev, now: now); return false }
+        var base = try CalendarBaseline.decode(l.baseline)
+        if base != nil, ev.title.isEmpty || ev.title == card.title, Store.sameDue(card.due, card.dueHasTime, ev.start, !ev.allDay) {
+            // The two agree again: the record has done its work.
+            try performThrowing { try db.run("UPDATE cards SET gcal_baseline='' WHERE id=?", [card.id]) }
+            base = nil
+        }
         var did = false
         let gT = ev.googleUpdated
         var patchTitle: String?, patchStart: Date?, patchEnd: Date?, patchDay: String?
 
         // Title.
-        if !ev.title.isEmpty, ev.title != card.title {
+        let titleWinner = winner(base, boardMoved: { $0.title != card.title }, googleMoved: { $0.googleTitle != ev.title })
+        if !ev.title.isEmpty, ev.title != card.title, titleWinner != .neither {
             let boardAt = try lastBoardChange(card.id, "title:%")
-            if boardAt == nil || gT > boardAt! {
+            if titleWinner == .google || (titleWinner == .newer && (boardAt == nil || gT > boardAt!)) {
                 try performThrowing {
                     let old = try currentCard(card.id)?.card
                     try db.run("UPDATE cards SET title=?, updated=? WHERE id=?", [ev.title, now, card.id])
@@ -347,11 +415,13 @@ extension Store {
 
         // Time. A task with no due (cleared on the board) takes Google's time only if Google changed it after that and since we last looked.
         let evTimed = !ev.allDay
-        if !Store.sameDue(card.due, card.dueHasTime, ev.start, evTimed) {
+        let dueWinner = winner(base, boardMoved: { !Store.sameDue($0.dueDate, $0.timed, card.due, card.dueHasTime) },
+                               googleMoved: { !Store.sameDue($0.googleStartDate, $0.googleTimed, ev.start, evTimed) })
+        if !Store.sameDue(card.due, card.dueHasTime, ev.start, evTimed), dueWinner != .neither {
             let boardAt = try lastBoardChange(card.id, "due:%")
-            let googleNewer = boardAt == nil || gT > boardAt!
+            let googleNewer = dueWinner == .google || (dueWinner == .newer && (boardAt == nil || gT > boardAt!))
             if card.due == nil {
-                if googleNewer, l.syncedAt == nil || gT > l.syncedAt! { try applyGoogleTime(card.id, ev, now: now); did = true }
+                if dueWinner == .google || (googleNewer && (l.syncedAt == nil || gT > l.syncedAt!)) { try applyGoogleTime(card.id, ev, now: now); did = true }
             } else if googleNewer {
                 try applyGoogleTime(card.id, ev, now: now); did = true
             } else if let due = card.due {

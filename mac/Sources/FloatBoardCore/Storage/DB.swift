@@ -123,6 +123,8 @@ public final class DB {
             ALTER TABLE cards ADD COLUMN due_has_time INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE cards ADD COLUMN gcal_calendar TEXT NOT NULL DEFAULT '';
             ALTER TABLE cards ADD COLUMN gcal_synced_at REAL;
+            -- A task linked to an event by version 10: what both sides held at the first sync, so that sync changes neither.
+            ALTER TABLE cards ADD COLUMN gcal_baseline TEXT NOT NULL DEFAULT '';
             -- Links between items by visible id (T-142, E-37); stored once, smaller text first.
             CREATE TABLE links(
                 id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,
@@ -194,7 +196,7 @@ public final class DB {
         reply_draft_link TEXT NOT NULL DEFAULT '',
         reply_draft_error TEXT NOT NULL DEFAULT '',
         reply_draft_request TEXT NOT NULL DEFAULT '',
-        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0, gcal_calendar TEXT NOT NULL DEFAULT '', gcal_synced_at REAL
+        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0, gcal_calendar TEXT NOT NULL DEFAULT '', gcal_synced_at REAL, gcal_baseline TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX cards_external_id ON cards(external_id);
     CREATE UNIQUE INDEX cards_source_key ON cards(connector, source_mid, source_sent)

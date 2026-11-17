@@ -111,6 +111,41 @@ import FloatBoardConnectors
         check(wasHeld && !gated.requests.contains { $0.httpMethod == "DELETE" } && store.card(id) != nil && linked == "y1"
               && outbox.rows(unsent: true).isEmpty, "f2_undo_during_a_slow_send_keeps_the_event")
     } catch { check(false, "f2 undo race: \(error)") }
+
+    // F3. Tasks linked to an event by an earlier version: the first sync after the upgrade changes neither side; it notes the
+    //     difference once. From then on the side that changes wins.
+    do {
+        let (store, cache, outbox) = try setup("f3-legacy")
+        let long = Date().addingTimeInterval(-2 * 86400)
+        let id = newTask(store, "Renamed task", due: at(10))
+        // As version 10 left it: the link without a calendar or sync time, and the edit recorded only as "edited".
+        store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='', gcal_event='lg1', gcal_synced_at=NULL WHERE id=\(id)")
+        store.performForTest("DELETE FROM events WHERE card_id=\(id) AND kind<>'created'")
+        store.performForTest("INSERT INTO events(card_id, at, kind, actor, uuid) VALUES(\(id), \(Date().timeIntervalSince1970 - 3600), 'edited', 'user', 'legacy-edit-\(id)')")
+        let cleared = newTask(store, "Cleared due", due: nil)
+        store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='', gcal_event='lg2', gcal_synced_at=NULL WHERE id=\(cleared)")
+        store.reload()
+        cacheEvent(cache, "lg1", "Old title", at(9), at(9, 30), updated: long, fb: id)
+        cacheEvent(cache, "lg2", "Cleared due", at(11), at(11, 30), updated: long, fb: cleared)
+        TaskEventRules.reconcile(store: store, cache: cache, now: Date())
+        TaskEventRules.reconcile(store: store, cache: cache, now: Date().addingTimeInterval(60))
+        let a = store.card(id), b = store.card(cleared)
+        let notes = store.recentActivity(limit: 50).filter { $0.message.contains("differ; kept both") }
+        check(a?.title == "Renamed task" && a?.due == at(10) && b?.due == nil && outbox.rows(unsent: true).isEmpty,
+              "f3_first_sync_after_upgrade_changes_neither_side")
+        check(notes.count == 2 && notes.contains { $0.message.hasPrefix("T-\(id) ") } && notes.allSatisfy { $0.level == .info },
+              "f3_difference_noted_once_per_task")
+        // Google renames the event later: that newer change wins, and the task keeps its own time.
+        cacheEvent(cache, "lg1", "Google title", at(9), at(9, 30), updated: Date().addingTimeInterval(120), fb: id)
+        TaskEventRules.reconcile(store: store, cache: cache, now: Date().addingTimeInterval(180))
+        check(store.card(id)?.title == "Google title" && store.card(id)?.due == at(10) && outbox.rows(unsent: true).isEmpty,
+              "f3_later_google_change_wins")
+        // The board moves the task later: that newer change goes to Google.
+        if var c = store.card(id) { c.due = at(14); store.update(c, now: Date().addingTimeInterval(240)) }
+        var moved = false
+        if case .patch(_, _, let s?, _, _)? = outbox.rows(unsent: true).first?.write { moved = s == at(14) }
+        check(moved, "f3_later_board_change_wins")
+    } catch { check(false, "f3 legacy: \(error)") }
 }
 
 /// A Google event as the API returns it.

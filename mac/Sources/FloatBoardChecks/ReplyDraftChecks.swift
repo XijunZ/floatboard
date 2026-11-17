@@ -138,8 +138,8 @@ private func draftProposal(id: String, mid: String, sent: String = "2026-11-07T1
         let backupVersion = backup.map { rows($0.url, "PRAGMA user_version") } ?? []
         check(opened.store != nil && opened.backedUp && backupVersion == [["7"]] && boardFacts(v7) == before
               && integrity(v7) == "ok" && rows(v7, "PRAGMA user_version") == [[String(DB.schemaVersion)]]
-              && Array(cols.suffix(12).prefix(5)) == draftColumns
-              && Array(cols.suffix(7)) == ["watch_person", "watch_contact", "watch_since", "due_day", "due_has_time", "gcal_calendar", "gcal_synced_at"]
+              && Array(cols.suffix(13).prefix(5)) == draftColumns
+              && Array(cols.suffix(8)) == ["watch_person", "watch_contact", "watch_since", "due_day", "due_has_time", "gcal_calendar", "gcal_synced_at", "gcal_baseline"]
               && rows(v7, "SELECT watch_person, watch_contact, watch_since FROM cards WHERE id=2") == [["", "", nil]]
               && rows(v7, "SELECT reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at FROM cards WHERE id=2")
                 == [[nil, "", "", "", nil]]
