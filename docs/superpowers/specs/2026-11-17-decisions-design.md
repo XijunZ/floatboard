@@ -122,9 +122,9 @@ ones without expected outcome or confidence show "Add expected outcome and confi
 (20) "Maybe" (Record / Not a decision), `decisions.reviews` (30) "Decision reviews due" (Review → the review sheet).
 Rows with buttons need a row view: foundation extension `WeeklyReviewRows` (§9).
 
-**Reviews:** due = recorded + 30 / 90 / 180 days (operational / strategic / investment), once each. A 15-minute timer asks
-the shared budget (`ReminderKind.decisionReview`) for each due review whose `review_ask_after` has passed: granted or
-duplicate → ask again tomorrow if still unanswered; deferred → ask from `until`. Snooze = due + 7 days; Turn off per
+**Reviews:** due = recorded + 30 / 90 / 180 days (operational / strategic / investment), once each. A 10-minute timer asks
+the shared budget (`ReminderKind.decisionReview`) for each due review not yet reminded: one reminder per review (granted
+once; then it stays on the weekly review page until answered, snoozed or turned off); deferred → ask from `until`. Snooze = due + 7 days; Turn off per
 decision. The review sheet shows the original card with its expected outcome beside it and asks **What happened?** and
 **Was the thinking sound?**; the answer is saved through `JotStore.create` as a jot (`Review of D-n · <decision>` then
 the two answers), linked `review-of` (auto), and the decision is marked reviewed. Text in the sheet and in saved reviews is

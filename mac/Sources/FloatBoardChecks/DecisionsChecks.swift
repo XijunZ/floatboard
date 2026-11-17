@@ -217,7 +217,8 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
     check(g.count == 1 && { if case .granted = g[0] { return true }; return false }()
           && ReminderBudget(store: s).pending().contains { $0.kind == ReminderKind.decisionReview.rawValue && $0.item == d.shortID.text },
           "due_review_asks_the_shared_budget")
-    check(DecisionReviews.askBudget(store: s, now: decisionsNow.addingTimeInterval(900)).isEmpty, "review_asked_once_a_day")
+    check(DecisionReviews.askBudget(store: s, now: decisionsNow.addingTimeInterval(900)).isEmpty
+          && DecisionReviews.askBudget(store: s, now: decisionsNow.addingTimeInterval(3 * 86400)).isEmpty, "review_reminded_once")
     // Over the limit: deferred, asked again then.
     let full = decisionsStore(root, "reviews-full.sqlite")!
     ReminderBudget(store: full).save(ReminderSettings(dailyLimit: 0, quietStart: 22 * 60, quietEnd: 8 * 60))

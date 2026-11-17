@@ -15,8 +15,9 @@ import Foundation
     /// The reminder's words.
     public static func reminderText(_ d: Decision) -> String { "Review \(d.shortID.text): \(d.text) — what happened?" }
 
-    /// Asks the shared budget for each due review whose next ask has come (called every 15 minutes while Decisions is on).
-    /// Granted or already granted today: ask again tomorrow if still unanswered. Over the limit or quiet hours: ask from then.
+    /// Asks the shared budget for each due review not yet reminded (checked every 10 minutes while Decisions is on). One
+    /// reminder per review ("once each"): once granted it is not asked again; the review then stays on the weekly review page
+    /// until answered, snoozed (which reminds once more) or turned off. Over the day's limit or in quiet hours: asked again then.
     @discardableResult
     public static func askBudget(store: Store, now: Date = Date()) -> [ReminderGrant] {
         guard store.isOn(.decisions) else { return [] }
@@ -27,14 +28,16 @@ import Foundation
             out.append(g)
             let next: Date
             switch g {
-            case .granted, .duplicate:
-                next = AppTime.calendar.date(byAdding: .day, value: 1, to: AppTime.calendar.startOfDay(for: now)) ?? now.addingTimeInterval(86400)
+            case .granted, .duplicate: next = remindedMark
             case .deferred(let until): next = until
             }
             store.perform { try store.db.run("UPDATE decisions SET review_ask_after=? WHERE id=?", [next, d.id]) }
         }
         return out
     }
+
+    /// `review_ask_after` once the review's reminder was granted: never asked again (until a snooze clears it).
+    static let remindedMark = Date(timeIntervalSince1970: 32_503_680_000)   // year 3000
 
     /// The review jot's text: a heading naming the decision, then the two answers.
     public static func reviewText(_ d: Decision, happened: String, sound: String) -> String {
