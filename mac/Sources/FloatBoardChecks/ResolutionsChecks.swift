@@ -19,6 +19,7 @@ import SQLite3
     resolutionReviewChecks(root)
     resolutionNudgeChecks(root)
     resolutionSearchPhoneChecks(root)
+    resolutionTypedIDKeepsLinksChecks(root)
 }
 
 /// 12:00 on a day in the app's zone.
@@ -334,3 +335,25 @@ private func makeV12Schema(_ url: URL) -> Bool {
     check(PhoneBoard.extras(store: store, now: now).goals == nil && GlobalSearch.run("studio", store: store).allSatisfy { $0.0 != .resolution },
           "goals_hidden_while_area_off")
 }
+
+// MARK: Codex review fixes
+
+/// RS-A: typing an id never replaces a link the two items already have (a reviewed goal keeps its record).
+@MainActor private func resolutionTypedIDKeepsLinksChecks(_ root: URL) {
+    guard let store = goalsStore(root, "typed.sqlite") else { return }
+    let r = ResolutionStore(store: store)
+    guard let q = make(r, .quarter, "2026-Q4", "Reviewed later") else { return }
+    let t = task(store, "Served the goal", done: true)
+    _ = r.linkWork(t, to: q.id, now: nov17)
+    _ = r.review(q.id, outcome: .dropped, note: "", newTitle: nil, now: nov17)
+    if var c = store.card(t.number) { c.notes = "This was for \(q.shortID.text)"; store.update(c, now: nov17) }
+    check(store.itemLinks(of: t).first { $0.other == q.shortID }?.kind == .serves && r.progress(q.id).done == [t.number],
+          "typed_reviewed_goal_id_keeps_serves_link")
+    // Generic: a jot made from a task keeps its `source` link when the task's id is typed into it.
+    let t2 = task(store, "Source task")
+    guard let j = JotStore(store: store).create(text: "Notes", now: nov17) else { check(false, "typed jot"); return }
+    store.link(j.shortID, t2, kind: .source, actor: .user, now: nov17)
+    JotStore(store: store).update(j.id, text: "Notes about \(t2.text)", now: nov17)
+    check(store.itemLinks(of: j.shortID).first { $0.other == t2 }?.kind == .source, "typed_id_never_replaces_another_link_kind")
+}
+
