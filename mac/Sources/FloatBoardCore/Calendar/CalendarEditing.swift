@@ -39,8 +39,11 @@ public enum EventPanelEdit {
     }
 
     /// What to send when the panel closes. `title` is set only when the user changed the title field; `move` only when they
-    /// changed the day or a time and the result differs from the event. A new start alone keeps the event's length (like a
-    /// drag); a new end keeps the day the end was on relative to the start (an overnight event still ends the next day).
+    /// changed the day or a time and the result differs from the event. `event` is the event as it is now (Google may have
+    /// changed it while the panel was open): the day, the start time and the end time each come from the panel only when the
+    /// user changed that field, else from `event`. A new start alone keeps the event's length (like a drag); a new end keeps
+    /// the day the end was on relative to the start (an overnight event still ends the next day). Only the end changed: the
+    /// start stays exactly the event's, so the move is an end-only change.
     public static func changes(event: CalEvent, opened: Fields, now: Fields) -> (title: String?, move: (start: Date, end: Date)?) {
         var title: String?
         let t = now.title.trimmingCharacters(in: .whitespaces)
@@ -50,11 +53,13 @@ public enum EventPanelEdit {
         let startChanged = !sameClock(now.start, opened.start), endChanged = !sameClock(now.end, opened.end)
         guard dayChanged || startChanged || endChanged else { return (title, nil) }
         let c = AppTime.calendar
-        let s = on(now.day, now.start)
+        let day = dayChanged ? now.day : event.start
+        let startClock = startChanged ? now.start : event.start
+        let s = dayChanged || startChanged ? on(day, startClock) : event.start
         let e: Date
         if endChanged {
             let offset = c.dateComponents([.day], from: c.startOfDay(for: event.start), to: c.startOfDay(for: event.end)).day ?? 0
-            e = span(day: now.day, start: now.start, end: now.end, endDayOffset: offset).end
+            e = span(day: day, start: s, end: now.end, endDayOffset: offset).end
         } else {
             e = s.addingTimeInterval(event.end.timeIntervalSince(event.start))
         }
@@ -71,7 +76,8 @@ extension Store {
 
     /// The calendar screen moved or resized `e`. A new start on an event made from a task goes through the task (its due moves
     /// and the event follows, the same path as a drag); a new end alone only patches the event's end, because an event's length
-    /// lives in Google, not on the task (D10). Anything else is a plain patch. Returns true when a change was queued.
+    /// lives in Google, not on the task (D10). Anything else is a plain patch, with only the end when the start is unchanged.
+    /// Returns true when a change was queued.
     @discardableResult
     public func moveCalendarEvent(_ e: CalEvent, start: Date, end: Date, now: Date = Date()) -> Bool {
         let outbox = CalendarOutbox(store: self)
@@ -89,6 +95,7 @@ extension Store {
             }
             return queued
         }
+        if start == e.start { return patchEnd() }
         return !outbox.enqueue(.patch(eventID: e.eventID, title: nil, start: start, end: end, allDayStart: nil),
                                account: e.account, calendarID: e.calendarID, now: now).isEmpty
     }

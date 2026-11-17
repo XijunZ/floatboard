@@ -53,6 +53,9 @@ struct NewEventDraft: Identifiable {
         return e
     }
 
+    /// The event as saved now (a sync may have changed it since `e` was read), with a change still waiting applied.
+    func current(_ e: CalEvent) -> CalEvent { shown(cache?.event(shortID: e.shortID) ?? e) }
+
     /// The task an event was made from, if any.
     func linkedTask(_ e: CalEvent) -> Card? { store?.linkedTask(of: e) }
 
