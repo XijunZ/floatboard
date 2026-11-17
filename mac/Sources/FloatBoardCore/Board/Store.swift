@@ -12,14 +12,9 @@ public final class Store: ObservableObject {
     @Published public private(set) var connectors: [ConnectorInfo] = []
     @Published public var lastError: String?
     /// The most recently deleted task (Undo bar and Edit → Undo Delete); cleared by undo or the next app start.
-    @Published public private(set) var lastDeleted: DeletedTask?
-    /// The outbox row that delete queued, so undo can take it back before it is sent.
-    private var lastDeletedOutbox: String?
-    /// The links delete took off that task, so undo can put back exactly those.
-    private var lastDeletedLinks: [StoredLink] = []
-    /// The Google event queued for deletion with that task and the calendar outbox row that deletes it, so undo can take the
-    /// delete back (or, once sent, make the event again).
-    private var lastDeletedEvent: (link: EventLink, row: String)?
+    @Published public internal(set) var lastDeleted: DeletedTask?
+    /// What recent deletes took away, by task (`DeleteMemo`), so undo or a phone restore can put back exactly that.
+    var deleteMemos: [Int64: DeleteMemo] = [:]
     /// What the health watchdog last found (set by `Health.refresh`); the bar warning reads this and nothing else.
     @Published public internal(set) var healthProblems: [HealthProblem] = []
     public let db: DB
@@ -250,34 +245,53 @@ public final class Store: ObservableObject {
     /// `not_action` / `wrong_details` / `duplicate`, a correction) in the same transaction. The engine learns from the
     /// first two; `duplicate` is only logged there.
     public func deleteCard(_ card: Card, verdict: String?, now: Date = Date()) {
-        var done: (DeletedTask, String?, [StoredLink], (link: EventLink, row: String)?)?
-        perform {
-            guard let cur = try currentCard(card.id), !cur.deleted else { return }
-            try db.run("UPDATE cards SET deleted=1, updated=? WHERE id=?", [now, card.id])
-            try log(card.id, "deleted", cur.card.status, nil, now)
-            let uuid = try queueOutbox(cur.card, kind: .deleted, verdict: verdict, now: now)
-            let links = try removeLinks(of: ShortID(kind: .task, number: card.id))
-            let event = try queueCalendarDelete(cardID: card.id, now: now)   // the event FloatBoard made for it goes too (D8)
-            done = (DeletedTask(id: card.id, title: cur.card.title, at: now), uuid, links, event)
-        }
-        if let done { lastDeleted = done.0; lastDeletedOutbox = done.1; lastDeletedLinks = done.2; lastDeletedEvent = done.3 }
+        var done: DeleteMemo?
+        perform { done = try deleteCardRow(card.id, verdict: verdict, now: now) }
+        if let done { remember(done); lastDeleted = done.task }
+    }
+
+    /// The body of `deleteCard`, for callers already inside a transaction (the phone's `delete`). Nil when the task is
+    /// not there or already deleted.
+    func deleteCardRow(_ id: Int64, verdict: String?, now: Date) throws -> DeleteMemo? {
+        guard let cur = try currentCard(id), !cur.deleted else { return nil }
+        try db.run("UPDATE cards SET deleted=1, updated=? WHERE id=?", [now, id])
+        try log(id, "deleted", cur.card.status, nil, now)
+        let uuid = try queueOutbox(cur.card, kind: .deleted, verdict: verdict, now: now)
+        let links = try removeLinks(of: ShortID(kind: .task, number: id))
+        let event = try queueCalendarDelete(cardID: id, now: now)   // the event FloatBoard made for it goes too (D8)
+        return DeleteMemo(task: DeletedTask(id: id, title: cur.card.title, at: now), outbox: uuid, links: links, event: event)
+    }
+
+    /// Keeps what a delete took away (the last 50 deletes, from the Mac or the phone), so undo or a phone restore can put
+    /// it back exactly.
+    func remember(_ m: DeleteMemo) {
+        deleteMemos[m.task.id] = m
+        if deleteMemos.count > 50, let oldest = deleteMemos.values.min(by: { $0.task.at < $1.task.at }) { deleteMemos[oldest.task.id] = nil }
     }
 
     /// Brings the last deleted task back where it was. A delete not yet sent to its connector is taken back with its
     /// lesson; one already sent stays sent (a plain delete changes nothing there; a "teach" lesson is kept).
     public func undoDelete(now: Date = Date()) {
         guard let d = lastDeleted else { return }
-        let outbox = lastDeletedOutbox
-        let links = lastDeletedLinks
-        let event = lastDeletedEvent
-        perform {
-            guard let row = try db.query("SELECT status, deleted FROM cards WHERE id=?", [d.id], {
-                (Status(rawValue: DB.text($0, 0)) ?? .todo, DB.int($0, 1) != 0) }).first, row.1 else { return }
-            try db.run("UPDATE cards SET deleted=0, updated=? WHERE id=?", [now, d.id])
-            try log(d.id, "restored", nil, row.0, now)
-            try restoreLinks(links)
-            if let event { try undoCalendarDelete(cardID: d.id, target: event.link, row: event.row, now: now) }
-            if let uuid = outbox {
+        let memo = deleteMemos[d.id]
+        perform { _ = try restoreCardRow(d.id, memo: memo, now: now) }
+        lastDeleted = nil; deleteMemos[d.id] = nil
+    }
+
+    /// The body of a restore (Undo Delete, or the phone's `restore`), inside a transaction. With what the delete took away
+    /// (`memo`): the same links come back, an unsent connector delete is taken back with its lesson, and the calendar event
+    /// is kept or made again (`undoCalendarDelete`). Without it (the app was restarted since): the task comes back and its
+    /// event's latest queued delete is taken back the same way; the connector, if it was told, stays told.
+    /// Returns false when the task is not deleted (nothing to do).
+    func restoreCardRow(_ id: Int64, memo: DeleteMemo?, now: Date) throws -> Bool {
+        guard let row = try db.query("SELECT status, deleted FROM cards WHERE id=?", [id], {
+            (Status(rawValue: DB.text($0, 0)) ?? .todo, DB.int($0, 1) != 0) }).first, row.1 else { return false }
+        try db.run("UPDATE cards SET deleted=0, updated=? WHERE id=?", [now, id])
+        try log(id, "restored", nil, row.0, now)
+        if let memo {
+            try restoreLinks(memo.links)
+            if let event = memo.event { try undoCalendarDelete(cardID: id, target: event.link, row: event.row, now: now) }
+            if let uuid = memo.outbox {
                 let unsent = try db.query("SELECT count(*) FROM outbox WHERE uuid=? AND sent IS NULL", [uuid]) { DB.int($0, 0) }.first ?? 0
                 if unsent > 0 && !outboxInFlight.contains(uuid) {
                     try db.run("DELETE FROM outbox WHERE uuid=?", [uuid])
@@ -287,8 +301,12 @@ public final class Store: ObservableObject {
                     activity("outbox", .info, "Delete undone; the connector had already been told", trace: uuid)
                 }
             }
+        } else if let t = try eventTarget(id), let deleteRow = try db.query("""
+            SELECT uuid FROM cal_outbox WHERE kind='delete' AND account=? AND calendar_id=? AND event_id=? ORDER BY created DESC, rowid DESC LIMIT 1
+            """, [t.account, t.calendar, t.event], { DB.text($0, 0) }).first {
+            try undoCalendarDelete(cardID: id, target: t, row: deleteRow, now: now)
         }
-        lastDeleted = nil; lastDeletedOutbox = nil; lastDeletedLinks = []; lastDeletedEvent = nil
+        return true
     }
 
     /// Hide the Undo bar (the menu item still works until the next delete).
@@ -686,6 +704,16 @@ public enum ReplyDraftRequestError: Error, Equatable, CustomStringConvertible {
 }
 
 /// The last deleted task, for undo.
+/// What one delete took away: the connector outbox row it queued (undo takes it back before it is sent), the links it
+/// took off the task, and the Google event queued for deletion with the calendar outbox row that deletes it (undo takes the
+/// delete back, or once sent, makes the event again).
+struct DeleteMemo {
+    var task: DeletedTask
+    var outbox: String?
+    var links: [StoredLink]
+    var event: (link: EventLink, row: String)?
+}
+
 public struct DeletedTask: Equatable {
     public let id: Int64
     public let title: String
