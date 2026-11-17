@@ -31,7 +31,7 @@ func circleDay(_ day: Int, _ h: Int = 12, month: Int = 11) -> Date {
 }
 
 @MainActor private func circleSchemaChecks(_ root: URL) {
-    check(DB.schemaVersion == 14, "circle_schema_version_14")
+    check(DB.schemaVersion >= 14, "circle_schema_version_at_least_14")
     guard let s = circleStore(root, "schema.sqlite") else { return }
     let tables = Set(((try? s.db.query("SELECT name FROM sqlite_master WHERE type='table'") { DB.text($0, 0) }) ?? [])) // try?-ok: empty fails the check
     check(["circle_people", "person_handles", "circle_exchanges", "circle_channels", "circle_merges", "circle_candidates",

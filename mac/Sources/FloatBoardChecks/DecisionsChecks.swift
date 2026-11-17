@@ -38,7 +38,7 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
 // MARK: Schema
 
 @MainActor private func decisionSchemaChecks(_ root: URL) {
-    check(DB.schemaVersion == 15, "decisions_schema_version_is_15")
+    check(DB.schemaVersion >= 15, "decisions_schema_version_at_least_15")
     guard let s = decisionsStore(root, "schema.sqlite") else { return }
     let cols = (try? s.db.query("PRAGMA table_info(decisions)") { DB.text($0, 1) }) ?? [] // try?-ok: empty fails the check
     check(["text", "quote", "source_item", "recorded", "decided", "expected_added", "confidence_added", "found_by", "review_due",

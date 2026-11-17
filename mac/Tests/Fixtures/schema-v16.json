@@ -25,6 +25,24 @@
   ],
   [
     "index",
+    "circle_exchanges_handle",
+    "circle_exchanges",
+    "CREATE INDEX circle_exchanges_handle ON circle_exchanges(handle_kind, handle, at)"
+  ],
+  [
+    "index",
+    "circle_updates_person",
+    "circle_updates",
+    "CREATE INDEX circle_updates_person ON circle_updates(person_id, found)"
+  ],
+  [
+    "index",
+    "decisions_recorded",
+    "decisions",
+    "CREATE INDEX decisions_recorded ON decisions(recorded)"
+  ],
+  [
+    "index",
     "events_card",
     "events",
     "CREATE INDEX events_card ON events(card_id)"
@@ -61,9 +79,27 @@
   ],
   [
     "index",
+    "jots_origin",
+    "jots",
+    "CREATE UNIQUE INDEX jots_origin ON jots(origin) WHERE origin<>''"
+  ],
+  [
+    "index",
+    "jots_task",
+    "jots",
+    "CREATE INDEX jots_task ON jots(task_id)"
+  ],
+  [
+    "index",
     "links_to",
     "links",
     "CREATE INDEX links_to ON links(to_type, to_id)"
+  ],
+  [
+    "index",
+    "person_handles_person",
+    "person_handles",
+    "CREATE INDEX person_handles_person ON person_handles(person_id)"
   ],
   [
     "index",
@@ -115,6 +151,36 @@
   ],
   [
     "index",
+    "sqlite_autoindex_circle_candidates_1",
+    "circle_candidates",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_circle_channels_1",
+    "circle_channels",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_circle_dismissed_1",
+    "circle_dismissed",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_circle_exchanges_1",
+    "circle_exchanges",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_circle_updates_1",
+    "circle_updates",
+    null
+  ],
+  [
+    "index",
     "sqlite_autoindex_connector_archive_1",
     "connector_archive",
     null
@@ -133,8 +199,32 @@
   ],
   [
     "index",
+    "sqlite_autoindex_decision_screened_1",
+    "decision_screened",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_decision_suggestions_1",
+    "decision_suggestions",
+    null
+  ],
+  [
+    "index",
     "sqlite_autoindex_item_tags_1",
     "item_tags",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_jot_suggestions_1",
+    "jot_suggestions",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_linkedin_rows_1",
+    "linkedin_rows",
     null
   ],
   [
@@ -157,8 +247,20 @@
   ],
   [
     "index",
+    "sqlite_autoindex_officer_candidates_1",
+    "officer_candidates",
+    null
+  ],
+  [
+    "index",
     "sqlite_autoindex_outbox_1",
     "outbox",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_person_handles_1",
+    "person_handles",
     null
   ],
   [
@@ -217,6 +319,48 @@
   ],
   [
     "table",
+    "circle_candidates",
+    "circle_candidates",
+    "CREATE TABLE circle_candidates(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,\n    handles TEXT NOT NULL DEFAULT '[]', company TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'new',\n    added REAL NOT NULL\n)"
+  ],
+  [
+    "table",
+    "circle_channels",
+    "circle_channels",
+    "CREATE TABLE circle_channels(\n    channel TEXT PRIMARY KEY, as_of REAL, complete_from REAL, cursor TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT ''\n)"
+  ],
+  [
+    "table",
+    "circle_dismissed",
+    "circle_dismissed",
+    "CREATE TABLE circle_dismissed(key TEXT PRIMARY KEY, at REAL NOT NULL)"
+  ],
+  [
+    "table",
+    "circle_exchanges",
+    "circle_exchanges",
+    "CREATE TABLE circle_exchanges(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL, direction TEXT NOT NULL, at REAL NOT NULL, handle_kind TEXT NOT NULL,\n    handle TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', key TEXT NOT NULL UNIQUE, ref TEXT NOT NULL DEFAULT '',\n    ignored INTEGER NOT NULL DEFAULT 0, added REAL NOT NULL\n)"
+  ],
+  [
+    "table",
+    "circle_merges",
+    "circle_merges",
+    "CREATE TABLE circle_merges(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, kept INTEGER NOT NULL, merged INTEGER NOT NULL, moved TEXT NOT NULL, auto INTEGER NOT NULL,\n    at REAL NOT NULL, split REAL\n)"
+  ],
+  [
+    "table",
+    "circle_people",
+    "circle_people",
+    "CREATE TABLE circle_people(\n    person_id INTEGER PRIMARY KEY, how_known TEXT NOT NULL DEFAULT '', company TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '',\n    birthday TEXT NOT NULL DEFAULT '', language TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',\n    interval_days INTEGER, firm TEXT NOT NULL DEFAULT '', focus TEXT NOT NULL DEFAULT '', purpose TEXT NOT NULL DEFAULT '',\n    stage TEXT NOT NULL DEFAULT '', stage_at REAL, snoozed_until REAL, reminded_at REAL, reminder_task INTEGER,\n    updates_on INTEGER NOT NULL DEFAULT 0, news_muted INTEGER NOT NULL DEFAULT 0, feed_url TEXT NOT NULL DEFAULT '',\n    officer_id TEXT NOT NULL DEFAULT '', officer_name TEXT NOT NULL DEFAULT '', officer_confirmed REAL, manual_checked REAL\n)"
+  ],
+  [
+    "table",
+    "circle_updates",
+    "circle_updates",
+    "CREATE TABLE circle_updates(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL,\n    detail TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', at REAL, found REAL NOT NULL, match TEXT NOT NULL DEFAULT 'possible',\n    verdict TEXT NOT NULL DEFAULT ''\n)"
+  ],
+  [
+    "table",
     "connector_archive",
     "connector_archive",
     "CREATE TABLE connector_archive(\n    id TEXT NOT NULL, removed_at REAL NOT NULL, name TEXT, base_url TEXT, settings_json TEXT,\n    settings_version INTEGER, restored_at REAL, PRIMARY KEY(id, removed_at)\n)"
@@ -232,6 +376,30 @@
     "corrections",
     "corrections",
     "CREATE TABLE corrections(\n    uuid TEXT PRIMARY KEY, connector TEXT, source_mid TEXT, source_sent TEXT,\n    proposed_json TEXT, verdict TEXT, detail TEXT, at REAL\n)"
+  ],
+  [
+    "table",
+    "decision_examples",
+    "decision_examples",
+    "CREATE TABLE decision_examples(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, decision_id INTEGER NOT NULL, text TEXT NOT NULL, created REAL NOT NULL, applied REAL,\n    connector TEXT NOT NULL DEFAULT ''\n)"
+  ],
+  [
+    "table",
+    "decision_screened",
+    "decision_screened",
+    "CREATE TABLE decision_screened(\n    jot_id INTEGER NOT NULL, version TEXT NOT NULL, screened REAL NOT NULL, found INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(jot_id, version)\n)"
+  ],
+  [
+    "table",
+    "decision_suggestions",
+    "decision_suggestions",
+    "CREATE TABLE decision_suggestions(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, decision_id INTEGER NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,\n    text TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'open', created REAL NOT NULL, UNIQUE(decision_id, kind, target)\n)"
+  ],
+  [
+    "table",
+    "decisions",
+    "decisions",
+    "CREATE TABLE decisions(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, quote TEXT NOT NULL DEFAULT '', source_item TEXT NOT NULL DEFAULT '',\n    source_kind TEXT NOT NULL DEFAULT '', recorded REAL NOT NULL, decided TEXT NOT NULL DEFAULT '', why TEXT NOT NULL DEFAULT '',\n    expected TEXT NOT NULL DEFAULT '', expected_added REAL, confidence TEXT NOT NULL DEFAULT '', confidence_added REAL,\n    alternatives TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT 'operational', status TEXT NOT NULL DEFAULT 'decided',\n    found_by TEXT NOT NULL DEFAULT 'you', source TEXT NOT NULL DEFAULT 'typed', review_state TEXT NOT NULL DEFAULT 'scheduled',\n    review_due REAL, review_ask_after REAL, reviewed REAL, not_decision INTEGER NOT NULL DEFAULT 0,\n    added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n)"
   ],
   [
     "table",
@@ -259,9 +427,39 @@
   ],
   [
     "table",
+    "jot_meetings",
+    "jot_meetings",
+    "CREATE TABLE jot_meetings(\n    jot_id INTEGER PRIMARY KEY, recap_key TEXT NOT NULL, fathom_url TEXT NOT NULL DEFAULT '', meeting_url TEXT NOT NULL DEFAULT '',\n    title TEXT NOT NULL DEFAULT '', scheduled_start REAL, invitees TEXT NOT NULL DEFAULT '[]',\n    matched_by TEXT NOT NULL DEFAULT '', received REAL NOT NULL\n)"
+  ],
+  [
+    "table",
+    "jot_suggestions",
+    "jot_suggestions",
+    "CREATE TABLE jot_suggestions(\n    jot_id INTEGER NOT NULL, tag TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'open', at REAL NOT NULL, PRIMARY KEY(jot_id, tag)\n)"
+  ],
+  [
+    "table",
+    "jot_sync",
+    "jot_sync",
+    "CREATE TABLE jot_sync(jot_id INTEGER PRIMARY KEY, pushed REAL, tags_asked INTEGER NOT NULL DEFAULT 0)"
+  ],
+  [
+    "table",
     "jots",
     "jots",
-    "CREATE TABLE jots(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'jot',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n)"
+    "CREATE TABLE jots(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'jot',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n, task_id INTEGER, origin TEXT NOT NULL DEFAULT '')"
+  ],
+  [
+    "table",
+    "linkedin_imports",
+    "linkedin_imports",
+    "CREATE TABLE linkedin_imports(id INTEGER PRIMARY KEY AUTOINCREMENT, export_date TEXT NOT NULL, imported REAL NOT NULL, rows INTEGER NOT NULL)"
+  ],
+  [
+    "table",
+    "linkedin_rows",
+    "linkedin_rows",
+    "CREATE TABLE linkedin_rows(\n    import_id INTEGER NOT NULL, url TEXT NOT NULL, name TEXT NOT NULL, company TEXT NOT NULL, position TEXT NOT NULL,\n    PRIMARY KEY(import_id, url)\n)"
   ],
   [
     "table",
@@ -283,6 +481,12 @@
   ],
   [
     "table",
+    "officer_candidates",
+    "officer_candidates",
+    "CREATE TABLE officer_candidates(\n    person_id INTEGER NOT NULL, officer_id TEXT NOT NULL, name TEXT NOT NULL, born TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '',\n    found REAL NOT NULL, PRIMARY KEY(person_id, officer_id)\n)"
+  ],
+  [
+    "table",
     "outbox",
     "outbox",
     "CREATE TABLE outbox(\n    uuid TEXT PRIMARY KEY, connector TEXT, kind TEXT, payload_json TEXT, created REAL,\n    attempts INTEGER DEFAULT 0, next_try REAL, last_error TEXT, sent REAL\n, detached INTEGER NOT NULL DEFAULT 0, detach_reason TEXT NOT NULL DEFAULT '')"
@@ -292,6 +496,12 @@
     "people",
     "people",
     "CREATE TABLE people(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, aliases TEXT NOT NULL DEFAULT '[]', tier TEXT NOT NULL DEFAULT 'network',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n)"
+  ],
+  [
+    "table",
+    "person_handles",
+    "person_handles",
+    "CREATE TABLE person_handles(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL, added REAL NOT NULL,\n    UNIQUE(kind, value)\n)"
   ],
   [
     "table",
@@ -322,6 +532,18 @@
     "cal_events_keep",
     "cal_events",
     "CREATE TRIGGER cal_events_keep AFTER UPDATE ON cal_events WHEN NEW.gone=0 AND EXISTS (SELECT 1 FROM cal_kept WHERE short_id=NEW.short_id) BEGIN\n    UPDATE cal_kept SET title=NEW.title, start=NEW.start, \"end\"=NEW.\"end\", all_day=NEW.all_day, video_link=NEW.video_link WHERE short_id=NEW.short_id;\nEND"
+  ],
+  [
+    "trigger",
+    "jots_task_note_deleted",
+    "jots",
+    "CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN\n    UPDATE cards SET notes=CASE WHEN NEW.deleted=1 THEN '' ELSE NEW.text END, updated=NEW.updated WHERE id=NEW.task_id;\nEND"
+  ],
+  [
+    "trigger",
+    "jots_task_note_text",
+    "jots",
+    "CREATE TRIGGER jots_task_note_text AFTER UPDATE OF text ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted=0 BEGIN\n    UPDATE cards SET notes=NEW.text, updated=NEW.updated WHERE id=NEW.task_id AND notes<>NEW.text;\nEND"
   ],
   [
     "trigger",

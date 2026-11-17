@@ -40,7 +40,9 @@ import FloatBoardCore
     // The editor saves a group change through update().
     var edited = c; edited.area = "Personal"
     store.update(edited, now: t0)
-    check(store.tagsChangedAt(c.id) == t0, "editor_group_change_stamps_tags")
+    // Within a millisecond: the stamp is stored as seconds since 1970 text, and Date keeps seconds since 2001, so an exact
+    // comparison failed whenever the conversion rounded the last bit.
+    check(abs((store.tagsChangedAt(c.id) ?? .distantPast).timeIntervalSince(t0)) < 0.001, "editor_group_change_stamps_tags")
     // A phone tag edit made before that loses.
     let r = store.applyPhoneActions([PhoneAction(id: "r1a", clientID: "r1-tags-a", cardID: c.id, action: "set_tags", madeAt: t0 - 60, tags: ["Work"])],
                                     connector: "ph", now: t0 + 1)
