@@ -182,8 +182,8 @@ Migration `0029_board_log.sql`: `board_log`; `phone_actions` gains `client_id` (
   the step is unchanged, else the push time. Each push is compared with the last one: step changes, new cards and gone
   cards are logged (device "mac"); the first push is the baseline. Waiting phone moves older than a card's new
   `status_at` are marked taken (the Mac already shows that step) or superseded.
-  `events` (optional, at most 50, today and tomorrow) are `{ id: "E-37", title, start, end, all_day, video (https or null), color, tasks: [card ids] }`;
-  `time_zone` is the Mac's zone, so the phone's Today list shows the Mac's times. Both are stored in the encrypted copy and returned by `GET /app/api/board`.
+  `events` (optional, at most 200, today through the end of next week) are `{ id: "E-37", title, start, end, all_day, video (https or null), color, tasks: [card ids], series?, repeat? }`;
+  `time_zone` is the Mac's zone, so the phone's planning summary shows the Mac's times. Both are stored in the encrypted copy and returned by `GET /app/api/board`.
 - `POST /app/api/action` `{ sent_at?, actions: [{ id, made_at?, card_id?, action, title?, group? }] }` (1 to 100; body
   at most 64 KB; the older single action still works). Times are corrected by `received_at - sent_at` (ignored past
   7 days) and never later than `received_at`. A repeated id is accepted and not stored again. A move older than the
@@ -375,7 +375,7 @@ Deploy order: migrations 0031 and 0032 (`npm run migrate:remote`), then the engi
 sends no `email` marker (the phone then offers Link an email only on tasks without an email link); a newer Mac
 against an older engine says "Update the engine first" when searching.
 
-### Built: Today list (Calendar, Nov 2026)
+### Built: Today list (Calendar, Nov 2026; replaced by the planning summary below)
 
 The phone shows a **Today** list above the board: today's meetings (time, title, a **Join** button when there is a
 video link) and the tasks due today. It is read only. The phone has no calendar access of its own: the Mac puts the
@@ -394,3 +394,24 @@ events in the board copy it already sends.
 - Deploy order: engine first, then the Mac app. An older engine ignores `events` safely; with the engine first, Today
   shows from the first push.
 - Past events stay in Today all day (they are not removed once they end).
+
+### Changed: planning summary (Calendar, 17 Nov 2026; replaces the Today list)
+
+Above the board the phone now shows a **planning summary** in three blocks, in the Mac's time zone: **Today**, **Rest
+of this week** (tomorrow to Sunday; left out on a Sunday) and **Next week** (Monday to Sunday). Each block lists its
+meetings, one line each (Today: the time or "All day"; the other blocks: the day and time, "Fri 14:00"), with the
+tasks linked to a meeting under it, then the open tasks due in that block. Empty blocks are not shown.
+
+- A repeating meeting (Google instances share `recurringEventId`) appears once per block with a short label instead of
+  every instance: "Standup · weekdays 09:00", "1:1 · weekly Tue 14:00", "Board · monthly". Its linked tasks are those of
+  all its instances in the block; Today's Join opens today's instance.
+- The label comes from the series' rule. The Mac reads it once per series with `events.get(calendarId, recurringEventId,
+  fields=recurrence)`, keeps it (`cal_series`), reads it again at the daily full read, and puts it in words itself:
+  FREQ DAILY / WEEKLY / MONTHLY / YEARLY, INTERVAL ("every 2 weeks"), BYDAY (MO-FR = "weekdays"); anything else, or a
+  rule not read yet, is "repeats".
+- `PUT /v2/board`: `events` now cover today through the end of next week (weeks start on Monday), at most 200 (was 50).
+  Each instance of a repeating meeting carries `series` (an opaque "S-" key: a hash, no Google id leaves the Mac) and
+  `repeat` (the label). Robustness as before (R17): a `series` that is not an "S-" key or a `repeat` that is not short
+  plain text is left out (the meeting is then listed like a one-off), never a refused push.
+- The grouping is a pure function (`planBlocks` in the phone's sync logic), tested on its own
+  (engine/test/phone/phone-planning.test.ts).

@@ -218,7 +218,7 @@ public final class CalendarCache {
         return events(base + " ORDER BY e.start, e.short_id LIMIT 1", args + [date]).first
     }
 
-    /// Like `events(from:to:)` but without events made from tasks (C6): what the phone's Today list shows.
+    /// Like `events(from:to:)` but without events made from tasks (C6): what the phone's planning summary shows.
     public func meetings(from: Date, to: Date) -> [CalEvent] {
         let (clause, args) = Self.connectedClause()
         return events("WHERE e.gone=0 AND c.shown=1 AND e.start<? AND e.end>?\(clause) AND \(Self.notTaskEvent) ORDER BY e.start, e.short_id", [to, from] + args)

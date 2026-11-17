@@ -52,7 +52,7 @@ The **Calendar** tab (next to Board) shows your Google calendars and your tasks 
 - A task only goes to Google when you drag it onto a time or press Add to calendar. Deleting that task deletes its event. Deleting the event in Google keeps the task and its date. Clearing a task's due leaves its event in Google.
 - To move an existing event to another calendar, use Open in Google Calendar; FloatBoard cannot do that yet.
 - Every task has an id like `T-142` and every event like `E-37`. Click an id to copy it, type it into search, or use it to link a meeting to a task (and back) from either side.
-- The bar shows your next meeting, with **Join** when it has a video link. The phone app has a read-only **Today** list.
+- The bar shows your next meeting, with **Join** when it has a video link. The phone app has a read-only **planning summary**: Today, the rest of this week and next week (meetings, a repeating one once with its rule, and tasks due).
 - Accounts connected before the Calendar tab existed work at once with their main calendar (Settings › Outputs › Calendar says "Showing your main calendar."); press **Show all calendars…** once to see the others. Connecting Gmail for an account signs it in for Calendar too.
 - Settings › General › Time zone: UK time by default, or follow this Mac. Times then stay put when you travel.
 

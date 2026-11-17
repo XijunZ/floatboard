@@ -346,7 +346,7 @@ private final class PhoneEngine {
     } catch { check((error as? ConnectorError) == .noPhoneApp, "phone_pairing_on_old_engine_says_no_phone_app") }
 }
 
-/// The Today list on the phone: today's and tomorrow's meetings (not events made from tasks) with the tasks linked to them.
+/// The phone's planning summary: meetings from today to the end of next week (not events made from tasks) with the tasks linked to them.
 @MainActor func phoneEventChecks() async {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-phoneev-\(UUID().uuidString)")
     let store: Store
