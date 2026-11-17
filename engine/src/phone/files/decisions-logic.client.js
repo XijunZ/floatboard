@@ -87,3 +87,8 @@
       type: DECISION_TYPES[form.type] ? form.type : "operational", quote: String(quote || "").slice(0, 4000),
       source: /^[A-Za-z0-9:_@.-]{1,80}$/.test(String(source || "")) ? String(source) : "", made_at: nowIso };
   }
+
+  // The queue goes out only once /app/api/me has confirmed the signed-in account and it is the account the queue was made under.
+  function decisionQueueSendable(queue, confirmed) {
+    return !!(queue && confirmed && queue.account === confirmed && Array.isArray(queue.actions) && queue.actions.length);
+  }

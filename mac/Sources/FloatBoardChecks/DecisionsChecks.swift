@@ -14,6 +14,7 @@ import FloatBoardConnectors
     decisionRecordChecks(root)
     decisionPeopleChecks(root)
     decisionScreeningChecks(root)
+    decisionChunkChecks(root)
     decisionReviewChecks(root)
     decisionRulebookChecks(root)
     decisionPhoneChecks(root)
@@ -204,6 +205,28 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
         let p2 = DecisionScreening.pending(store: s, now: runAt.addingTimeInterval(60))
         check(p2.map(\.ref) == ["J-\(late.id)@\(DecisionScreening.version(late.text))"], "late_arriving_jot_with_older_time_is_screened")
     } else { check(false, "late jot setup") }
+}
+
+// MARK: Long jots: screened in chunks, marked screened only when every chunk is done
+
+@MainActor private func decisionChunkChecks(_ root: URL) {
+    guard let s = decisionsStore(root, "chunks.sqlite") else { return }
+    let filler = String(repeating: "Notes about the week, nothing decided here. ", count: 1000)     // 45,000 characters
+    let tail = "Finally we decided to close the Leeds office."
+    guard let j = JotStore(store: s).create(text: filler + tail, kind: .meetingNotes, now: decisionsNow.addingTimeInterval(-86400)) else { check(false, "chunk setup"); return }
+    let v = DecisionScreening.version(j.text)
+    let parts = DecisionScreening.pending(store: s, now: decisionsNow)
+    check(parts.count == 3 && parts.allSatisfy { $0.ref.hasPrefix("J-\(j.id)@\(v)-c") && $0.text.count <= DecisionScreening.maxCharsPerJot }
+          && parts.last?.text.contains(tail) == true, "long_jot_sent_in_chunks_of_the_same_version")
+    guard parts.count == 3 else { return }
+    let ok = { (p: ScreenJot, found: [ScreenFound]) in ScreenResult(ref: p.ref, ok: true, decisions: found) }
+    DecisionScreening.apply([ok(parts[0], []), ok(parts[1], []), ScreenResult(ref: parts[2].ref, ok: false, decisions: [])], sent: parts, store: s, now: decisionsNow)
+    let left = DecisionScreening.pending(store: s, now: decisionsNow.addingTimeInterval(60))
+    check(left.map(\.ref) == [parts[2].ref], "jot_not_screened_until_every_chunk_is_done")
+    let o = DecisionScreening.apply([ok(parts[2], [ScreenFound(quote: tail, decision: "Close the Leeds office", type: "strategic")])],
+                                    sent: left, store: s, now: decisionsNow)
+    check(o.recorded.count == 1 && DecisionScreening.pending(store: s, now: decisionsNow.addingTimeInterval(120)).isEmpty,
+          "last_chunk_completes_the_jot_and_records")
 }
 
 // MARK: Reviews (D6) and the weekly review (D4)

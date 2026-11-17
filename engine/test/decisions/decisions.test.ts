@@ -85,6 +85,14 @@ describe("decisions: weekly screening (⚑)", () => {
     expect(out.results).toEqual([{ ref: "J-1@abc1", ok: false, decisions: [] }]);
   });
 
+  it("accepts_chunk_refs_of_a_long_jot", async () => {
+    const u = await user("Chunks");
+    answers = [{ jots: [{ ref: "J-4@abc4-c2of3", decisions: [] }] }];
+    const r = await post(u.key, "/v2/decisions/screen", { jots: [{ ...jot(4, "part two"), ref: "J-4@abc4-c2of3" }] });
+    expect(r.status).toBe(200);
+    expect((await r.json<any>()).results).toEqual([{ ref: "J-4@abc4-c2of3", ok: true, decisions: [] }]);
+  });
+
   it("refuses_bad_requests_no_key_and_decisions_off", async () => {
     const u = await user("Refuse");
     expect((await post(u.key, "/v2/decisions/screen", { jots: [] })).status).toBe(400);
@@ -202,12 +210,28 @@ describe("decisions: phone copy and actions", () => {
     expect((await call("/app/api/decisions/fill", { method: "POST", headers: { Origin: BASE }, body: "{}" })).status).toBe(401);
   });
 
+  it("phone_actions_and_copy_are_bound_to_the_signed_in_account", async () => {
+    const a = await user("AcctA"), b = await user("AcctB");
+    const pa = await pairPhone(a.key), pb = await pairPhone(b.key);
+    await call("/v2/decisions", { method: "PUT", key: a.key, body: JSON.stringify({ decisions: [d(1)] }) });
+    const ga = await (await call("/app/api/decisions", { headers: { Cookie: pa.cookie } })).json<any>();
+    const gb = await (await call("/app/api/decisions", { headers: { Cookie: pb.cookie } })).json<any>();
+    expect(typeof ga.account).toBe("string");
+    expect(ga.account).not.toBe(gb.account);
+    expect(gb.decisions).toEqual([]);
+    const r = await call("/app/api/decisions/action", { method: "POST", headers: { Cookie: pb.cookie, Origin: BASE },
+      body: JSON.stringify({ actions: [{ id: "act-0000b001", decision: "D-1", action: "not_decision" }] }) });
+    expect((await r.json<any>()).account).toBe(gb.account);
+    expect((await (await call("/v2/decision-actions", { key: a.key })).json<any>()).actions).toEqual([]);
+    expect((await (await call("/v2/decision-actions", { key: b.key })).json<any>()).actions.map((x: any) => x.id)).toEqual(["act-0000b001"]);
+  });
+
   it("phone_needs_a_session_and_copy_is_checked", async () => {
     expect((await call("/app/api/decisions")).status).toBe(401);
     const u = await user("Check");
     expect((await call("/v2/decisions", { method: "PUT", key: u.key, body: JSON.stringify({ decisions: "nope" }) })).status).toBe(400);
     expect((await call("/v2/decisions", { method: "PUT", key: u.key, body: JSON.stringify({ decisions: [{ id: "X-1" }] }) })).status).toBe(400);
     const { cookie } = await pairPhone(u.key);
-    expect((await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>())).toEqual({ decisions: [], updated: null, waiting: 0 });
+    expect((await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>())).toMatchObject({ decisions: [], updated: null, waiting: 0 });
   });
 });
