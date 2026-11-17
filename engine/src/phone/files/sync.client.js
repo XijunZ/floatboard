@@ -296,23 +296,43 @@
       return key ? { c: c, key: key, at: /^\d{4}-\d{2}-\d{2}$/.test(c.due) ? keyParts(c.due) : Date.parse(c.due) } : null;
     }).filter(Boolean).sort(function (a, b) { return a.at - b.at; });
 
+    // An instance's time of day ("all day" for an all-day one), to tell a series' usual instances from moved ones.
+    var timeKey = function (x) { return x.e.all_day ? "all day" : clock.format(new Date(x.s)); };
+
     return blocks.map(function (b) {
       var meetings = [], bySeries = {};
-      evs.forEach(function (x) {
-        if (x.first > b.to || x.last < b.from) return;
+      var inBlock = evs.filter(function (x) { return !(x.first > b.to || x.last < b.from); });
+      // A series' usual time in this block: the time in its label ("weekdays 09:00"), else the time most of its instances
+      // here share (the earliest on a tie). An instance at another time (moved in Google) is never hidden in the series row.
+      var usual = {};
+      inBlock.forEach(function (x) {
+        if (!x.series || usual[x.series]) return;
+        var named = x.label && x.label.match(/\b\d{2}:\d{2}\b/);
+        if (named) { usual[x.series] = named[0]; return; }
+        var count = {}, best = null;
+        inBlock.forEach(function (y) {
+          if (y.series !== x.series) return;
+          var k = timeKey(y);
+          count[k] = (count[k] || 0) + 1;
+          if (best === null || count[k] > count[best]) best = k;
+        });
+        usual[x.series] = best;
+      });
+      inBlock.forEach(function (x) {
         var tasks = Array.isArray(x.e.tasks) ? x.e.tasks.filter(function (t) { return typeof t === "number"; }) : [];
         var video = typeof x.e.video === "string" && /^https:\/\//.test(x.e.video) ? x.e.video : null;
-        if (x.series) {
+        var day = x.first < b.from ? b.from : x.first;
+        var time = x.e.all_day || x.first < b.from ? "" : clock.format(new Date(x.s));
+        var when = b.key === "today" ? (time || "All day") : dayName(day) + (time ? " " + time : "");
+        if (x.series && timeKey(x) === usual[x.series]) {
           var m = bySeries[x.series];
           if (m) { tasks.forEach(function (t) { if (m.tasks.indexOf(t) < 0) m.tasks.push(t); }); return; }
-          m = { id: x.e.id, title: x.e.title, label: x.label || "repeats", when: "", tasks: tasks.slice(), video: video, color: x.e.color };
+          // The series row: its rule in words; in Today also the occurrence's actual time.
+          m = { id: x.e.id, title: x.e.title, label: x.label || "repeats", when: b.key === "today" ? when : "", tasks: tasks.slice(), video: video, color: x.e.color };
           bySeries[x.series] = m;
           meetings.push(m);
           return;
         }
-        var day = x.first < b.from ? b.from : x.first;
-        var time = x.e.all_day || x.first < b.from ? "" : clock.format(new Date(x.s));
-        var when = b.key === "today" ? (time || "All day") : dayName(day) + (time ? " " + time : "");
         meetings.push({ id: x.e.id, title: x.e.title, label: null, when: when, tasks: tasks, video: video, color: x.e.color });
       });
       var due = open.filter(function (t) { return t.key >= b.from && t.key <= b.to; }).map(function (t) { return t.c; });
