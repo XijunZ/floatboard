@@ -145,6 +145,24 @@ enum Snapshot {
             let hours = 8...18
             save(CalendarView(span: .day, snapshotHours: hours).padding(12), "calendar-day.png", CGSize(width: 1100, height: 640))
             save(CalendarView(span: .week, snapshotHours: hours).padding(12), "calendar-week.png", CGSize(width: 1100, height: 640))
+            // The tab as the app lays it out (scrolling grid, real buttons): drawn by an off-screen hosting view, which the
+            // image renderer above cannot do. At a short window height, to see that nothing stretches between the rows.
+            func saveLive<V: View>(_ v: V, _ name: String, _ size: CGSize) {
+                let host = NSHostingView(rootView: v.environmentObject(store).environmentObject(ui).environmentObject(google)
+                    .frame(width: size.width, height: size.height).background(Color(white: 0.97)).environment(\.colorScheme, .light))
+                host.frame = CGRect(origin: .zero, size: size)
+                host.layoutSubtreeIfNeeded()
+                guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+                host.cacheDisplay(in: host.bounds, to: rep)
+                guard let png = rep.representation(using: .png, properties: [:]) else { return }
+                do { try png.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name)) } catch {
+                    store.activity("snapshot", .error, "Could not write the snapshot image \(name)", detail: "\(error)")
+                }
+            }
+            for (span, name) in [(CalendarView.Span.week, "calendar-week-live.png"), (.day, "calendar-day-live.png")] {
+                saveLive(CalendarView(span: span).padding(.horizontal, 12).padding(.bottom, 12).padding(.top, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading), name, CGSize(width: 1000, height: 530))
+            }
             // Links between made-up tasks and meetings: the editor, the event panel and a card with its meeting count.
             let events = cache.events(from: cal0.startOfDay(for: Date()), to: Date().addingTimeInterval(7 * 86400))
             if let planning = events.first(where: { $0.title == "Planning" }), let review = events.first(where: { $0.title == "Design sync" }),
