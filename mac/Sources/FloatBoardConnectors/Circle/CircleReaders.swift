@@ -50,6 +50,33 @@ public enum CircleWhatsAppReader {
     }
 }
 
+extension CircleWhatsAppReader {
+    /// The last few messages of a one-to-one chat, with text, for a draft the owner asked for (P9). Read on request only,
+    /// sent to Claude for that draft and never stored.
+    public static func lastMessages(folder: URL = WhatsAppLocal.folder, phone: String, limit: Int = 5) throws -> [(direction: String, at: Date, text: String)] {
+        try WhatsAppLocal.withCopy(folder) { db in
+            var stmt: OpaquePointer?
+            let sql = """
+                SELECT m.ZISFROMME, m.ZMESSAGEDATE, COALESCE(m.ZTEXT,'') FROM ZWAMESSAGE m JOIN ZWACHATSESSION s ON s.Z_PK = m.ZCHATSESSION
+                WHERE s.ZSESSIONTYPE = 0 AND s.ZCONTACTJID = ? AND COALESCE(m.ZMESSAGETYPE, 0) IN (0, 7) AND COALESCE(m.ZTEXT,'') <> ''
+                ORDER BY m.ZMESSAGEDATE DESC LIMIT ?
+                """
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+                throw WhatsAppLocal.ReadError.unreadable(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, phone + "@s.whatsapp.net", -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+            var out: [(direction: String, at: Date, text: String)] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                out.append((sqlite3_column_int(stmt, 0) == 1 ? "out" : "in", Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1) + WhatsAppLocal.appleEpoch),
+                            String((sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "").prefix(1000))))
+            }
+            return out.reversed()
+        }
+    }
+}
+
 /// Circle's WeChat reader: incoming one-to-one messages from macOS's notification history (who and when only).
 /// It can't see what you send, muted chats, or notifications you cleared; the card says so.
 public enum CircleWeChatReader {

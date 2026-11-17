@@ -425,11 +425,11 @@ import Foundation
         store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES('circle_backfill_months', ?)", [String(max(1, min(60, m)))]) }
     }
 
-    func meta(_ key: String) -> String? {
+    public func meta(_ key: String) -> String? {
         (try? store.db.query("SELECT value FROM meta WHERE key=?", [key]) { DB.text($0, 0) })?.first // try?-ok: unreadable = unset
     }
 
-    func setMeta(_ key: String, _ value: String?) {
+    public func setMeta(_ key: String, _ value: String?) {
         store.perform {
             if let value { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [key, value]) }
             else { try store.db.run("DELETE FROM meta WHERE key=?", [key]) }
