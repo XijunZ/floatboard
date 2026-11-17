@@ -492,6 +492,7 @@
       b.hidden = views.indexOf(v) < 0;
       b.setAttribute("aria-selected", String(v === view));
     });
+    circleRender(); // Circle: its screen, Plan's due people, the icon badge
   }
 
   var noteTimer = 0;
@@ -515,6 +516,7 @@
     store(BOARD_KEY, null);
     store(QUEUE_KEY, null);
     store(SENT_KEY, null);
+    circleDrop(); // Circle's copy and queue go with the account
   }
 
   // /app/api/me answered: the session's account. Any board or queue of another account is dropped, never shown or sent.
@@ -615,6 +617,7 @@
     render();
     note(replacedText(replaced, dropped, rejected));
     if (syncAgain && failures === 0 && me) { syncAgain = false; sync(); }
+    if (me && failures === 0) circleSync(); // Circle: send its taps, then fetch its copy
   }
 
   async function openBoard() {
@@ -1126,6 +1129,8 @@
       busy = false;
     }
   }
+
+/*@CIRCLE_JS@*/
 
   // ------------------------------------------------------------ start
 
