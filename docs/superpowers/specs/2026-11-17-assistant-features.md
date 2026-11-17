@@ -1,233 +1,276 @@
 # FloatBoard assistant: features per area, then links
 
-Date: 17 Nov 2026 · Status: **draft v2 for owner review** (v1 reviewed by Codex; its findings are folded in, see the end)
+Date: 17 Nov 2026 · Status: **draft v3** (owner's 28 comments + market research folded in; Codex review next, then owner)
+Research behind it: `docs/superpowers/research/2026-11-17-market-research.md`,
+`docs/superpowers/research/2026-11-17-people-intelligence.md`.
 
-FloatBoard is growing from a task board into a small personal assistant with four new areas:
-Calendar, Jots, People and Decisions. Sections 1–4 define **what each area does on its own**, each
-complete without the others. Section 5 defines **only how links between areas are made and shown**.
-Each area still gets its own full design and build plan before it is built; this document fixes scope.
+FloatBoard grows from a task board into a small personal assistant: **Calendar, Jots, Circle,
+Decisions, Resolutions**. Sections 1–5 define what each area does on its own. Section 6 defines only
+how they link. Section 7 lists every AI job (all Haiku) and flags the ones that are judgement calls.
+Each area still gets its own full design and build plan; this document fixes scope.
 
-Build order: Calendar (built on branch `calendar`, awaiting review) → Jots → People → Decisions.
+Build order: Calendar (built, in review) → Jots → Circle → Decisions → Resolutions.
 
-## Ground rules (apply to every area)
+## Ground rules
 
-- **The board stays home.** The app opens on the board; the bar is always visible. New areas are tabs
-  next to it. No area competes to be the home screen.
-- **One main trigger per area**, stated at the top of each section.
-- **Claude proposes, the owner confirms** anything that files, merges, sends or changes meaning.
-  Importing source material (a meeting recap, a message timestamp) is automatic; interpreting it
-  (which group, which person, is this a decision) is a suggestion until confirmed. ✗ teaches the rulebook.
-- **No logging chores.** What FloatBoard can work out from data it already reads is worked out.
-  Plain facts (dates, who sent what when) are computed by code, not AI.
-- **One reminder budget.** All assistant reminders (People, Decision reviews) share one daily limit
-  (default 3), with quiet hours, de-duplicated across Mac and phone. The daily jot nudge is separate
-  (one a day, skippable). Existing task due alerts are unchanged.
-- **Visible ids:** `T-` task, `E-` event, `J-` jot, `P-` person, `D-` decision. One click copies;
-  typing an id in search finds it; typing an id in a **jot, task note or event panel** (not search,
-  drafts or imported text) links it when saved. Removing the id text does not unlink; unlinking is
+- **The board stays home.** The app opens on the board; the bar is always visible. Tabs:
+  Board · Calendar · Jots · Circle · Decisions · Resolutions. Each area is a module that can be
+  switched off (nothing deleted; off by default for new installs).
+- **One shared standard for items.** Tasks, jots, people, decisions and resolutions all have: a
+  visible id (`T- E- J- P- D- R-`), date added, date updated, source (typed / phone / meeting /
+  message / Claude), and **tags**. Tags are the board's groups; any item can carry several. One
+  search covers everything; every list sorts by date added, date updated or tag.
+- **Claude proposes, the owner confirms**, except where the owner chose otherwise (Decisions is a
+  recorder, see 4). The owner's own words are never replaced without a before/after confirm.
+- **No logging chores.** Dates, matches and changes are computed by code, not AI.
+- **Select text → right-click** works the same everywhere text is shown (jots, task notes, decision
+  reviews, meeting notes): **Make task**, **Make decision**, **Copy id link**.
+- **One reminder budget:** Circle reminders and decision reviews share one daily limit (default 3)
+  with quiet hours, shown once across Mac and phone. The daily jot nudge is separate. Task due
+  alerts are unchanged.
+- **Ids link:** typing an id in a jot, task note or event panel links it when saved. Unlinking is
   an explicit ✕ on the link chip.
-- **Each area is a switchable module** (Settings › Modules): own code folder and tables, off by
-  default for new installs. Switching off hides the tab and its links; nothing is deleted; switching
-  on brings it all back.
-- **Nothing lost:** edits keep history; deletes go through the undo bar.
-- **Where things live:** the Mac's database is the record (as for tasks today). The phone writes to
-  the engine and the Mac takes the change in (as phone task edits do today); Claude's background work
-  runs where email triage runs (the engine, in Always-on mode). **Phone features need Always-on mode**
-  (the owner's current mode); in Mac-only mode they are Mac-only.
-- **Privacy:** see the per-area "Data" lines. The general rule: People uses message **metadata only**
-  (who, when, channel, direction); message text goes to Claude only when the owner asks for a draft,
-  and only the last few messages with that person. Nothing new is shown in notification previews
-  beyond what tasks show today.
+- **Where things live:** the Mac database is the record. The online engine (Always-on mode, the
+  owner's mode) holds what the phone needs and runs Claude's background jobs. Phone features need
+  Always-on mode.
+- **Privacy:** Circle uses message metadata (who, when, channel, direction) and never stores message
+  text. Message text reaches Claude only for a draft the owner asks for, or for Prospect signals
+  (5 people at most, see 3).
 
 ---
 
-## 0. Board (exists today, for reference)
+## 0. Board (exists)
 
-Trigger: the owner, plus suggested tasks from Gmail, Outlook, WhatsApp, WeChat and Fathom. Tasks with
-groups, due dates, statuses, the bar, quick add, phone app, rulebooks, history, backups. Unchanged,
-except that task editors gain link chips (section 5).
+Unchanged, except: tasks can carry several tags (today one group, which becomes the first tag), and
+the task's **notes** become a jot (J10).
 
 ---
 
-## 1. Calendar — built, awaiting review
+## 1. Calendar — built, in review
 
-**Trigger:** Google Calendar (two-way). **Authoritative spec:** `2026-11-16-calendar-design.md`
-(decisions D1–D14). Summary:
+**Trigger:** Google Calendar, two-way. **Authoritative spec:** `2026-11-16-calendar-design.md`.
 
 | # | Feature |
 |---|---|
 | C1 | Day and week views mirroring every calendar of every connected account; on/off per calendar |
 | C2 | Create, move, resize, rename, delete events in FloatBoard; changes go to Google |
-| C3 | Tasks with a due date show on their day; title and time stay in step with their own event both ways |
-| C4 | A task reaches Google only when dragged onto a slot or "Add to calendar" (date-only → all-day event) |
-| C5 | Event panel: time, calendar, Join, Open in Google; deleting a task deletes its own event, not vice versa |
+| C3 | Tasks with a due date show on their day; a task and its own event stay in step (title, time) |
+| C4 | A task reaches Google only when dragged onto a slot or "Add to calendar" |
+| C5 | Event panel with Join and Open in Google; deleting a task deletes its own event, not vice versa |
 | C6 | Bar shows the next or current meeting with Join |
-| C7 | Phone Today list (as fresh as the Mac's last sync) |
-| C8 | Settings: calendars, default account, time zone; existing accounts show their main calendar at once and "Show all calendars…" (one click) for the rest |
-| C9 | Offline changes wait and send later; Undo within 10 s never touches Google |
+| C7 | **Phone: planning summary** (changed, see below) |
+| C8 | Settings: calendars, default account, time zone; main calendar works without reconnecting |
+| C9 | Safety, always on (not a setting): offline edits wait and send later; a delete waits 10 s so Undo never touches Google; retries keep their order; an edit never overwrites a newer change made in Google |
 
-**Needed later by People/Jots (an extension, not built):** keep each event's guest list (email + reply
-status) in the cache, and keep a small permanent record for events that a jot or decision links to,
-so links survive the cache's 30-day/90-day window.
+**C7 (changed on the owner's request).** The phone does not repeat Google Calendar's day view (the
+Pixel's own calendar does that). It shows a **planning summary** in three blocks: **Today**,
+**Rest of this week**, **Next week**. Each block lists meetings and tasks due, one line each.
+A recurring meeting appears **once per block** with a short label instead of every instance:
+"Standup · weekdays 09:00", "1:1 · weekly Tue", "Board · monthly". The label is read once per series
+from Google (the series' repeat rule) and cached.
 
-**Not in v1:** invitations, month view, whole-series edits, moving events between calendars.
+**Later (needed by other areas, not built):** keep each event's guest list (email, reply status) and
+meeting link; keep a small permanent record of events that a jot or decision links to.
+**Not in v1:** invitations, month view, whole-series edits, moving events between calendars,
+a "pause Google sync" switch (offer if wanted).
 
 ---
 
-## 2. Jots — next to design
+## 2. Jots — next
 
-**Trigger:** the owner (typing or voice), plus meeting recaps from Fathom.
-**Job:** a calm place to dump thinking every day, filed into the same groups as tasks.
-**Unit:** one saved capture = one jot (`J-n`), with a timestamp, text, a folder, and its source
-(typed / phone / meeting).
+**Trigger:** the owner (typing or voice), task notes, and Fathom meeting recaps.
+**Job:** one place for all thinking, findable by tags and search. **No folders.**
+**Unit:** one saved capture = one jot (`J-n`) with text, tags, kind (**jot**, **task note**,
+**meeting notes**), date added and updated, source.
 
 | # | Feature |
 |---|---|
-| J1 | **Capture window** from anywhere (⌃⌥J) and ✎ on the bar: small, quiet, ⌘↩ saves, Esc closes and **keeps the draft** for next time |
-| J2 | **Voice on the Mac:** the capture window works with macOS dictation as configured in System Settings (no custom recording; a 🎙 button only if it can reliably start dictation) |
-| J3 | **Phone capture:** the phone Jots screen opens to a writing box; voice via the phone keyboard's microphone. Captures made offline are kept on the phone and sent when back online |
-| J4 | **Jots tab:** today on top with a writing box, earlier days below, search, folder filter |
-| J5 | **Folders = the board's groups**, plus **Braindump** (where every new jot lands) and **Unfiled**. Renaming a group renames its folder; deleting a group moves its jots to Unfiled |
-| J6 | **Sorting a braindump:** Claude suggests splitting a mixed jot into parts, each with a group. Accepting a part creates a new jot in that folder marked "from J-n"; parts can be accepted one by one; the original stays whole and is marked "sorted" when all parts are handled. Editing the original later does not change the parts |
-| J7 | **Actions in a jot → suggested tasks:** Claude suggests tasks from a jot (✓/✗, the existing chip); "Make task" on selected text does it by hand. The jot shows "→ 1 task" |
-| J8 | **"Jot about this"** on a task opens the capture window already linked to that task |
-| J9 | **Meeting recaps become jots:** each Fathom meeting is saved once as a meeting jot holding Fathom's **full** summary (not the 600-character board summary) plus the link to full notes; its folder is suggested (Unfiled until confirmed). The tasks Fathom already suggests are **not** suggested again from this jot |
-| J10 | **Daily nudge** at a chosen time (Mac notification and phone push), skipped on days already jotted; shows the day's finished tasks as a prompt |
-| J11 | **Daily file copy** to `~/Code/Resources/braindumps/daily/YYYY-MM-DD.md` (folder set in Settings), dated by the app's time zone, rewritten whenever that day's jots change (including late phone captures and deletes); a failed write is shown in Activity and retried |
-| J12 | Edit and delete with history and Undo |
+| J1 | **Capture window** from anywhere (⌃⌥J) and ✎ on the bar: small and quiet, ⌘↩ saves, Esc closes and keeps the draft |
+| J2 | **Voice:** on the Mac, macOS dictation in the capture window; on the phone, the keyboard's microphone. Nothing custom to build |
+| J3 | **Phone:** opens to a writing box; captures made offline are kept and sent later; the **last 30 days of jots** can be read and searched on the phone |
+| J4 | **Jots tab:** one list, newest first, today's meetings shown at the top of today; search; filter and sort by tag, kind, date added, date updated |
+| J5 | **Tags:** the board's groups. Claude suggests tags after you save (✓/✗); an untagged jot shows as "untagged" |
+| J6 | **Claude cleanup** (button on a jot): fixes grammar and structure only, never changes or removes substance. Shows **before and after** side by side; you choose "Use cleaned" or "Keep mine". The original is always kept in the jot's history |
+| J7 | **Select text → right-click → Make task / Make decision**: opens the task or decision form already filled in from the selection (title, due date if mentioned, tags from the jot). Links back to the jot |
+| J8 | **"Jot about this"** on a task opens the capture window linked to that task, with the task's tags |
+| J9 | **Meeting notes:** every Fathom recap is saved automatically as a *meeting notes* jot holding Fathom's full summary and link, attached to its calendar event (`E-n`) by the meeting link and start time (code, not AI), with the tags of the tasks linked to that event (else suggested). Tasks linked to that meeting show these notes in their notes section. Fathom's suggested tasks are not suggested a second time |
+| J10 | **Task notes are jots:** when a task's notes reach 10 characters, they are saved as a *task note* jot with the task's tags, linked to the task; later edits update that same jot (with history). Under 10 characters: no jot |
+| J11 | **Daily nudge** at a chosen time (Mac notification and phone push), skipped on days already jotted; shows the day's finished tasks as a prompt |
+| J12 | **Daily file copy** to `~/Code/Resources/braindumps/daily/YYYY-MM-DD.md` (folder in Settings), dated by the app's time zone, rewritten when that day's jots change |
+| J13 | **Online copy, 30-day buffer:** the engine keeps each jot for the phone for 30 days **counted from when the Mac has saved it**. A jot the Mac hasn't taken in yet is never removed, however long the Mac is off. The Mac keeps everything forever |
+| J14 | Edit and delete with history and Undo |
 
-**Data:** jot text is stored in the Mac database and the engine (needed for phone and Claude); sent
-to Claude for J6/J7 only when the Jots rulebook allows.
-**Not in v1:** rich text, attachments, a prompt on every ticked task, weekly review (see Q2).
+**Not in v1:** rich text, attachments, a prompt on every ticked task, automatic task suggestions
+from ordinary jots (the owner makes tasks by right-click; Fathom's own suggestions stay).
 
 ---
 
-## 3. People — after Jots
+## 3. Circle — after Jots (replaces the keep-in-touch project)
 
-**Trigger:** who you exchange messages and meetings with. Replaces the separate keep-in-touch
-project (spec 24 Oct 2026), which is retired.
-**Job:** know who matters, when you last really talked, and who is due a message.
+**Trigger:** who you exchange messages and meetings with, plus people you add.
+**Job:** know who matters, when you last really talked, who is due, and what changed for them.
 
-**What each channel can tell FloatBoard** (decides what "last contact" means):
+**Tiers** (one per person) and **default intervals**, changeable per person:
+**Family 1 month · Close friend 2 weeks · Network 3 months.**
+**Tags** (any number): **Investor** (on Family, Close friend or Network; sets the interval to at most
+3 months) and **Prospect** (on Close friend or Network, never Family; someone being tested as a
+closer relationship). Plus the shared tags.
 
-| Channel | Incoming | Outgoing | Notes |
+**Every channel is checked** for "last talked":
+
+| Channel | Incoming | Outgoing | How |
 |---|---|---|---|
-| WhatsApp (Mac app's database) | ✓ | ✓ | full two-way, 1:1 chats only |
-| Gmail | ✓ | needs a new read of **Sent** (who and when only, no text) | see Q3 |
-| Outlook (extension) | unread only | ✗ | "heard from" only |
-| WeChat (notifications) | ✓ | ✗ | "heard from" only |
-| Calendar | — | — | a past meeting both of you accepted |
+| WhatsApp | ✓ | ✓ | the Mac app's database (1:1 chats) |
+| Gmail | ✓ | ✓ | inbox plus **Sent folder** (who and when only; owner approved) |
+| Outlook | ✓ | ✗ | extension sees incoming only → "heard from" |
+| WeChat | ✓ | ✗ | notifications only → "heard from" |
+| Calendar | — | — | a past meeting both accepted counts as talked |
+| Manual | | | one tap **"I contacted them"** for calls, in person, or channels without outgoing |
 
 | # | Feature |
 |---|---|
-| P1 | **Profile:** name, tier, how you know them, notes, birthday, language, handles (emails, phones, WhatsApp, WeChat) |
-| P2 | **Where people come from:** suggested from 1:1 conversations with replies in both directions (✓/✗), plus manual add. No address-book import in v1 |
-| P3 | **Same person, many handles:** merged automatically only on an exact phone or email match; anything else ("same name?", Chinese ↔ pinyin) is a suggestion. Every merge can be undone (split) |
-| P4 | **Contact dates, computed by code:** *last talked* (a two-way exchange or an accepted meeting together) and *last heard from* (incoming only). Channels that can't see outgoing messages say so on the profile |
-| P5 | **Tiers and default intervals** (from *last talked*), changeable per person: Family 14 days, Close friend 21, Network 70, Investor 91 |
-| P6 | **Keep-in-touch reminder** when a person passes their interval: a suggested task "Message P-n", inside the shared reminder budget, at most one open per person. ✗ snoozes that person one interval; it closes itself when an outgoing message to them is seen |
-| P7 | **Timeline:** per person, a list of channel, date and direction of recent exchanges, each opening the conversation in its app. No message text stored |
-| P8 | **Draft a message** (on request, from the profile or a reminder): Claude writes a short draft in the owner's voice and the language usually used with them, from the profile notes and the last few messages only; it never invents a reason. One tap opens WhatsApp or Gmail with it, otherwise copies it. Never sent automatically |
-| P9 | **Prospects** (Network and Investor only): a purpose (career, investing, venture, learning) and a stage the owner moves by hand: *want to meet → in touch → regular* (or *dropped*). Prospects get the same reminders and drafts |
+| P1 | **Contacts manager** (the Circle tab): everyone in one list; search; filter by tier and tag; sort by name, last talked, due date; select several to change tier or tags at once; merge two people, or split a wrong merge |
+| P2 | **Add a contact** (button, or right-click a name in a jot or task): a short form — name, tier, tags, how you know them, company and role, handles (phones, emails, WhatsApp, WeChat, LinkedIn URL), birthday, language, notes; plus *firm and focus* when tagged Investor and *purpose and stage* when tagged Prospect. Filled in as far as possible from messages, email signatures and the LinkedIn export; you confirm |
+| P3 | **Where people come from:** manual add; suggested from 1:1 conversations with replies both ways; suggested from Google Contacts and the LinkedIn connections export (import as suggestions, never in bulk) |
+| P4 | **Same person, many handles:** merged automatically only on an exact phone or email match; anything else is a suggestion. Every merge can be split |
+| P5 | **Contact dates** (code): *last talked* (two-way or a meeting together) and *last heard from* (incoming only) |
+| P6 | **Due this week:** one list of people past their interval, inside the shared reminder budget. Each due person can become a task ("Message P-n") and, optionally, a short calendar slot to do it. ✗ or snooze pushes them back one interval. It clears itself when an outgoing message, a meeting or "I contacted them" is seen |
+| P7 | **Context nudges:** birthday; "you meet P-n next week" |
+| P8 | **Timeline:** per person, recent exchanges (channel, date, direction), meetings, jots, tasks and decisions, each opening its source. No message text stored |
+| P9 | **Draft a message** (on request): a short draft in the owner's voice and usual language, from notes and the last few messages; never invents a reason; one tap opens WhatsApp or Gmail with it. Never sent automatically |
+| P10 | **Active prospects (at most 5 at a time):** a purpose (career, investing, venture, learning) and a stage moved by hand (*want to meet → in touch → regular*, or *dropped*). Only for these, Claude also spots **promises and follow-up dates** in your messages with them, and shows them on the card |
+| P11 | **Updates (people intelligence)** for Investor- and Prospect-tagged people (others on request): job and title changes from the **LinkedIn connections export** (you download it monthly; FloatBoard reminds you and compares); **UK Companies House** directorships and resignations; **news** for that person or firm (Google News feed); posts from their **blog / Substack / company news** page if they have one. Shown on the card as "What's new" |
+| P12 | **LinkedIn posts:** not read automatically (it breaks LinkedIn's terms and risks your account). The card links to their profile and reminds you to turn on LinkedIn's own "notify me about posts" for the people you most want to follow |
+| P13 | **Chinese contacts:** no automatic sources exist that can be used safely from the UK; the card keeps a "last checked" date and links for a manual look |
 
-**Data:** profiles and metadata live on the Mac (engine copy for the phone). Message text never
-leaves its app except the few messages sent to Claude for a requested draft.
-**Later:** promises and follow-up dates spotted in messages, life events, suggested new people,
-LinkedIn export, address-book import.
+**Not in v1:** paid enrichment services, X/Twitter, scoring relationships, pipelines beyond the
+prospect stages, group chats.
 
 ---
 
-## 4. Decisions — last
+## 4. Decisions — after Circle
 
-**Trigger:** Claude reading jots and meeting jots.
-**Job:** a log of what the owner decided and why, to look back on. **Read-only** (the owner never
-types decisions; corrections below).
-**What counts:** a commitment to a course of action by the owner, or a group the owner is part of
-("we'll start the cohort in January"). Not intentions or to-dos ("I should…", "maybe…").
+**Trigger:** jots only (including meeting notes and task notes). Never email.
+**Job:** a **recorder and screener** of decisions already made, so they can be reviewed. It is not
+a tool for making decisions.
+**What counts:** a commitment to a course of action by the owner or a group the owner is in. Not
+intentions or to-dos.
 
 | # | Feature |
 |---|---|
-| D1 | **Extraction:** each new or edited jot and meeting jot is read once per version; found decisions appear in the log marked "found by Claude", uncertain ones in a separate **Maybe** list |
-| D2 | **Card:** the decision in one line; the date it was made (the source's date, not the extraction date); the exact quote with its source (`J-n`, labelled "from meeting summary" for meeting jots); what prompted it, options and reasons **only if written** (otherwise "not recorded"); group; type (operational / strategic / investment) |
-| D3 | **The quote is kept** with the decision, so deleting or editing the source later doesn't erase the evidence (the card then says "source changed" or "source deleted") |
-| D4 | **Status:** decided / tentative / reversed / superseded. A later decision that seems to replace an earlier one is **suggested** as superseding it; the owner confirms |
-| D5 | **Corrections:** "Not a decision" (removes it, teaches the rulebook), "Wrong status", "Wrong type", "Re-read source" (extract again). No free editing of text |
-| D6 | **Reviews:** only for decisions in the main log (not Maybe), after 30 days (operational), 90 (strategic) or 180 (investment), once each, inside the shared reminder budget. Asks "what happened?" and "was the thinking sound?"; the answer is saved as a jot linked to the decision. Each review can be snoozed or turned off per decision |
-| D7 | Search and filters (group, type, status) |
+| D1 | **Weekly screening** (Sunday, with the weekly review): Claude reads the week's new and edited jots once and **records** the decisions it finds directly (no confirm step), each marked "found by Claude"; unsure ones go to **Maybe** |
+| D2 | **Make decision by hand:** select text anywhere → right-click → **Make decision** opens a 4-field form already filled in: *decision*, *why* (only from the text, otherwise "not recorded"), *expected outcome*, *confidence* (low/medium/high); alternatives optional |
+| D3 | **Card:** decision, date it was made (the source's date), exact quote and source `J-n` (labelled "meeting notes" when it came from Fathom), why, expected outcome, confidence, type (operational / strategic / investment), tags, people involved. The quote is kept even if the source is later edited or deleted |
+| D4 | **Weekly review page:** this week's recorded decisions (each with "Not a decision" and, for screened ones, a one-line prompt to add expected outcome and confidence), Maybe items, and due reviews |
+| D5 | **Status:** decided / tentative / reversed / superseded; a decision that seems to replace an earlier one is suggested as superseding it |
+| D6 | **Reviews:** 30 days (operational), 90 (strategic), 180 (investment), once each, inside the reminder budget. The review shows the original card with its expected outcome beside it and asks "what happened?" and "was the thinking sound?". The answer is saved as a jot linked to the decision; right-click in it → Make task. Snooze or turn off per decision |
+| D7 | **Decisions → people:** a decision that names someone in Circle links to them (their card shows it); it can suggest a "tell P-n" or "ask P-n" task; a review can suggest "check in with P-n about how it went" |
+| D8 | Search and filters (tag, type, status, person) |
 
-**Data:** reads jots only (not email). Uses Sonnet, because the owner reads the output.
-**Not in v1:** decision templates, outcome statistics, extraction from email.
+**Not in v1:** templates, outcome statistics, extraction from email.
 
 ---
 
-## 5. Links between the areas
+## 5. Resolutions — last
 
-Links are stored in the one general `links` table already built with Calendar. Each link has a
-**kind** and records who made it:
+**Trigger:** the owner.
+**Job:** longer-term direction: a **5-year** picture, **yearly** goals and **quarterly** goals, kept
+light so it doesn't become a heavy planning system.
+
+| # | Feature |
+|---|---|
+| R1 | **Three levels:** 5-year (a few lines of text), this year (up to 5 goals), this quarter (up to 3 goals). Each goal is an item `R-n` with tags |
+| R2 | **Link work to goals:** a task, jot or decision can be linked to a quarterly or yearly goal (picker, or type `R-n`). A quarterly goal can sit under a yearly goal, and a yearly goal under the 5-year picture |
+| R3 | **Progress without scoring:** each goal shows its linked tasks done / open, recent jots and decisions. No percentages, no points |
+| R4 | **Quarterly review** (nudge at quarter end): for each goal, "kept / changed / dropped" and a short note (saved as a jot); then set next quarter's goals. **Yearly review** at year end the same way, and a look at the 5-year picture |
+| R5 | The board can be filtered by a goal (shows only its tasks) |
+
+**Not in v1:** OKR scores, habit tracking, life-area wheels.
+
+---
+
+## 6. Links between the areas
+
+All links live in the one general `links` table (built with Calendar). Each link has a **kind** and
+records who made it (auto / suggested / manual).
 
 | Kind | Meaning | Example |
 |---|---|---|
 | `own-event` | a task's own Google event | T-12 → E-40 (built) |
-| `related` | two items are about the same thing | T-12 ↔ E-41, J-7 ↔ P-3 |
-| `source` | an item was made from another | T-15 from J-7; D-2 from J-9 |
-| `notes-of` | a meeting jot belongs to an event | J-9 → E-41 |
-| `review-of` | a review jot reviews a decision | J-30 → D-2 |
-| `supersedes` | a decision replaces another | D-5 → D-2 |
+| `related` | about the same thing | T-12 ↔ E-41, J-7 ↔ P-3 |
+| `source` | made from | T-15 from J-7; D-2 from J-9 |
+| `notes-of` | notes belong to | J-9 → E-41; J-20 → T-12 (task note) |
+| `review-of` | a review of a decision or goal | J-30 → D-2; J-44 → R-3 |
+| `supersedes` | replaces | D-5 → D-2 |
+| `serves` | work towards a goal | T-12 → R-3; R-3 → R-1 |
 
-Made **auto** (certain), **suggested** (Claude proposes, owner confirms) or **manual** (owner picks
-or types an id). Unlinking is always manual and undoable. Deleting an item hides its links (restored
-by Undo); it never deletes the other item, except a task's `own-event` (Calendar D8). Merging two
-people moves all links to the merged person.
-
-| Link | Kind | How it's made |
+| Link | Kind | Made |
 |---|---|---|
-| Task ↔ its own Google event | own-event | auto (built) |
+| Task ↔ its own event | own-event | auto (built) |
 | Task ↔ meeting | related | manual by id (built) |
-| Jot → Task (J7) | source | suggested or manual |
-| Task → Jot (J8) | related | manual ("Jot about this") |
-| Meeting jot → Event | notes-of | auto only when exactly one event of the owner's overlaps the meeting time; otherwise suggested candidates; unmatched is fine; can be changed |
-| Jot ↔ Person | related | suggested when a jot names a known person; manual by `P-n` |
-| Event ↔ Person | related | auto when a guest's email exactly matches one person's handle; a past meeting counts as *last talked* only if both accepted |
-| Task ↔ Person | related | auto when the task was suggested from that person's message (labelled "from their message"); manual otherwise |
-| Decision → Jot | source | auto, always |
-| Review jot → Decision | review-of | auto (D6) |
-| Decision → Decision | supersedes | suggested (D4) |
-| Decision ↔ Person / Task | related | suggested only; people at a meeting are shown as "at the meeting", not as involved |
+| Meeting notes → event | notes-of | auto by meeting link + start time; otherwise suggested; changeable |
+| Task note → task | notes-of | auto (J10) |
+| Selection → task / decision | source | manual (right-click) |
+| Jot ↔ task ("Jot about this") | related | manual |
+| Jot ↔ person | related | suggested when a jot names a known person; manual by `P-n` |
+| Event ↔ person | related | auto when a guest's email matches one person exactly |
+| Task ↔ person | related | auto when the task came from their message or is a Circle reminder; manual otherwise |
+| Decision → jot | source | auto, always |
+| Decision ↔ person | related | auto when the decision names a Circle person; suggested otherwise |
+| Review jot → decision / goal | review-of | auto |
+| Decision → decision | supersedes | suggested |
+| Task / jot / decision → goal | serves | manual |
 
-**Hubs:** a person page shows timeline, meetings, jots, open tasks and decisions linked to them; a
-meeting panel shows its tasks, notes, people and decisions. **One meeting, one pass:** a Fathom
-recap makes one meeting jot (J9), its existing suggested tasks, and decisions read from that jot once.
+Unlinking is manual and undoable. Deleting an item hides its links (Undo restores them) and never
+deletes the other item, except a task's `own-event`. Merging two people moves their links.
 
----
-
-## 6. Questions for the owner (each with a suggested default)
-
-1. **Decisions confirmation.** You asked for a read-only tab that finds decisions by itself. Codex
-   argues every decision should wait for your ✓ first. *Default: show found decisions directly (as you
-   asked), uncertain ones in Maybe, supersession only suggested.* Alternative: everything waits for ✓.
-2. **Weekly review:** with Jots, or after Decisions? *Default: after Decisions, so it can include them.*
-3. **Gmail Sent folder.** To know you replied by email, FloatBoard must read who you emailed and when
-   from Sent (no text). *Default: yes.* Without it, email counts only as "heard from".
-4. **"Reverse apply" of meeting notes to jots** — what did you mean? *Default: Claude suggests a
-   `related` link between a new meeting jot and an earlier jot on the same topic; old jots are never
-   edited.*
-5. **Prospect stages** (P9): keep the simple hand-moved stages in v1, or leave prospects to tiers
-   only for now? *Default: keep, hand-moved only.*
+**Hubs:** a person card and a meeting panel each show everything linked to them.
+**One meeting, one pass:** Fathom recap → meeting notes jot on the event → shown in linked tasks →
+screened for decisions that week → guests' "last talked" updated.
 
 ---
 
-## Changes from v1 (Codex review, 17 Nov 2026)
+## 7. AI jobs (all Haiku) and judgement-call flags
 
-- Each area now owns all its features (jot → task, "Jot about this" moved into Jots; Calendar
-  extension named); section 5 is only link kinds and how links are made.
-- Added: where data lives and phone/offline behaviour; per-channel table for People; privacy lines.
-- Interpretation is suggested, not automatic (meeting jot folder, person merges, supersession,
-  meeting-event matching); plain dates computed by code, not AI.
-- Evidence kept: decisions keep their quote; meeting jots keep Fathom's full summary; linked events
-  kept beyond the cache window.
-- Defined: what a jot is, how splitting works, draft kept on Esc, group rename/delete, exact People
-  intervals, one reminder per person, a shared reminder budget, decision definition and dates,
-  review eligibility, link kinds, unlink and merge rules, daily-file location and rewrite rules.
-- Removed from v1: address-book import, AI for contact dates, drafts based on unbuilt signals,
-  duplicate task suggestions from meeting jots. Board stays the launch tab.
-- Not adopted: making every decision wait for ✓ (asked as Q1, because it reverses what the owner asked for).
+The owner's rule: Haiku only, used efficiently (new items only, batched); anything Haiku must judge
+probabilistically is flagged here for the owner.
+
+| Job | Area | Input | Flag |
+|---|---|---|---|
+| Suggest tags after a jot is saved | Jots | one jot | low (✓/✗) |
+| Cleanup: grammar and structure only | Jots | one jot, on request | low (before/after confirm) |
+| Fill the task / decision form from a selection | Jots, Decisions | the selection + its jot | low (owner edits the form) |
+| **Find decisions in the week's jots** | Decisions | new/edited jots, weekly batch | **⚑ judgement: what counts as a decision, and its type; recorded without confirm, so mistakes show up as noise. Mitigations: Maybe list, "Not a decision" teaches the rulebook, weekly batch only** |
+| Suggest "supersedes" | Decisions | new decision + same-tag earlier ones | **⚑ judgement; suggestion only** |
+| Fill the add-contact form | Circle | that person's recent message headers and signatures | low (owner confirms) |
+| **Spot promises and follow-up dates** | Circle | message text, **5 active prospects only** | **⚑ judgement and message text leaves the Mac; limited to 5 people** |
+| **Is this news about this person?** | Circle | news headline + person's name, firm | **⚑ same-name confusion; shown as "possible" until opened** |
+| Draft a message | Circle | notes + last few messages, on request | low (never sent automatically); note: user-facing text on Haiku by owner's choice |
+
+Done by code, not AI: last-contact dates, intervals and due lists, matching meeting notes to events,
+matching guests and handles to people, exact-match merges, LinkedIn export changes, Companies House
+appointments (matched by name plus birth month/year; uncertain matches are suggestions), recurring
+meeting labels, the 30-day buffer.
+
+---
+
+## 8. Owner answers recorded (17 Nov 2026)
+
+1. Decisions are recorded without confirmation; jots are the only source; screening is weekly.
+2. Weekly review: yes, as the Decisions screening page (D4), also listing Circle's due list.
+3. Gmail Sent folder: yes.
+4. Meeting notes link to their meeting by id and appear in the linked tasks' notes (J9).
+5. Investor and Prospect are tags, not tiers (Investor allowed on Family; Prospect not).
+Also: Circle (not People); phone shows a planning summary; no folders in Jots; Resolutions added;
+Haiku only.
+
+## 9. Open questions (each with a suggested default)
+
+1. **Several tags per task** (needed for "same standard as jots"): today a task has one group.
+   *Default: allow several; the first one keeps the card's colour.*
+2. **Six tabs** is a lot next to the board. *Default: keep six; Resolutions is a quiet tab you open
+   at review time.*
+3. **Prospect signals send message text to Claude** for up to 5 people. *Default: yes, only for
+   active prospects, and the card says so.*
+4. **News watch per person** costs nothing but can be noisy. *Default: on for Investor and Prospect
+   tags only.*
