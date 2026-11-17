@@ -33,6 +33,14 @@ struct ExpandedView: View {
                 }
             case .calendar:
                 CalendarView()
+            case .jots:
+                JotsTab()
+            case .circle:
+                CircleTab()
+            case .decisions:
+                DecisionsTab()
+            case .resolutions:
+                ResolutionsTab()
             case .settings:
                 SettingsView()
             }
@@ -45,6 +53,11 @@ struct ExpandedView: View {
         .padding(.top, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay(alignment: .bottom) { UndoDeleteBar() }
+        .overlay(alignment: .bottom) { UndoUnlinkBar() }
+        .sheet(isPresented: $ui.showReview) { WeeklyReviewView { ui.showReview = false } }
+        .sheet(item: $ui.makeTask) { req in MakeTaskForm(request: req) { ui.makeTask = nil } }
+        // A tab whose area was switched off goes back to the board.
+        .onChange(of: store.modules) { _, on in if let m = ui.tab.module, !on.contains(m) { ui.tab = .board } }
         .toolbar { toolbarContent }
         .onChange(of: ui.search) { _, q in
             if !q.isEmpty { ui.tab = .board }
@@ -77,7 +90,7 @@ struct ExpandedView: View {
     /// Native toolbar: tabs in the middle, Guide and pin on the right (search is the system search field).
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            TabPicker(tab: $ui.tab)
+            TabPicker(tab: $ui.tab, tabs: UIState.Tab.visible(store.modules))
         }
         // Push search / Guide / Pin to the right edge.
         if #available(macOS 26.0, *) { ToolbarSpacer(.flexible) }
@@ -111,6 +124,11 @@ struct ExpandedView: View {
             .frame(width: ui.search.isEmpty ? 220 : 280, height: 22)
             .background(Capsule().fill(Color.primary.opacity(0.07)))
             .overlay(Capsule().strokeBorder(searchFocused ? Color.accentColor : Color.clear, lineWidth: 1.5))
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button { ui.showGlobalSearch.toggle() } label: { Label("Search everything", systemImage: "text.magnifyingglass") }
+                .help("Search tasks, meetings and every area by words or an id (T-12, J-7)")
+                .popover(isPresented: $ui.showGlobalSearch, arrowEdge: .bottom) { GlobalSearchView() }
         }
         ToolbarItem(placement: .primaryAction) {
             Button { showGuide.toggle() } label: { Label("Guide", systemImage: "questionmark.circle") }
@@ -255,9 +273,10 @@ extension SortKey {
 /// The window's tabs (in the toolbar).
 struct TabPicker: View {
     @Binding var tab: UIState.Tab
+    var tabs: [UIState.Tab] = UIState.Tab.allCases
     var body: some View {
         Picker("View", selection: $tab) {
-            ForEach(UIState.Tab.allCases, id: \.self) { Text($0.title).tag($0) }
+            ForEach(tabs, id: \.self) { Text($0.title).tag($0) }
         }
         .pickerStyle(.segmented)
         .labelsHidden()

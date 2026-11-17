@@ -73,9 +73,11 @@ struct EventPanel: View {
                     .controlSize(.small)
             }
             if !event.description.isEmpty {
-                Text(event.description).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(6)
+                // Selectable, with Make task / Copy id link on right-click.
+                ScrollView { SelectableText(event.description, source: event.id, fontSize: 11) }.frame(maxHeight: 90)
             }
             LinkedTasksSlot(event: event)
+            LinkChips(item: event.id, except: [.task])
             if waiting {
                 Label("Waiting to send to Google", systemImage: "arrow.up.circle").font(.system(size: 11)).foregroundStyle(.secondary)
             }

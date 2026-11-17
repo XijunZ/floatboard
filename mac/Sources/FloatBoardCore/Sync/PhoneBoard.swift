@@ -232,7 +232,7 @@ public enum PhoneBoard {
     /// The budget reminders waiting to be shown (at most 20), for the engine to send to the phone when the Mac does not.
     @MainActor
     public static func reminders(store: Store, now: Date) -> [BoardReminder] {
-        ReminderBudget(store: store).pending().prefix(20).map {
+        ReminderBudget(store: store).forPhone(now: now).prefix(20).map {
             BoardReminder(id: $0.id, title: clip(store.item(ShortID.parse($0.item) ?? ShortID(kind: .task, number: 0))?.title ?? "FloatBoard"),
                           text: clip($0.text), fireAt: isoUTC($0.fireAt))
         }

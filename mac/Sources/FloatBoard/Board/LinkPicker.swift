@@ -106,7 +106,7 @@ struct LinkedMeetings: View {
             if !linked.isEmpty {
                 Text("Linked meetings").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
                 ForEach(linked, id: \.self) { id in
-                    LinkedRow(remove: { store.unlink(me, id) }) {
+                    LinkedRow(remove: { store.unlinkWithUndo(me, id) }) {
                         if let e = cache.event(shortID: id.number) {
                             (Text("\(id.text) · ").foregroundStyle(.secondary).monospacedDigit()
                              + Text(Fmt.meeting(e.start) + " ").foregroundStyle(.secondary)
@@ -136,7 +136,7 @@ struct LinkedTasksSlot: View {
             if !linked.isEmpty {
                 Text("Linked tasks").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
                 ForEach(linked, id: \.self) { id in
-                    LinkedRow(remove: { store.unlink(me, id) }) {
+                    LinkedRow(remove: { store.unlinkWithUndo(me, id) }) {
                         if let t = store.card(id.number) {
                             TaskCheck(task: t)
                             Text(t.title).lineLimit(1).strikethrough(t.status == .done)

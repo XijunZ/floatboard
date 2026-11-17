@@ -22,6 +22,9 @@ struct EditCardView: View {
     @AppStorage("editorWidth") private var width: Double = 420
     @AppStorage("editorExtraHeight") private var extraHeight: Double = 0
     @State private var dragStart: (w: Double, h: Double)?
+    /// The task's tags other than its group, as the pop-up opened and as edited (saved with the task).
+    @State private var openedTags: [String] = []
+    @State private var otherTags: [String] = []
 
     /// Saves only the fields the user changed since the pop-up opened (`opened`); everything else is taken from the card as
     /// stored now, so a title, time or Meet link that Google sent meanwhile is kept (and not sent back as a newer edit).
@@ -39,8 +42,12 @@ struct EditCardView: View {
         guard let current = store.card(draft.id) else { return }
         let merged = Card.editorSave(opened: base, edited: draft, current: current)
         opened = draft   // the editor may stay open (Draft reply): later changes are measured from here
-        guard merged != current else { return }
-        store.update(merged)
+        if merged != current { store.update(merged) }
+        // Other tags: saved when changed here (the group is saved above, as before).
+        if otherTags != openedTags, let now = store.card(draft.id) {
+            store.setTags(ShortID(kind: .task, number: draft.id), primary: now.area, others: otherTags)
+            openedTags = otherTags
+        }
     }
 
     /// The task as currently edited (unsaved), for calendar/Join actions.
@@ -195,10 +202,10 @@ struct EditCardView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("From the email or meeting (AI)").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
                     // Grows with the pop-up: drag the corner down to read more.
-                    Text(LinkedText.make(draft.aiSummary)).font(.system(size: 12)).textSelection(.enabled)
-                        .lineLimit(6 + Int(extraHeight / 15))
+                    // Selectable, with Make task / Copy id link on right-click; grows with the pop-up.
+                    ScrollView { SelectableText(attributed: LinkedText.make(draft.aiSummary), source: ShortID(kind: .task, number: draft.id)) }
+                        .frame(maxWidth: .infinity, maxHeight: CGFloat(110 + extraHeight / 2), alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
@@ -206,10 +213,9 @@ struct EditCardView: View {
             TextField("Link: a call (Meet, Zoom, Teams) or any web page (optional)", text: $draft.link)
                 .textFieldStyle(.roundedBorder)
             if draft.status == .watch { waitingOn }
+            TagEditor(primary: $draft.area, others: $otherTags)
             HStack(spacing: 8) {
-                Text("Group").foregroundStyle(.secondary)
-                Dropdown(options: store.areas.map(\.name), selection: $draft.area, dot: store.color)
-                Text("Importance").foregroundStyle(.secondary).padding(.leading, 8)
+                Text("Importance").foregroundStyle(.secondary)
                 Dropdown(options: Importance.allCases, selection: $draft.importance, title: \.label)
             }
             .font(.system(size: 12))
@@ -237,6 +243,7 @@ struct EditCardView: View {
             .buttonStyle(.borderless)
             .font(.system(size: 12))
             LinkedMeetings(taskID: draft.id)
+            LinkChips(item: ShortID(kind: .task, number: draft.id), except: [.event])
             emailSection
             if replyDraftCard.canDraftReply { replyDraftSection }
             VStack(alignment: .leading, spacing: 2) {
@@ -264,7 +271,11 @@ struct EditCardView: View {
         // Clicking away (or the board collapsing) closes the pop-up: keep the edits.
         .onDisappear { if !finished { save() } }
         .onAppear {
-            if opened == nil { opened = draft }
+            if opened == nil {
+                opened = draft
+                openedTags = store.itemTags(ShortID(kind: .task, number: draft.id)).others
+                otherTags = openedTags
+            }
             hasDue = draft.due != nil
             if let d = draft.due {
                 day = d

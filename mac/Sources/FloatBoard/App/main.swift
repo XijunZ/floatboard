@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var reminders: SystemReminders?
     private var reminderSync: ReminderSync?
     private var reminderWatch: AnyCancellable?
+    private var assistantTicker: AssistantTicker?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before migration touches the real file: snapshot it, but only if it exists and needs migrating.
@@ -138,6 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.connectors.whatsappTick() }
         }
         startDueReminders()
+        // Budget reminders (Circle, Decisions) and the Sunday weekly-review nudge.
+        assistantTicker = AssistantTicker(store: store, ui: ui, show: { [weak self] r in self?.reminders?.schedule(r) },
+                                          pushBoard: { [weak self] in self?.connectors.trigger("reminder shown") })
+        assistantTicker?.start()
         // A new time zone (chosen in Settings, or the Mac's own when following it) re-reads the board, so every screen
         // and the reminders redraw in it.
         for name in [AppTime.didChange, .NSSystemTimeZoneDidChange] {

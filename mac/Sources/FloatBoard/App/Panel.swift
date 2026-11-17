@@ -6,19 +6,35 @@ import SwiftUI
 @MainActor
 final class UIState: ObservableObject {
     enum Mode { case banner, expanded, minimized, hidden }
+    /// The window's tabs (features: ground rules). An area's tab shows only while its module is on.
     enum Tab: Hashable, CaseIterable {
-        case board, calendar, settings
+        case board, calendar, jots, circle, decisions, resolutions, settings
         var title: String {
             switch self {
             case .board: "Board"
             case .calendar: "Calendar"
             case .settings: "Settings"
+            default: module?.title ?? ""
             }
         }
+        var module: Module? {
+            switch self {
+            case .jots: .jots; case .circle: .circle; case .decisions: .decisions; case .resolutions: .resolutions
+            default: nil
+            }
+        }
+        /// The tabs to show with these modules on.
+        static func visible(_ modules: Set<Module>) -> [Tab] { allCases.filter { $0.module.map(modules.contains) ?? true } }
     }
 
     @Published var mode: Mode = .banner
     @Published var tab: Tab = .board
+    /// The weekly review page (opened from the bar, or by the Sunday nudge).
+    @Published var showReview = false
+    /// Make task from a selection: the form shows while this is set.
+    @Published var makeTask: MakeTaskRequest?
+    /// Search everything (toolbar): the popover shows while true.
+    @Published var showGlobalSearch = false
     /// The open section of the Settings tab.
     @Published var settingsSection: SettingsSection = .mode
     @Published var hovering = false
