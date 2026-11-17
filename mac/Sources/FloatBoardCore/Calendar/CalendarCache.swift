@@ -166,6 +166,16 @@ public final class CalendarCache {
                             fb_card=excluded.fb_card, gone=0, cancelled=0
                         """, [account, calendarID, change.eventID, start, end, f.allDay ? 1 : 0, f.startDay, f.endDay, f.title,
                               f.location, f.videoLink, f.description, f.htmlLink, f.recurringID, f.googleUpdated, f.fbCard])
+                    // An event FloatBoard has written or sent to: note what Google has now (a changed field with its stamp).
+                    if let json = try db.query("SELECT own_write FROM cal_events WHERE account=? AND calendar_id=? AND event_id=? AND own_write IS NOT NULL",
+                                               [account, calendarID, change.eventID], { DB.text($0, 0) }).first {
+                        let prior = try? JSONDecoder().decode(CalOwnWrite.self, from: Data(json.utf8)) // try?-ok: an unreadable record is rebuilt from what Google has now
+                        let seen = CalendarOutbox.observed(prior, base: nil, current: f)
+                        if seen != prior {
+                            try db.run("UPDATE cal_events SET own_write=? WHERE account=? AND calendar_id=? AND event_id=?",
+                                       [String(decoding: try JSONEncoder().encode(seen), as: UTF8.self), account, calendarID, change.eventID])
+                        }
+                    }
                 }
             }
             if let nextToken {
