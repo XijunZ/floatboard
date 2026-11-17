@@ -41,6 +41,18 @@ import FloatBoardConnectors
           && AccountColors.eventColors(accountColor: p[0], calendar: grey, shownCalendarsOfAccount: 3) == .init(stripe: p[0], mark: nil),
           "cal1_event_stripe_is_the_account_colour_calendar_colour_only_a_mark")
 
+    // Review fix 3: the new-event sheet offers only calendars of accounts shown on the page; with all of them hidden it says
+    // so. Events still waiting to send (or refused) stay on the page even in a hidden account.
+    let own = { (acct: String, id: String) in CalCalendar(account: acct, calendarID: id, name: id, color: "#111111", owned: true, shown: true) }
+    let sub = CalCalendar(account: b, calendarID: "shared", name: "Shared", color: "#222222", owned: false, shown: true)
+    let opts = CalendarSettings.newEventOptions([own(a, "wa"), own(b, "pb"), sub], hidden: [a])
+    let none = CalendarSettings.newEventOptions([own(a, "wa"), own(b, "pb")], hidden: [a, b])
+    check(opts.options.map(\.calendarID) == ["pb"] && !opts.allHidden && none.options.isEmpty && none.allHidden,
+          "review3_new_event_sheet_leaves_out_hidden_accounts")
+    check(!CalendarSettings.showsOnPage(account: a, hidden: [a], waiting: false)
+          && CalendarSettings.showsOnPage(account: a, hidden: [a], waiting: true)
+          && CalendarSettings.showsOnPage(account: b, hidden: [a], waiting: false), "review3_waiting_or_refused_events_stay_visible_in_a_hidden_account")
+
     // CAL-2 banner: an account shown with its main calendar only (the list permission is missing) gets one line, unless dismissed.
     let main = { (acct: String) in CalCalendar(account: acct, calendarID: CalendarCache.primaryAlias, name: "Main calendar", color: "#9aa0a6", owned: true, shown: true, primary: true) }
     let listed = CalCalendar(account: c, calendarID: c, name: "C", color: "#111111", owned: true, shown: true, primary: true)

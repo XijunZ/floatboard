@@ -43,10 +43,15 @@ struct TimeGrid: View {
         let to = cal.date(byAdding: .day, value: days.count, to: from) ?? from
         let calendars = Dictionary(cache.calendars().map { (TaskEventRules.key($0.account, $0.calendarID), $0) }, uniquingKeysWith: { a, _ in a })
         let waitingNew = outbox.pendingNewEvents(from: from, to: to)
-        // Accounts hidden with the legend are left out here (the bar and the phone still show them).
+        // Accounts hidden with the legend are left out here (the bar and the phone still show them), except events still
+        // waiting to send or refused, so their state and Discard stay in reach.
         let hidden = store.hiddenCalendarAccounts()
+        let refusedIDs = Set(outbox.failedNewEvents().keys)
         let events = (cache.events(from: from, to: to).filter { !edits.deleted.contains($0.shortID) }.map(edits.shown) + waitingNew)
-            .filter { !hidden.contains($0.account) }
+            .filter { e in
+                CalendarSettings.showsOnPage(account: e.account, hidden: hidden,
+                                             waiting: e.shortID < 0 || refusedIDs.contains(e.eventID) || (hidden.contains(e.account) && outbox.pending(eventShortID: e.shortID)))
+            }
         let accountColours = store.accountColors(for: cache.connectedAccountList())
         let shownPerAccount = Dictionary(grouping: calendars.values.filter(\.shown), by: \.account).mapValues(\.count)
         let tints = calendars.mapValues { c in

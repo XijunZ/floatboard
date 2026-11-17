@@ -114,6 +114,20 @@ extension Store {
 }
 
 extension CalendarSettings {
+    /// The calendars a new event can go to: owned and shown, of accounts not hidden on the Calendar page (a new event in a
+    /// hidden account would vanish from the page at once). `allHidden`: there are such calendars, but only in hidden accounts.
+    public static func newEventOptions(_ calendars: [CalCalendar], hidden: Set<String>) -> (options: [CalCalendar], allHidden: Bool) {
+        let possible = calendars.filter { $0.owned && $0.shown }
+        let options = possible.filter { !hidden.contains($0.account) }
+        return (options, options.isEmpty && !possible.isEmpty)
+    }
+
+    /// Whether an event shows on the Calendar page: not in an account hidden with the legend, unless it is still waiting to
+    /// be sent or was refused (so its state, and Discard, stay in reach).
+    public static func showsOnPage(account: String, hidden: Set<String>, waiting: Bool) -> Bool {
+        waiting || !hidden.contains(account)
+    }
+
     /// The accounts the Calendar page names in its "Showing main calendars only" line: connected, shown with their main
     /// calendar only (the last list read said so, or nothing but the main-calendar stand-in is kept and no list read has
     /// finished yet), and the line not closed for them.
