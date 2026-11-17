@@ -39,9 +39,10 @@ struct TimeGrid: View {
         let placed = days.map { CalendarLayout.columns(for: events, tasks: tasks, day: $0) }
 
         VStack(spacing: 0) {
-            // Day names.
+            // Day names. The gutter's spacer has no height of its own: a bare Color.clear takes any height it is offered, so
+            // the stack gave this row part of the window's spare height and the names sat far below the title.
             HStack(spacing: 0) {
-                Color.clear.frame(width: gutter)
+                Color.clear.frame(width: gutter, height: 0)
                 ForEach(Array(days.enumerated()), id: \.offset) { _, d in DayHeading(day: d, single: days.count == 1) }
             }
             .padding(.bottom, 4)
