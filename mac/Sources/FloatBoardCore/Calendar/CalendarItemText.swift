@@ -43,3 +43,18 @@ extension CalendarLayout {
         }
     }
 }
+
+/// When a calendar item's hover details may show: after the pointer has rested on it (`waited`), unless something
+/// suppressed them since it entered (a click's panel or editor, a drag, a resize). Once suppressed they stay closed until
+/// the pointer leaves and enters again, so they never pop up mid-drag or linger after a drop.
+public struct HoverGate: Equatable {
+    public private(set) var armed = false
+    public private(set) var shown = false
+    public init() {}
+    public mutating func enter(suppressed: Bool) { armed = !suppressed; shown = false }
+    public mutating func waited(suppressed: Bool) { if armed && !suppressed { shown = true } }
+    public mutating func suppress() { armed = false; shown = false }
+    public mutating func leave() { armed = false; shown = false }
+    /// The popover closed by itself (Escape, a click elsewhere).
+    public mutating func closed() { shown = false }
+}
