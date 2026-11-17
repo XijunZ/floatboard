@@ -121,3 +121,43 @@ describe("phone delete logic", () => {
     expect(after.restore).toEqual({ id: "r1", made_at: "2026-11-17T10:00:00.001Z", card_id: 1, action: "restore" });
   });
 });
+
+// Round 6 (C2): a delete the engine took whose answer never came back. The phone keeps it queued and is no longer syncing;
+// Undo must still send a restore (the delete may be on the Mac already), never just drop the delete locally.
+describe("phone delete with a lost answer", () => {
+  it("undo_after_a_lost_answer_sends_a_restore_and_the_card_comes_back", async () => {
+    const u = await setup("Lost answer");
+    await put(u.key, { cards: [card(1), card(2)] });
+    const now = Date.now();
+    const del = { id: "pdel-lost1", made_at: iso(now), card_id: 1, action: "delete" };
+    let queue: any[] = [del];
+    // The sync loop marks what it sends, sends it, and the engine stores the delete, but the answer is lost.
+    const body = L.takeBatch(queue, iso(now));
+    queue = L.markAttempted(queue, body);
+    expect((await send(u.cookie, body)).status).toBe(200);
+    expect((await board(u.cookie)).cards.map((c: any) => c.id)).toEqual([2]);
+    // Undo while no sync runs.
+    const u1 = L.deleteUndoFor({ id: 1, title: "Task 1", status: "todo" }, del, now);
+    const step = L.undoDeleteStep(u1, queue, false, "pres-lost1", iso(Date.now() + 1));
+    expect(step.restore).toMatchObject({ id: "pres-lost1", card_id: 1, action: "restore" });
+    queue = step.actions.concat([step.restore]);
+    // The next sync sends the delete again (idempotent) and the restore: the card is back.
+    const r = await (await send(u.cookie, L.takeBatch(queue, iso(Date.now())))).json<any>();
+    expect(r.accepted).toEqual(expect.arrayContaining(["pdel-lost1", "pres-lost1"]));
+    expect((await board(u.cookie)).cards.map((c: any) => c.id).sort()).toEqual([1, 2]);
+    expect((await macActions(u.key)).actions.map((x: any) => x.action)).toEqual(["delete", "restore"]);
+  });
+
+  it("a_delete_never_sent_is_still_taken_back_locally", () => {
+    const del = { id: "pdel-new", made_at: "2026-11-17T10:00:00.000Z", card_id: 1, action: "delete" };
+    const other = { id: "pdel-oth", made_at: "2026-11-17T10:00:00.000Z", card_id: 2, action: "delete" };
+    // Only the batch's actions are marked; the mark is not sent to the engine.
+    const marked = L.markAttempted([del, other], { actions: [{ id: "pdel-oth" }] });
+    expect(marked.map((a: any) => !!a.attempted)).toEqual([false, true]);
+    expect(L.takeBatch(marked, "2026-11-17T10:00:00.000Z").actions[1].attempted).toBeUndefined();
+    const u = L.deleteUndoFor({ id: 1, title: "One", status: "todo" }, del, 1000);
+    const step = L.undoDeleteStep(u, marked, false, "r", "2026-11-17T10:00:05.000Z");
+    expect(step.restore).toBeNull();
+    expect(step.actions.map((a: any) => a.id)).toEqual(["pdel-oth"]);
+  });
+});
