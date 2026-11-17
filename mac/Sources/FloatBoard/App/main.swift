@@ -139,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.connectors.whatsappTick() }
         }
         startDueReminders()
+        ResolutionsArea.setUp(store: store, ui: ui)
         // Budget reminders (Circle, Decisions) and the Sunday weekly-review nudge.
         assistantTicker = AssistantTicker(store: store, ui: ui, show: { [weak self] r in self?.reminders?.schedule(r) },
                                           pushBoard: { [weak self] in self?.connectors.trigger("reminder shown") })

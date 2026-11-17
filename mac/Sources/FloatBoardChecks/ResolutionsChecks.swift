@@ -267,6 +267,15 @@ private func makeV12Schema(_ url: URL) -> Bool {
           case .success(let nq?) = ry.review(qq.id, outcome: .kept, note: "", newTitle: nil, now: at) else { check(false, "year review"); return }
     check(ny.period.key == "2027" && ry.goal(yy.id)?.status == .kept && ry.parent(of: nq.id)?.id == ny.id
           && ry.parent(of: qq.id)?.id == yy.id, "yearly_goal_rolls_over_and_parent_follows")
+    // The other order (quarter reviewed first): the year's continuation adopts the quarter's continuation.
+    guard let orderStore = goalsStore(root, "order.sqlite") else { return }
+    let ro = ResolutionStore(store: orderStore)
+    guard let oy = make(ro, .year, "2026", "Year goal"), let oq = make(ro, .quarter, "2026-Q4", "Quarter goal") else { return }
+    _ = ro.setParent(oq.id, oy.id, now: nov17)
+    guard case .success(let nq2?) = ro.review(oq.id, outcome: .kept, note: "", newTitle: nil, now: at) else { check(false, "order review"); return }
+    let orphan = ro.parent(of: nq2.id) == nil
+    guard case .success(let ny2?) = ro.review(oy.id, outcome: .kept, note: "", newTitle: nil, now: at) else { check(false, "order review 2"); return }
+    check(orphan && ro.parent(of: nq2.id)?.id == ny2.id, "year_continuation_adopts_quarter_continuations")
 }
 
 // MARK: Nudges
