@@ -200,6 +200,7 @@ public final class Store: ObservableObject {
                 try recordFieldChanges(old: old, new: new, actor: .user, now: now)
                 try queueCalendarPatch(old: old, new: new, now: now)
                 try queueChange(old: old, new: new, now: now)
+                if old.area != card.area { try stampTagsRow([card.id], now: now) }   // the group is the primary tag
                 // Ids typed into the notes link the task to them (new ones only; one unlinked with ✕ stays unlinked).
                 try linkMentionsRow(in: card.notes, previous: oldNotes, from: ShortID(kind: .task, number: card.id), now: now) }
         }
@@ -248,6 +249,7 @@ public final class Store: ObservableObject {
         try db.run("UPDATE cards SET area=?, updated=? WHERE id=?", [area, now, id])
         try insertEvent(id, "group: \(old.area) → \(area)", actor: .user, at: now)
         try queueChange(old: old, new: new, now: now)
+        try stampTagsRow([id], now: now)
     }
 
     /// How long the board's Undo bar stays up after a delete.
@@ -617,6 +619,7 @@ public final class Store: ObservableObject {
         perform {
             try db.run("INSERT INTO events(card_id,at,kind,actor,uuid) SELECT id, ?, ?, 'user', lower(hex(randomblob(16))) FROM cards WHERE area=?",
                        [now, "group renamed: \(area.name) → \(name)", area.name])
+            try stampTagsOfGroupRow(area.name, now: now)
             try db.run("UPDATE cards SET area=? WHERE area=?", [name, area.name])
             try db.run("UPDATE areas SET name=? WHERE id=?", [name, area.id])
             try groupsChanged(.renamed(area.name, name), now: now)
@@ -648,8 +651,9 @@ public final class Store: ObservableObject {
         perform {
             try db.run("INSERT INTO events(card_id,at,kind,actor,uuid) SELECT id, ?, ?, 'user', lower(hex(randomblob(16))) FROM cards WHERE area=?",
                        [now, "group deleted: \(area.name) → moved to \(target)", area.name])
+            try stampTagsOfGroupRow(area.name, now: now)
             try db.run("UPDATE cards SET area=? WHERE area=?", [target, area.name])
-            try dropTagRows(area.id)
+            try dropTagRows(area.id, now: now)
             try db.run("DELETE FROM areas WHERE id=?", [area.id])
             try groupsChanged(.deleted(area.name), now: now)
         }
