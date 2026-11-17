@@ -164,3 +164,27 @@ extension Store {
         }
     }
 }
+
+extension TagRules {
+    /// The phone copy's tag rule, the same as the engine's `parseTags` (engine/src/phone/board.ts): each tag trimmed and cut to
+    /// 60 UTF-16 units (never splitting a character), empty ones dropped, a repeat (case ignored, after cutting) dropped,
+    /// at most 20. Keep the two equal: a list that breaks it costs the card its tags on the engine.
+    public static let phoneMaxTags = 20
+    public static let phoneMaxTagUnits = 60
+
+    public static func forPhone(_ tags: [String]) -> [String] {
+        var out: [String] = [], seen = Set<String>()
+        for raw in tags {
+            var t = "", n = 0
+            for ch in raw.trimmingCharacters(in: .whitespacesAndNewlines) {
+                if n + ch.utf16.count > phoneMaxTagUnits { break }
+                t.append(ch); n += ch.utf16.count
+            }
+            t = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty, seen.insert(t.lowercased()).inserted else { continue }
+            out.append(t)
+            if out.count == phoneMaxTags { break }
+        }
+        return out
+    }
+}
