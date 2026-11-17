@@ -62,6 +62,19 @@ extension JotStore {
         return jot
     }
 
+    /// Puts texts the engine kept (earlier phone versions) into a jot's history, oldest first; a text equal to the jot's current
+    /// one or already in its history is not added twice.
+    public func keepInHistory(_ id: Int64, _ texts: [EarlierText]) {
+        guard !texts.isEmpty, let j = jot(id) else { return }
+        var have = Set(history(id).map(\.text) + [j.text])
+        store.perform {
+            for t in texts.sorted(by: { $0.at < $1.at }) where !have.contains(t.text) {
+                try store.db.run("INSERT INTO jot_history(jot_id, text, at) VALUES(?,?,?)", [id, t.text, t.at])
+                have.insert(t.text)
+            }
+        }
+    }
+
     /// The jot that arrived with this engine key, if any (deleted ones too).
     public func jot(origin: String) -> Jot? {
         guard !origin.isEmpty else { return nil }

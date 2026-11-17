@@ -5,7 +5,9 @@
  *   in `jot_copies` under its Mac number; `mac_saved_at` is when the Mac last saved its latest version.
  * - The phone reads the copy (`GET /app/api/jots`: added in the last 30 days, not deleted) and sends captures, edits,
  *   deletes and Make task / Make decision (`POST /app/api/jots`, a batch with `sent_at`; times are moved onto the engine's
- *   clock; each action id is applied once). A change older than the copy's version is "superseded" (newest wins).
+ *   clock; each action id is applied once). A change older than the copy's version is "superseded" (newest wins), but an
+ *   edit's text is never thrown away: every text a change replaces waits in `jot_copy_versions` until the Mac has put it in
+ *   the jot's history (acked). A change to a jot the copy no longer holds waits for the Mac too (never dropped).
  * - Phone changes and Fathom meeting notes wait (`waiting=1`) until the Mac takes them (`GET /v2/jots/waiting`) and acks
  *   them (`POST /v2/jots/ack`, only for the same `rev`, so a newer phone change keeps waiting).
  * - Hourly: a copy is removed 30 days after the Mac saved its latest version; never while a change waits, never before the
@@ -127,8 +129,18 @@ route("PUT", "/v2/jots", async (req, env, user) => {
       // A newer phone change waits for the Mac: keep its text; the tags are the Mac's (the phone does not edit them).
       await env.DB.prepare("UPDATE jot_copies SET tags=? WHERE user_id=? AND key=?").bind(JSON.stringify(j.tags), user.id, have.key).run();
     } else {
-      await env.DB.prepare(`UPDATE jot_copies SET text_enc=?, kind=?, source=?, tags=?, added=?, updated=?, deleted=?, mac_saved_at=?, waiting=0
-          WHERE user_id=? AND key=?`).bind(enc, j.kind, j.source, JSON.stringify(j.tags), j.added, j.updated, j.deleted ? 1 : 0, now, user.id, have.key).run();
+      // A waiting phone edit that this newer Mac version replaces is kept for the jot's history (never thrown away).
+      let keep = false;
+      if (have.waiting) {
+        const cur = await env.DB.prepare("SELECT text_enc, rev FROM jot_copies WHERE user_id=? AND key=?").bind(user.id, have.key).first<{ text_enc: string; rev: number }>();
+        if (cur && (await decrypt(env, cur.text_enc)) !== j.text) {
+          await env.DB.prepare("INSERT INTO jot_copy_versions(user_id,key,rev,text_enc,at) VALUES(?,?,?,?,?)").bind(user.id, have.key, cur.rev + 1, cur.text_enc, have.updated).run();
+          keep = true;
+        }
+      }
+      await env.DB.prepare(`UPDATE jot_copies SET text_enc=?, kind=?, source=?, tags=?, added=?, updated=?, deleted=?, mac_saved_at=?, waiting=?, rev=rev+?
+          WHERE user_id=? AND key=?`).bind(enc, j.kind, j.source, JSON.stringify(j.tags), j.added, j.updated, j.deleted ? 1 : 0, now, keep ? 1 : 0, keep ? 1 : 0,
+          user.id, have.key).run();
     }
   }
   if (nudge) {
@@ -147,6 +159,9 @@ route("GET", "/v2/jots/waiting", async (_req, env, user) => {
   for (const r of rows) {
     const o: Record<string, unknown> = await rowOut(env, r);
     if (r.ref) o.ref = r.ref;
+    const versions = (await env.DB.prepare("SELECT text_enc, at FROM jot_copy_versions WHERE user_id=? AND key=? AND rev<=? ORDER BY id")
+      .bind(user.id, r.key, r.rev).all<{ text_enc: string; at: string }>()).results;
+    if (versions.length) o.versions = await Promise.all(versions.map(async (v) => ({ text: await decrypt(env, v.text_enc), at: v.at })));
     if (r.recap_key) {
       const m = await env.DB.prepare("SELECT recap_key, fathom_url, meeting_url, title, scheduled_start, invitees FROM meetings WHERE user_id=? AND recap_key=?")
         .bind(user.id, r.recap_key).first<{ recap_key: string; fathom_url: string; meeting_url: string; title: string; scheduled_start: string | null; invitees: string }>();
@@ -171,6 +186,8 @@ route("POST", "/v2/jots/ack", async (req, env, user) => {
       acked += (await env.DB.prepare("DELETE FROM jot_copies WHERE user_id=? AND key=? AND rev=?").bind(user.id, it.key, it.rev).run()).meta.changes;
       continue;
     }
+    // Earlier texts sent with this version are in the Mac's history now.
+    await env.DB.prepare("DELETE FROM jot_copy_versions WHERE user_id=? AND key=? AND rev<=?").bind(user.id, it.key, it.rev).run();
     if (it.mac_id) {
       // A copy the Mac sent under its own number before acking this capture is the same jot: one copy stays.
       await env.DB.prepare("DELETE FROM jot_copies WHERE user_id=? AND mac_id=? AND key<>?").bind(user.id, it.mac_id, it.key).run();
@@ -204,7 +221,7 @@ async function phoneList(env: Env, userId: string, nowMs = Date.now()) {
   return out;
 }
 
-type Dropped = { id: string | null; reason: string };
+type Dropped = { id: string | null; reason: string; kept?: true };
 
 async function applyPhone(env: Env, userId: string, a: any, skew: number | null, receivedMs: number): Promise<"ok" | Dropped> {
   const id = typeof a?.id === "string" ? a.id : null;
@@ -223,20 +240,42 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
         VALUES(?,?,?,'jot','phone','[]',?,?,1,1)`).bind(userId, `phone:${id}`, await encrypt(env, text), made, made), seen]);
     return "ok";
   }
-  const row = typeof a.key === "string"
-    ? await env.DB.prepare("SELECT key, updated, deleted FROM jot_copies WHERE user_id=? AND key=? AND kind NOT LIKE 'action:%'").bind(userId, a.key)
-      .first<{ key: string; updated: string; deleted: number }>()
-    : null;
-  if (!row) return drop("unknown jot");
+  if (typeof a.key !== "string" || !a.key || a.key.length > 200) return drop("bad key");
+  const macID = /^J-(\d+)$/.exec(a.key)?.[1];
+  let row = await env.DB.prepare("SELECT key, updated, deleted, rev, text_enc FROM jot_copies WHERE user_id=? AND key=? AND kind NOT LIKE 'action:%'")
+    .bind(userId, a.key).first<{ key: string; updated: string; deleted: number; rev: number; text_enc: string }>();
+  if (!row && macID) {
+    row = await env.DB.prepare("SELECT key, updated, deleted, rev, text_enc FROM jot_copies WHERE user_id=? AND mac_id=?").bind(userId, Number(macID))
+      .first<{ key: string; updated: string; deleted: number; rev: number; text_enc: string }>();
+  }
   if (a.op === "make_task" || a.op === "make_decision") {
     await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,text_enc,kind,source,tags,added,updated,waiting,rev,ref)
-        VALUES(?,?,?,?,'phone','[]',?,?,1,1,?)`).bind(userId, `action:${id}`, await encrypt(env, text), `action:${a.op}`, made, made, row.key), seen]);
+        VALUES(?,?,?,?,'phone','[]',?,?,1,1,?)`).bind(userId, `action:${id}`, await encrypt(env, text), `action:${a.op}`, made, made, row?.key ?? a.key), seen]);
     return "ok";
   }
-  if (Date.parse(made) < Date.parse(row.updated)) { await seen.run(); return drop("superseded"); }
-  const set = a.op === "edit" ? ["text_enc=?", [await encrypt(env, text)]] as const : ["deleted=?", [a.op === "delete" ? 1 : 0]] as const;
-  await env.DB.batch([env.DB.prepare(`UPDATE jot_copies SET ${set[0]}, updated=?, waiting=1, rev=rev+1 WHERE user_id=? AND key=?`)
-    .bind(...set[1], made, userId, row.key), seen]);
+  if (!row) {
+    // A jot the copy no longer holds (removed 30 days after the Mac saved it, or never here): the change waits for the Mac,
+    // which applies it to its jot by number or key (newest wins), or keeps it as a new jot. Never dropped.
+    await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,mac_id,text_enc,kind,source,tags,added,updated,deleted,waiting,rev)
+        VALUES(?,?,?,?,'jot','phone','[]',?,?,?,1,1)`).bind(userId, a.key, macID ? Number(macID) : null, await encrypt(env, a.op === "edit" ? text : ""),
+        made, made, a.op === "delete" ? 1 : 0), seen]);
+    return "ok";
+  }
+  const older = Date.parse(made) < Date.parse(row.updated);
+  if (a.op === "edit") {
+    // Newest wins with history: the text being replaced (or this older edit) is kept until the Mac has saved it.
+    const kept = older ? await encrypt(env, text) : row.text_enc;
+    const stmts = [env.DB.prepare("INSERT INTO jot_copy_versions(user_id,key,rev,text_enc,at) VALUES(?,?,?,?,?)").bind(userId, row.key, row.rev + 1, kept,
+      older ? made : row.updated)];
+    stmts.push(older
+      ? env.DB.prepare("UPDATE jot_copies SET waiting=1, rev=rev+1 WHERE user_id=? AND key=?").bind(userId, row.key)
+      : env.DB.prepare("UPDATE jot_copies SET text_enc=?, updated=?, waiting=1, rev=rev+1 WHERE user_id=? AND key=?").bind(await encrypt(env, text), made, userId, row.key));
+    await env.DB.batch([...stmts, seen]);
+    return older ? { id, reason: "superseded", kept: true } : "ok";
+  }
+  if (older) { await seen.run(); return { id, reason: "superseded", kept: true }; }   // the text stays; the Mac's newer version wins
+  await env.DB.batch([env.DB.prepare("UPDATE jot_copies SET deleted=?, updated=?, waiting=1, rev=rev+1 WHERE user_id=? AND key=?")
+    .bind(a.op === "delete" ? 1 : 0, made, userId, row.key), seen]);
   return "ok";
 }
 
@@ -256,12 +295,14 @@ export async function handleJotsApp(req: Request, env: Env): Promise<Response | 
   const actions = rb.body.actions;
   if (!Array.isArray(actions) || actions.length > MAX_ACTIONS) return appJSON({ error: `actions must be a list of at most ${MAX_ACTIONS}` }, 400, s.setCookie);
   const skew = skewOf(isISO(rb.body.sent_at) ? rb.body.sent_at : null, receivedMs);
-  const accepted: string[] = [], dropped: Dropped[] = [];
+  const accepted: string[] = [], dropped: Dropped[] = [], superseded: string[] = [];
   for (const a of actions) {
     const r = await applyPhone(env, s.userId, a, skew, receivedMs);
-    if (r === "ok") accepted.push(a.id); else dropped.push(r);
+    if (r === "ok") accepted.push(a.id);
+    else if (r.kept) { accepted.push(a.id); superseded.push(a.id); }   // older than the Mac's version: kept for the history
+    else dropped.push(r);
   }
-  return appJSON({ accepted, dropped, jots: await phoneList(env, s.userId) }, 200, s.setCookie);
+  return appJSON({ accepted, dropped, superseded, jots: await phoneList(env, s.userId) }, 200, s.setCookie);
 }
 
 // ---- Housekeeping and the nudge -----------------------------------------------------------------
@@ -271,6 +312,8 @@ export async function purgeJots(env: Env, nowMs = Date.now()): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM jot_copies WHERE waiting=0 AND mac_saved_at IS NOT NULL AND mac_saved_at<?").bind(iso(nowMs - KEEP_DAYS * DAY)),
     env.DB.prepare("DELETE FROM jot_actions_seen WHERE at<?").bind(iso(nowMs - SEEN_KEEP_DAYS * DAY)),
+    env.DB.prepare(`DELETE FROM jot_copy_versions WHERE NOT EXISTS (SELECT 1 FROM jot_copies c WHERE c.user_id=jot_copy_versions.user_id
+        AND c.key=jot_copy_versions.key)`),
   ]);
 }
 
