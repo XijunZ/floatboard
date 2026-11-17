@@ -193,7 +193,9 @@ extension ConnectorClient {
             // Examples go into the rulebook of the engine that screens (this Mac's in Mac only mode).
             if DecisionsEngine.client(store: store)?.id == id { DecisionRulebook.applyPending(store: store, connector: id, now: now) }
             let copy = DecisionPhone.copy(store: store, now: now)
-            let data = try JSONEncoder().encode(copy)
+            let enc = JSONEncoder()
+            enc.outputFormatting = [.sortedKeys]   // a stable hash: key order is otherwise not guaranteed
+            let data = try enc.encode(copy)
             let hash = SHA256.hash(data: data + Data(client.engineAddress.utf8)).map { String(format: "%02x", $0) }.joined()
             if hash != DecisionPhone.sentHash(store: store, connector: id) {
                 try await client.putDecisions(copy)
