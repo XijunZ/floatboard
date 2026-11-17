@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 11
+    public static let schemaVersion = 12
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -50,9 +50,11 @@ public final class DB {
             } else if version < DB.oldestSupportedVersion {
                 throw DBError.tooOld(file: url.lastPathComponent, version: Int(version))
             } else if version < DB.schemaVersion {
+                if version == 11 { try addMissingV11Columns() }
                 try transaction {
                     try exec(DB.upgrade(from: Int(version)) + "PRAGMA user_version = \(DB.schemaVersion);")
                     if version < 11 { try backfillDueDays() }
+                    if version < 12 { try exec(DB.v12Backfill) }
                 }
             } else if version == DB.schemaVersion {
                 try addMissingV11Columns()
@@ -191,8 +193,81 @@ public final class DB {
 
             """
         }
+        if version < 12 {
+            // 11 -> 12: the assistant foundation (docs/superpowers/specs/2026-11-17-foundation-design.md). Filled in by `v12Backfill`.
+            sql += """
+            ALTER TABLE links ADD COLUMN kind TEXT NOT NULL DEFAULT 'related';
+            ALTER TABLE links ADD COLUMN made_by TEXT NOT NULL DEFAULT 'manual';
+            ALTER TABLE links ADD COLUMN subject TEXT NOT NULL DEFAULT '';
+            ALTER TABLE links ADD COLUMN hidden_by TEXT NOT NULL DEFAULT '';
+            ALTER TABLE cards ADD COLUMN item_source TEXT NOT NULL DEFAULT '';
+            ALTER TABLE areas ADD COLUMN fixed INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE cal_events ADD COLUMN guests TEXT NOT NULL DEFAULT '[]';
+
+            """ + v12Tables
+        }
         return sql
     }
+
+    /// The tables, indexes and triggers version 12 adds (the same text for a new board and an upgraded one).
+    static let v12Tables = """
+    -- Tags on any item (a task's primary tag is its group, cards.area; its other tags and every tag of other items are here).
+    CREATE TABLE item_tags(
+        item TEXT NOT NULL, tag_id INTEGER NOT NULL, is_primary INTEGER NOT NULL DEFAULT 0, added REAL NOT NULL,
+        PRIMARY KEY(item, tag_id)
+    );
+    CREATE INDEX item_tags_tag ON item_tags(tag_id);
+    -- Jots (J-n): one saved capture each, every earlier text kept in jot_history.
+    CREATE TABLE jots(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'jot',
+        source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX jots_added ON jots(added);
+    CREATE TABLE jot_history(id INTEGER PRIMARY KEY AUTOINCREMENT, jot_id INTEGER NOT NULL, text TEXT NOT NULL, at REAL NOT NULL);
+    CREATE INDEX jot_history_jot ON jot_history(jot_id);
+    -- People (P-n); aliases is a JSON list of other names, for matching names in text by code.
+    CREATE TABLE people(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, aliases TEXT NOT NULL DEFAULT '[]', tier TEXT NOT NULL DEFAULT 'network',
+        source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
+    );
+    -- The shared reminder budget: one row per notification granted (id = kind, item and day), delivered once.
+    CREATE TABLE reminders(
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, item TEXT NOT NULL, text TEXT NOT NULL, day TEXT NOT NULL,
+        fire_at REAL NOT NULL, granted REAL NOT NULL, delivered REAL, delivered_by TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX reminders_day ON reminders(day);
+    -- A permanent minimal record of every event a link points to, kept when the event leaves the window or Google deletes it.
+    CREATE TABLE cal_kept(
+        short_id INTEGER PRIMARY KEY, title TEXT NOT NULL, start REAL NOT NULL, "end" REAL NOT NULL, all_day INTEGER NOT NULL,
+        video_link TEXT NOT NULL DEFAULT '', kept_at REAL NOT NULL
+    );
+    CREATE TRIGGER links_keep_event AFTER INSERT ON links BEGIN
+        INSERT OR REPLACE INTO cal_kept(short_id, title, start, "end", all_day, video_link, kept_at)
+        SELECT short_id, title, start, "end", all_day, video_link, CAST(strftime('%s','now') AS REAL) FROM cal_events
+        WHERE (NEW.from_type='E' AND short_id=CAST(NEW.from_id AS INTEGER)) OR (NEW.to_type='E' AND short_id=CAST(NEW.to_id AS INTEGER));
+    END;
+    CREATE TRIGGER cal_events_keep AFTER UPDATE ON cal_events WHEN NEW.gone=0 AND EXISTS (SELECT 1 FROM cal_kept WHERE short_id=NEW.short_id) BEGIN
+        UPDATE cal_kept SET title=NEW.title, start=NEW.start, "end"=NEW."end", all_day=NEW.all_day, video_link=NEW.video_link WHERE short_id=NEW.short_id;
+    END;
+
+    """
+
+    /// 11 -> 12 data: existing links classified (a task and its own event: own-event, made by code; the rest stay related and
+    /// manual), tasks made on the phone marked so, records kept for linked events, and all four areas switched on (the
+    /// owner wants to see them; a new board starts with them off). The fixed tags are added at every start (`seedFixedTags`).
+    static let v12Backfill = """
+    UPDATE links SET kind='own-event', made_by='auto', subject='T-' || to_id
+    WHERE from_type='E' AND to_type='T' AND EXISTS (
+        SELECT 1 FROM cal_events e WHERE e.short_id=CAST(links.from_id AS INTEGER) AND (
+            e.fb_card=CAST(links.to_id AS INTEGER)
+            OR EXISTS (SELECT 1 FROM cards c WHERE c.id=CAST(links.to_id AS INTEGER) AND c.gcal_event<>'' AND c.gcal_event=e.event_id AND c.gcal_account=e.account)));
+    UPDATE cards SET item_source='phone' WHERE id IN (SELECT card_id FROM events WHERE kind='created (from the phone)');
+    INSERT OR IGNORE INTO cal_kept(short_id, title, start, "end", all_day, video_link, kept_at)
+    SELECT short_id, title, start, "end", all_day, video_link, CAST(strftime('%s','now') AS REAL) FROM cal_events
+    WHERE short_id IN (SELECT CAST(from_id AS INTEGER) FROM links WHERE from_type='E' UNION SELECT CAST(to_id AS INTEGER) FROM links WHERE to_type='E');
+    INSERT OR REPLACE INTO meta(key, value) VALUES('modules', '["jots","circle","decisions","resolutions"]');
+
+    """
 
     /// The schema at `schemaVersion`. Boards that reached this version by upgrading have exactly these tables,
     /// columns (in this order) and indexes, so a new board has the same shape. module_applied is unused but kept for that reason.
@@ -229,7 +304,7 @@ public final class DB {
         reply_draft_link TEXT NOT NULL DEFAULT '',
         reply_draft_error TEXT NOT NULL DEFAULT '',
         reply_draft_request TEXT NOT NULL DEFAULT '',
-        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0, gcal_calendar TEXT NOT NULL DEFAULT '', gcal_synced_at REAL, gcal_baseline TEXT NOT NULL DEFAULT ''
+        reply_draft_sent_at REAL, watch_person TEXT NOT NULL DEFAULT '', watch_contact TEXT NOT NULL DEFAULT '', watch_since REAL, due_day TEXT, due_has_time INTEGER NOT NULL DEFAULT 0, gcal_calendar TEXT NOT NULL DEFAULT '', gcal_synced_at REAL, gcal_baseline TEXT NOT NULL DEFAULT '', item_source TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX cards_external_id ON cards(external_id);
     CREATE UNIQUE INDEX cards_source_key ON cards(connector, source_mid, source_sent)
@@ -250,7 +325,7 @@ public final class DB {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE COLLATE NOCASE,
         color TEXT NOT NULL,
-        position REAL NOT NULL
+        position REAL NOT NULL, fixed INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE module_applied(external_id TEXT PRIMARY KEY, at REAL NOT NULL);
     CREATE TABLE activity(
@@ -293,9 +368,12 @@ public final class DB {
     );
     CREATE INDEX instructions_part ON instructions(connector, part, at);
     -- Links between items by visible id (T-142, E-37); stored once, smaller text first.
+    -- kind/made_by: what the link means and who made it (§6); subject: the id the kind is said of; hidden_by: the deleted item hiding it.
     CREATE TABLE links(
         id INTEGER PRIMARY KEY AUTOINCREMENT, from_type TEXT NOT NULL, from_id TEXT NOT NULL,
         to_type TEXT NOT NULL, to_id TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'related', made_by TEXT NOT NULL DEFAULT 'manual', subject TEXT NOT NULL DEFAULT '',
+        hidden_by TEXT NOT NULL DEFAULT '',
         UNIQUE(from_type, from_id, to_type, to_id)
     );
     CREATE INDEX links_to ON links(to_type, to_id);
@@ -312,6 +390,7 @@ public final class DB {
         location TEXT NOT NULL DEFAULT '', video_link TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
         html_link TEXT NOT NULL DEFAULT '', recurring_id TEXT, google_updated REAL NOT NULL, fb_card INTEGER,
         gone INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, own_write TEXT, original_start TEXT,
+        guests TEXT NOT NULL DEFAULT '[]',
         UNIQUE(account, calendar_id, event_id)
     );
     CREATE INDEX cal_events_start ON cal_events(start);
@@ -331,7 +410,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """
+    """ + v12Tables
 
     func exec(_ sql: String) throws {
         if sqlite3_exec(handle, sql, nil, nil, nil) != SQLITE_OK { throw DBError.sql(lastMessage) }

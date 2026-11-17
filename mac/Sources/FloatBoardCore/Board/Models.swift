@@ -95,6 +95,8 @@ public struct Card: Identifiable, Equatable {
     /// Whether `due` carries a time of day. Stored, not guessed from the clock, so a time zone change never turns a
     /// date-only task into a timed one (or the reverse).
     public var dueHasTime: Bool = false
+    /// Where the task came from when recorded ("phone"); empty = worked out from the task (`itemSource`).
+    public var itemSourceRaw: String = ""
 
     public init(id: Int64, title: String, notes: String, area: String, importance: Importance, due: Date?, status: Status,
                 created: Date, started: Date?, done: Date?, link: String = "", gcalAccount: String = "",

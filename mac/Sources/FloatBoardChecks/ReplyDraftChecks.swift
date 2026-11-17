@@ -41,7 +41,7 @@ private func boardFacts(_ url: URL) -> [String: [[String?]]] {
     [
         "cards": rows(url, "SELECT count(*) FROM cards"),
         "events": rows(url, "SELECT count(*) FROM events"),
-        "areas": rows(url, "SELECT count(*) FROM areas"),
+        "areas": rows(url, "SELECT count(*) FROM areas WHERE name NOT IN ('Investor', 'Prospect')"),   // the fixed tags are added at start
         "outbox": rows(url, "SELECT count(*) FROM outbox"),
         "connectors": rows(url, "SELECT count(*) FROM connectors"),
         "card_rows": rows(url, """
@@ -50,7 +50,7 @@ private func boardFacts(_ url: URL) -> [String: [[String?]]] {
                    connector,proposal_json FROM cards ORDER BY id
             """),
         "event_rows": rows(url, "SELECT * FROM events ORDER BY id"),
-        "area_rows": rows(url, "SELECT * FROM areas ORDER BY id"),
+        "area_rows": rows(url, "SELECT id,name,color,position FROM areas WHERE name NOT IN ('Investor', 'Prospect') ORDER BY id"),
     ]
 }
 
@@ -138,8 +138,8 @@ private func draftProposal(id: String, mid: String, sent: String = "2026-11-07T1
         let backupVersion = backup.map { rows($0.url, "PRAGMA user_version") } ?? []
         check(opened.store != nil && opened.backedUp && backupVersion == [["7"]] && boardFacts(v7) == before
               && integrity(v7) == "ok" && rows(v7, "PRAGMA user_version") == [[String(DB.schemaVersion)]]
-              && Array(cols.suffix(13).prefix(5)) == draftColumns
-              && Array(cols.suffix(8)) == ["watch_person", "watch_contact", "watch_since", "due_day", "due_has_time", "gcal_calendar", "gcal_synced_at", "gcal_baseline"]
+              && Array(cols.suffix(14).prefix(5)) == draftColumns
+              && Array(cols.suffix(9).prefix(8)) == ["watch_person", "watch_contact", "watch_since", "due_day", "due_has_time", "gcal_calendar", "gcal_synced_at", "gcal_baseline"]
               && rows(v7, "SELECT watch_person, watch_contact, watch_since FROM cards WHERE id=2") == [["", "", nil]]
               && rows(v7, "SELECT reply_draft_state,reply_draft_link,reply_draft_error,reply_draft_request,reply_draft_sent_at FROM cards WHERE id=2")
                 == [[nil, "", "", "", nil]]
@@ -157,7 +157,7 @@ private func draftProposal(id: String, mid: String, sent: String = "2026-11-07T1
     do {
         let fresh = root.appendingPathComponent("fresh8.sqlite")
         _ = try DB(url: fresh)
-        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("schema-v11.json"))) as? [[Any]] ?? []
+        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("schema-v\(DB.schemaVersion).json"))) as? [[Any]] ?? []
         let expected = raw.map { $0.map { $0 as? String } }
         let freshRows = norm(rows(fresh, masterSQL))
         check(!expected.isEmpty && freshRows == norm(rows(v7, masterSQL)) && freshRows == norm(expected),
