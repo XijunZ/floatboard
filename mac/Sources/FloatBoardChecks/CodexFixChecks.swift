@@ -203,6 +203,40 @@ import FloatBoardConnectors
               && outbox.due(now: Date().addingTimeInterval(1)).count == 1
               && store.recentActivity(limit: 200).filter { $0.level != .info }.count == before, "f4_precondition_failed_is_retried_quietly")
     } catch { check(false, "f4 offline: \(error)") }
+
+    // F5. Moving a date-only task keeps its all-day event's length in days (a 3-day event stays 3 days), from a board edit
+    //     and from the sync.
+    do {
+        let (store, cache, outbox) = try setup("f5-multiday")
+        let long = Date().addingTimeInterval(-86400)
+        func days(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: day)! }
+        func allDay(_ id: String, _ title: String, from: Int, count: Int, fb: Int64) {
+            cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: id, cancelled: false,
+                fields: CalEventFields(start: days(from), end: days(from + count), allDay: true, startDay: Due.dayString(days(from)),
+                                       endDay: Due.dayString(days(from + count)), title: title, googleUpdated: long, fbCard: fb))], nextToken: nil)
+        }
+        func patchedSpan(_ eventID: String) -> (String?, Date?)? {
+            for r in outbox.rows(unsent: true) { if case .patch(let id, _, _, let e, let d)? = r.write, id == eventID { return (d, e) } }
+            return nil
+        }
+        let a = newTask(store, "Conference", due: day, hasTime: false)
+        linkTask(store, a, event: "md1")
+        allDay("md1", "Conference", from: 0, count: 3, fb: a)
+        if var c = store.card(a) { c.due = days(5); store.update(c) }
+        let board = patchedSpan("md1")
+        check(board?.0 == Due.dayString(days(5)) && board?.1 == days(8), "f5_board_move_keeps_a_3_day_event_3_days")
+
+        let b = newTask(store, "Offsite", due: day, hasTime: false)
+        linkTask(store, b, event: "md2")
+        allDay("md2", "Offsite", from: 0, count: 3, fb: b)
+        // The board's newer date, not yet sent (as after a failed send that Google later refused): the sync queues it.
+        store.performForTest("UPDATE cards SET due=\(days(2).timeIntervalSince1970), due_day='\(Due.dayString(days(2)))', due_has_time=0 WHERE id=\(b)")
+        store.performForTest("INSERT INTO events(card_id, at, kind, actor, uuid) VALUES(\(b), \(Date().timeIntervalSince1970), 'due: moved', 'user', 'f5-\(b)')")
+        store.reload()
+        TaskEventRules.reconcile(store: store, cache: cache, now: Date())
+        let synced = patchedSpan("md2")
+        check(synced?.0 == Due.dayString(days(2)) && synced?.1 == days(5), "f5_sync_move_keeps_a_3_day_event_3_days")
+    } catch { check(false, "f5 multiday: \(error)") }
 }
 
 /// A Google event as the API returns it.
