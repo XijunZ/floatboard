@@ -341,7 +341,7 @@ private struct EventBlock: View {
         .frame(height: h, alignment: .top)
         .offset(drag)
         .opacity(drag == .zero ? 1 : 0.8)
-        .modifier(HoverDetail(suppressed: open || showRefusal) { CalendarItemDetail(content: .event(event), calendar: calendar) })
+        .modifier(HoverDetail(suppressed: open || showRefusal || drag != .zero || grow != 0) { CalendarItemDetail(content: .event(event), calendar: calendar) })
         .popover(isPresented: $open, arrowEdge: .trailing) { EventPanel(event: event, calendar: calendar, waiting: waiting) }
         .popover(isPresented: $showRefusal, arrowEdge: .trailing) {
             if let refused {
@@ -404,7 +404,7 @@ private struct TaskBlock: View {
             })
         // A click opens the task exactly as on the board: the board's task editor.
         .onTapGesture { editing = true }
-        .modifier(HoverDetail(suppressed: editing) { CalendarItemDetail(content: .task(task), calendar: nil) })
+        .modifier(HoverDetail(suppressed: editing || drag != .zero) { CalendarItemDetail(content: .task(task), calendar: nil) })
         .popover(isPresented: $editing, arrowEdge: .trailing) { EditCardView(draft: store.card(task.id) ?? task) { editing = false } }
     }
 }
@@ -487,9 +487,10 @@ private struct StripMore: View {
 /// After the pointer rests on a calendar item for 0.4 s: a small popover with its full details (`CalendarItemDetail`).
 /// It closes when the pointer leaves; a click still opens the item's panel or editor (then this stays closed).
 struct HoverDetail<Detail: View>: ViewModifier {
+    /// True while a click's panel or editor is open, or the item is being dragged or resized.
     var suppressed: Bool
     @ViewBuilder var detail: () -> Detail
-    @State private var shown = false
+    @State private var gate = HoverGate()
     @State private var wait: Task<Void, Never>?
     @Environment(\.calendarSnapshot) private var snapshot
 
@@ -498,14 +499,16 @@ struct HoverDetail<Detail: View>: ViewModifier {
             content
                 .onHover { inside in
                     wait?.cancel()
-                    guard inside, !suppressed else { shown = false; return }
+                    guard inside else { gate.leave(); return }
+                    gate.enter(suppressed: suppressed)
                     wait = Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 400_000_000) // try?-ok: a cancelled wait just means the pointer left
-                        if !Task.isCancelled && !suppressed { shown = true }
+                        if !Task.isCancelled { gate.waited(suppressed: suppressed) }
                     }
                 }
-                .onChange(of: suppressed) { _, s in if s { wait?.cancel(); shown = false } }
-                .popover(isPresented: $shown, arrowEdge: .top) { detail() }
+                // A drag, resize or click closes them at once, and they stay closed until the pointer enters again.
+                .onChange(of: suppressed) { _, s in if s { wait?.cancel(); gate.suppress() } }
+                .popover(isPresented: Binding(get: { gate.shown }, set: { if !$0 { gate.closed() } }), arrowEdge: .top) { detail() }
         }
     }
 }

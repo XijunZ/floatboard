@@ -23,6 +23,17 @@ import FloatBoardCore
                      allDay: false, title: "Call", location: "", videoLink: "", description: "", htmlLink: "", recurringID: nil,
                      googleUpdated: Date(), fbCard: nil)
     let t = Card(id: 42, title: "Write the long plan", notes: "", area: "Work", importance: .medium, due: Date(), status: .todo, created: Date(), started: nil, done: nil)
+    // Review fix 2: the hover details never open during a drag or resize, and do not come back after the drop until the
+    // pointer enters the item again.
+    var g = HoverGate()
+    g.enter(suppressed: false); g.suppress(); g.waited(suppressed: false)
+    let duringDrag = g.shown
+    g.waited(suppressed: false)   // the drag ended, the pointer still over the item
+    let afterDrop = g.shown
+    g.leave(); g.enter(suppressed: false); g.waited(suppressed: false)
+    let nextEntry = g.shown
+    var h = HoverGate(); h.enter(suppressed: false); h.waited(suppressed: false); let open = h.shown; h.suppress()
+    check(!duringDrag && !afterDrop && nextEntry && open && !h.shown, "review2_hover_details_close_on_drag_and_stay_closed_until_next_entry")
     check(CalendarLayout.clickTarget(.task(t)) == .taskEditor(42) && CalendarLayout.clickTarget(.event(e)) == .eventPanel(7),
           "cal3_click_on_a_task_opens_the_task_editor_events_their_panel")
 }
