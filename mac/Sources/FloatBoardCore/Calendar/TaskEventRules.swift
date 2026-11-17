@@ -158,9 +158,10 @@ extension Store {
            let mark = cached.fbCard, mark != cardID {
             return nil
         }
-        let row = CalendarOutbox(store: self).enqueue(.delete(eventID: t.event), account: t.account, calendarID: t.calendar, now: now)
+        let row = CalendarOutbox(store: self).enqueue(.delete(eventID: t.event), account: t.account, calendarID: t.calendar, now: now,
+                                                    delay: Store.calendarDeleteDelay)   // held back so Undo wins (R19)
         guard !row.isEmpty else { return nil }   // not queued (logged by enqueue): the event stays, nothing to undo
-        calendarQueued()
+        // No scheduler nudge: the delete is not due until the Undo bar is gone.
         return (t, row)
     }
 

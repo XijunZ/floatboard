@@ -238,6 +238,11 @@ public final class Store: ObservableObject {
         }
     }
 
+    /// How long the board's Undo bar stays up after a delete.
+    public static let undoBarSeconds: TimeInterval = 8
+    /// How long a calendar delete waits before it may be sent: a little longer than the Undo bar, so Undo always wins.
+    public static let calendarDeleteDelay: TimeInterval = undoBarSeconds + 2
+
     /// Soft delete: the row stays in the database (and in exports) for the record.
     public func delete(_ card: Card) { deleteCard(card, verdict: nil) }
 

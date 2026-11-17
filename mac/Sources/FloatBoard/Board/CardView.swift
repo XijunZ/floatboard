@@ -205,7 +205,7 @@ struct UndoDeleteBar: View {
             .frame(maxWidth: 520)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .task(id: d.at) {
-                try? await Task.sleep(for: .seconds(8)) // try?-ok: cancelled when another delete replaces this bar
+                try? await Task.sleep(for: .seconds(Store.undoBarSeconds)) // try?-ok: cancelled when another delete replaces this bar
                 if !Task.isCancelled { withAnimation { store.dismissUndoBar(for: d) } }
             }
         }

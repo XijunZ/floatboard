@@ -133,10 +133,14 @@ import FloatBoardConnectors
         guard let ca = store.card(a) else { check(false, "undo setup: no card"); return }
         nudges = 0
         store.delete(ca)
-        let deleteNudged = nudges > 0 && kinds() == ["delete"]
+        let deleteNudged = nudges == 0 && kinds() == ["delete"]
+        let t0 = Date()
+        let notDue = outbox.due(now: t0).isEmpty && outbox.due(now: t0.addingTimeInterval(Store.undoBarSeconds)).isEmpty
+        let dueAfter = outbox.due(now: t0.addingTimeInterval(Store.calendarDeleteDelay + 1)).count == 1
+        check(notDue && dueAfter && Store.calendarDeleteDelay >= Store.undoBarSeconds + 2, "delete_row_not_due_within_undo_window")
         store.undoDelete()
         check(deleteNudged && outbox.rows(unsent: true).isEmpty && gcalEvent(a) == "u1" && store.card(a) != nil,
-              "undo_before_send_drops_the_delete_and_keeps_the_event")
+              "undo_before_send_drops_the_delete_and_keeps_the_event")  // no nudge, no rows, link back
 
         // Already sent: the event is gone in Google, so a new one is made (and the scheduler is asked to send it).
         guard let ca2 = store.card(a) else { check(false, "undo setup: card not back"); return }
