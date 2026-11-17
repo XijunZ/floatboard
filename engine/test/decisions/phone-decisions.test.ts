@@ -55,4 +55,21 @@ describe("phone decisions", () => {
     expect(L.decisionsWaiting(0)).toBe("");
     expect(L.decisionsWaiting(2)).toBe("2 changes waiting for your Mac");
   });
+
+  it("queue_sent_only_for_the_confirmed_account_it_was_made_under", () => {
+    const q = { account: "acc-a", actions: [{ id: "x" }] };
+    expect(L.decisionQueueSendable(q, null)).toBe(false);          // /app/api/me has not answered yet
+    expect(L.decisionQueueSendable(q, "acc-b")).toBe(false);       // another account signed in
+    expect(L.decisionQueueSendable({ account: null, actions: [{ id: "x" }] }, "acc-a")).toBe(false);
+    expect(L.decisionQueueSendable({ account: "acc-a", actions: [] }, "acc-a")).toBe(false);
+    expect(L.decisionQueueSendable(q, "acc-a")).toBe(true);
+  });
+
+  it("ui_sends_only_through_the_check_and_caches_under_the_engines_account", () => {
+    expect(DECISIONS_UI_JS).toContain("decisionQueueSendable(decQueue, confirmedAccount())");
+    expect(DECISIONS_UI_JS).not.toContain("shownAccount");
+    // Signing out (and a change of account) drops the cached copy and the queue with the rest of the account's data.
+    const drop = APP_JS.slice(APP_JS.indexOf("function dropAccountData()"));
+    expect(drop.slice(0, drop.indexOf("\n  }\n"))).toContain("dropDecisions();");
+  });
 });

@@ -170,12 +170,28 @@ describe("decisions: phone copy and actions", () => {
     expect((await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>()).waiting).toBe(0);
   });
 
+  it("phone_actions_and_copy_are_bound_to_the_signed_in_account", async () => {
+    const a = await user("AcctA"), b = await user("AcctB");
+    const pa = await pairPhone(a.key), pb = await pairPhone(b.key);
+    await call("/v2/decisions", { method: "PUT", key: a.key, body: JSON.stringify({ decisions: [d(1)] }) });
+    const ga = await (await call("/app/api/decisions", { headers: { Cookie: pa.cookie } })).json<any>();
+    const gb = await (await call("/app/api/decisions", { headers: { Cookie: pb.cookie } })).json<any>();
+    expect(typeof ga.account).toBe("string");
+    expect(ga.account).not.toBe(gb.account);
+    expect(gb.decisions).toEqual([]);
+    const r = await call("/app/api/decisions/action", { method: "POST", headers: { Cookie: pb.cookie, Origin: BASE },
+      body: JSON.stringify({ actions: [{ id: "act-0000b001", decision: "D-1", action: "not_decision" }] }) });
+    expect((await r.json<any>()).account).toBe(gb.account);
+    expect((await (await call("/v2/decision-actions", { key: a.key })).json<any>()).actions).toEqual([]);
+    expect((await (await call("/v2/decision-actions", { key: b.key })).json<any>()).actions.map((x: any) => x.id)).toEqual(["act-0000b001"]);
+  });
+
   it("phone_needs_a_session_and_copy_is_checked", async () => {
     expect((await call("/app/api/decisions")).status).toBe(401);
     const u = await user("Check");
     expect((await call("/v2/decisions", { method: "PUT", key: u.key, body: JSON.stringify({ decisions: "nope" }) })).status).toBe(400);
     expect((await call("/v2/decisions", { method: "PUT", key: u.key, body: JSON.stringify({ decisions: [{ id: "X-1" }] }) })).status).toBe(400);
     const { cookie } = await pairPhone(u.key);
-    expect((await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>())).toEqual({ decisions: [], updated: null, waiting: 0 });
+    expect((await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>())).toMatchObject({ decisions: [], updated: null, waiting: 0 });
   });
 });

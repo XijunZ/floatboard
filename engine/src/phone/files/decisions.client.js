@@ -9,14 +9,17 @@
   var decisionsShown = false;
   var decWaiting = 0;
 
-  function decAccount() { return (me && me.account) || shownAccount || null; }
+  // The account /app/api/me confirmed for this session (null until it answers).
+  function confirmedAccount() { return (me && me.account) || null; }
 
+  // The cached copy and queue, each under the account it was made for. Shown before /me answers (offline reading), but the
+  // queue is sent only once /me confirms that same account; anything of another confirmed account is dropped.
   function loadDecisionCache() {
-    var acc = decAccount();
-    var c = load(DEC_KEY);
-    decisions = c && c.account === acc ? c : null;
-    var q = load(DEC_QUEUE_KEY);
-    decQueue = q && q.account === acc ? q : { account: acc, actions: [] };
+    var c = load(DEC_KEY), q = load(DEC_QUEUE_KEY), acc = confirmedAccount();
+    decisions = c && typeof c.account === "string" && (!acc || c.account === acc) ? c : null;
+    decQueue = q && typeof q.account === "string" && Array.isArray(q.actions) && (!acc || q.account === acc) ? q
+      : { account: decisions ? decisions.account : acc, actions: [] };
+    if (!decQueue.account) decQueue.account = acc;
   }
 
   function saveDecQueue() { store(DEC_QUEUE_KEY, decQueue.actions.length ? decQueue : null); }
@@ -47,16 +50,18 @@
 
   async function syncDecisions() {
     try {
-      if (decQueue.actions.length) {
+      if (decisionQueueSendable(decQueue, confirmedAccount())) {
         var sent = decQueue.actions.slice(0, 50);
         var r = await api("/app/api/decisions/action", { method: "POST", body: { actions: sent } });
         decQueue.actions = decisionQueueAfter(decQueue.actions, r.accepted || []);
         saveDecQueue();
       }
       var b = await api("/app/api/decisions");
-      decisions = { account: decAccount(), decisions: Array.isArray(b.decisions) ? b.decisions : [], updated: b.updated || null };
+      var acc = typeof b.account === "string" ? b.account : confirmedAccount();
+      if (!acc || (confirmedAccount() && acc !== confirmedAccount())) { renderDecisions(); return; }   // not this session's account
+      decisions = { account: acc, decisions: Array.isArray(b.decisions) ? b.decisions : [], updated: b.updated || null };
       decWaiting = b.waiting || 0;
-      if (decisions.account) store(DEC_KEY, decisions);
+      store(DEC_KEY, decisions);
     } catch (e) {
       if (e instanceof SignedOut) { showSignIn(); return; }
       if (e && e.status === 400 && decQueue.actions.length) {   // a malformed action would block the queue: drop it
@@ -69,7 +74,9 @@
 
   function queueDecision(a) {
     if (!a) return;
-    decQueue.account = decAccount();
+    var acc = confirmedAccount() || (decisions && decisions.account) || null;
+    if (!acc) { toast("Sign in again to do this."); return; }
+    if (decQueue.account !== acc) decQueue = { account: acc, actions: [] };
     decQueue.actions.push(a);
     saveDecQueue();
     renderDecisions();
