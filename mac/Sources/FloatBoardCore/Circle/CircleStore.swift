@@ -140,7 +140,8 @@ import Foundation
     /// The live person a handle belongs to (raw or normalised input).
     public func person(owning raw: Handle) -> Int64? {
         guard let v = Handles.normalize(raw.kind, raw.value) else { return nil }
-        let id = (try? store.db.query(""" // try?-ok: unreadable = nobody; the next read tries again
+        let id = (try? store.db.query( // try?-ok: unreadable = nobody; the next read tries again
+            """
             SELECT h.person_id FROM person_handles h JOIN people p ON p.id=h.person_id WHERE h.kind=? AND h.value=? AND p.deleted=0
             """, [raw.kind.rawValue, v]) { DB.int($0, 0) })?.first
         return id
