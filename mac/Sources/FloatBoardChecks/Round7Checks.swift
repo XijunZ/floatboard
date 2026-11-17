@@ -115,4 +115,51 @@ import FloatBoardConnectors
         check(!before.contains("original_start") && after.contains("original_start") && same && version == 11,
               "r7_existing_v11_board_gets_original_start_in_place")
     } catch { check(false, "r7 v11 amend: \(error)") }
+
+    // When the column is added to an existing board, the next pass reads each calendar in full (the daily full read, which
+    // first takes in what changed since the last pass, so nothing is hidden or taken as deleted): cached instances get their
+    // original start at once. A board that already has the column keeps its schedule.
+    do {
+        let url = root.appendingPathComponent("v11-reread.sqlite")
+        let recent = Date().addingTimeInterval(-600)
+        let inst = #"{"id":"mv_1","status":"confirmed","summary":"Sync","recurringEventId":"mv","start":{"dateTime":"2026-11-21T09:00:00Z"},"end":{"dateTime":"2026-11-21T09:15:00Z"},"originalStartTime":{"dateTime":"2026-11-20T09:00:00Z"},"updated":"2026-11-16T10:00:00Z"}"#
+        do {
+            let store = Store(db: try DB(url: url))
+            let cache = CalendarCache(store: store)
+            cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: cid, name: "Me", color: "#112233", owned: true, shown: true, primary: true)])
+            cache.apply(account: acct, calendarID: cid, changes: [
+                GoogleEventChange(eventID: "mv_1", cancelled: false, fields: CalEventFields(start: iso.date(from: "2026-11-21T09:00:00Z")!, end: iso.date(from: "2026-11-21T09:15:00Z")!,
+                                                                                         title: "Sync", recurringID: "mv", googleUpdated: recent)),
+                GoogleEventChange(eventID: "keep", cancelled: false, fields: CalEventFields(start: iso.date(from: "2026-11-19T12:00:00Z")!, end: iso.date(from: "2026-11-19T13:00:00Z")!,
+                                                                                         title: "Lunch", googleUpdated: recent)),
+            ], nextToken: "T", fullRead: true, now: recent)
+            cache.saveSeries(account: acct, calendarID: cid, seriesID: "mv", rule: "RRULE:FREQ=WEEKLY", now: Date())
+            _ = try store.db.run("ALTER TABLE cal_events DROP COLUMN original_start")
+        }
+        let store = Store(db: try DB(url: url))
+        let fake = FakeGoogle()
+        fake.handler = { r in
+            if r.url?.path.contains("/events/") == true { return (#"{"recurrence":["RRULE:FREQ=WEEKLY"]}"#, 200) }
+            // The catch-up since the last pass reports nothing new; the full read lists only the moved instance (the other
+            // event is simply not listed: it must stay, not be hidden or taken as deleted).
+            if r.url?.query?.contains("syncToken") == true { return (#"{"items":[],"nextSyncToken":"T2"}"#, 200) }
+            return (#"{"items":[\#(inst)],"nextSyncToken":"T3"}"#, 200)
+        }
+        await CalendarSync(store: store, apiFor: { _ in fake.api() }, accounts: { [acct] }).syncOnce()
+        let cache = CalendarCache(store: store)
+        let lists = fake.requests.filter { $0.url?.path.hasSuffix("/events") == true }
+        let fullList = lists.contains { $0.url?.query?.contains("syncToken") != true }
+        let moved = cache.event(account: acct, calendarID: cid, eventID: "mv_1")
+        let kept = cache.event(account: acct, calendarID: cid, eventID: "keep")
+        let ok = fullList && moved?.originalStart == iso.date(from: "2026-11-20T09:00:00Z") && kept?.gone == false && kept?.cancelled == false
+        if !ok { print("  r7 reread: full \(fullList), moved \(String(describing: moved?.originalStart)), kept gone \(String(describing: kept?.gone))") }
+        check(ok, "r7_adding_original_start_rereads_calendars_without_hiding_events")
+
+        // Opening again (the column is there now) does not ask for another full read.
+        let before = cache.calendars().first?.fullReadAt
+        _ = try DB(url: url)
+        let reopened = Store(db: try DB(url: url))
+        check(before != nil && CalendarCache(store: reopened).calendars().first?.fullReadAt == before,
+              "r7_board_with_original_start_keeps_its_read_schedule")
+    } catch { check(false, "r7 reread: \(error)") }
 }
