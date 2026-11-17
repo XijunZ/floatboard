@@ -316,6 +316,30 @@ import FloatBoardConnectors
               && store.newEventCalendar(account: who)?.calendarID == "real-main-id", "f7_primary_alias_rekeyed_to_the_real_id_without_duplicates")
         CalendarListAttempts.forget(who)
     } catch { check(false, "f7 alias: \(error)") }
+
+    // F8. What a sign-in connects follows the permissions Google says were granted (people can untick some): Calendar only
+    //     with calendar.events, Gmail only with gmail.modify, and the message says exactly what got connected.
+    do {
+        let gm = "https://www.googleapis.com/auth/gmail.modify", ev = "https://www.googleapis.com/auth/calendar.events"
+        let ls = "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+        var all = true
+        for gmailAsked in [true, false] {
+            for g in [true, false] { for e in [true, false] { for l in [true, false] {
+                if !gmailAsked && g { continue }
+                let scope = (["openid", "https://www.googleapis.com/auth/userinfo.email"] + (g ? [gm] : []) + (e ? [ev] : []) + (l ? [ls] : [])).joined(separator: " ")
+                let d = GoogleAuthConfig.granted(scope: scope, gmailAsked: gmailAsked)
+                let m = GoogleAuthConfig.connectedMessage(email: "a@example.com", granted: d, gmailAsked: gmailAsked)
+                let ok = d.calendar == e && d.gmail == (gmailAsked && g) && d.calendarList == (e && l)
+                    && m.contains("a@example.com")
+                    && (e ? m.contains("Calendar") && !m.contains("Calendar was not allowed") : m.contains("not") && m.contains("Calendar"))
+                    && (!gmailAsked || (g ? m.contains("Gmail") && !m.contains("Gmail was not allowed") : m.contains("Gmail was not allowed") || m.contains("Gmail or Calendar")))
+                    && (!e || l || m.contains("main calendar only"))
+                if !ok { all = false; print("  f8 combination gmailAsked=\(gmailAsked) gmail=\(g) events=\(e) list=\(l): \(d) \"\(m)\"") }
+            } } }
+        }
+        let none = GoogleAuthConfig.granted(scope: nil, gmailAsked: true)
+        check(all && !none.calendar && !none.gmail, "f8_every_partial_consent_connects_only_what_was_granted")
+    }
 }
 
 /// A Google event as the API returns it.

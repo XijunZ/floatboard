@@ -187,18 +187,26 @@ final class Google: ObservableObject {
                 return
             }
             let expires = Double(json["expires_in"] as? Int ?? 3000)
-            if let gmail = gmailHandler {
-                gmailHandler = nil
-                // The one consent covers Calendar too: keep it as this account's Calendar sign-in first, so a failed hand-off
-                // to the engine does not lose it.
-                let calendarKept = saveCalendarSignIn(email: email, refresh: refresh, access: access, expiresIn: expires)
-                do {
-                    try await gmail(email, refresh)
-                    status = calendarKept ? "Gmail and Calendar \(email) connected." : "Gmail \(email) connected."
-                } catch { fail("Signed in to \(email), but the engine didn't take it: \(error)") }
-                return
+            // Only what Google says was granted is used: a sign-in without a permission never replaces one that has it.
+            let gmail = gmailHandler
+            gmailHandler = nil
+            var granted = GoogleAuthConfig.granted(scope: json["scope"] as? String, gmailAsked: gmail != nil)
+            // The one consent covers Calendar too: keep it as this account's Calendar sign-in first, so a failed hand-off
+            // to the engine does not lose it.
+            if granted.calendar, !saveCalendarSignIn(email: email, refresh: refresh, access: access, expiresIn: expires) { granted.calendar = false }
+            if let gmail, granted.gmail {
+                do { try await gmail(email, refresh) } catch {
+                    fail("Signed in to \(email), but the engine didn't take it: \(error)")
+                    return
+                }
             }
-            if saveCalendarSignIn(email: email, refresh: refresh, access: access, expiresIn: expires) { status = "Connected \(email)." }
+            let message = GoogleAuthConfig.connectedMessage(email: email, granted: granted, gmailAsked: gmail != nil)
+            if !granted.calendar && !granted.gmail {
+                fail(message, detail: "granted: \(json["scope"] as? String ?? "none")")
+            } else {
+                status = message
+                if message.contains("not allowed") { store?.activity("google", .warning, message, detail: "granted: \(json["scope"] as? String ?? "none")") }
+            }
         } catch {
             fail("Sign-in failed: \(error.localizedDescription)", detail: "\(error)")
         }
