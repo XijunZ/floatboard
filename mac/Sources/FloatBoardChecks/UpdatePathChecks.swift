@@ -109,4 +109,12 @@ func installStepChecks() {
           "update_now_tells_the_build_it_runs_from_the_app")
     let buildApp = (try? String(contentsOf: script.deletingLastPathComponent().appendingPathComponent("build-app.sh"), encoding: .utf8)) ?? "" // try?-ok: empty fails
     check(buildApp.contains("./scripts/install-app.sh") && !buildApp.contains("rm -rf \"$DEST/FloatBoard.app\""), "build_app_installs_through_the_safe_step")
+    // Round 14 (8): an install that stopped between its two moves (the app moved aside, the new one not yet in) is put back
+    // first, before any leftovers are cleared, even when this install then fails.
+    do {
+        try fm.moveItem(at: dest.appendingPathComponent("FloatBoard.app"), to: dest.appendingPathComponent(".FloatBoard.app.old"))
+    } catch { check(false, "crash setup: \(error)"); return }
+    let again = run(root.appendingPathComponent("build/Missing.app"))
+    check(again.0 != 0 && version() == "new" && !fm.fileExists(atPath: dest.appendingPathComponent(".FloatBoard.app.old").path),
+          "an_install_stopped_between_its_moves_is_put_back_first")
 }

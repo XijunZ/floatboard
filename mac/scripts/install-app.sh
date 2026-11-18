@@ -5,11 +5,14 @@
 #   FLOATBOARD_INSTALL_DEST=<folder>: install there instead (checks, on scratch folders); nothing is stopped or opened.
 set -euo pipefail
 APP="$1"
-[ -d "$APP" ] || { echo "error: no built app at $APP; nothing was installed." >&2; exit 1; }
 if [ -n "${FLOATBOARD_INSTALL_DEST:-}" ]; then DEST="$FLOATBOARD_INSTALL_DEST"; MANAGED=0
 else DEST=/Applications; [ -w "$DEST" ] || DEST="$HOME/Applications"; MANAGED=1; fi
-mkdir -p "$DEST"
 NEW="$DEST/.FloatBoard.app.new"; OLD="$DEST/.FloatBoard.app.old"
+# An earlier install stopped between its two moves (the app moved aside, the new one not in): put the app back first,
+# before anything is cleared, whatever happens next.
+if [ ! -d "$DEST/FloatBoard.app" ] && [ -d "$OLD" ]; then mv "$OLD" "$DEST/FloatBoard.app"; fi
+[ -d "$APP" ] || { echo "error: no built app at $APP; nothing was installed." >&2; exit 1; }
+mkdir -p "$DEST"
 rm -rf "$NEW" "$OLD"
 cp -R "$APP" "$NEW" || { rm -rf "$NEW"; echo "error: copying the new app failed; the installed one is unchanged." >&2; exit 1; }
 if [ "$MANAGED" = 1 ] && [ -z "${FLOATBOARD_FROM_UPDATER:-}" ]; then pkill -x FloatBoard 2>/dev/null || true; fi
