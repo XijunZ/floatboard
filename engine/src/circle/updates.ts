@@ -18,6 +18,7 @@ import type { Budget } from "../lib/budget";
 import { decrypt } from "../lib/crypto";
 import { askStructured } from "../lib/llm";
 import { circleFetch } from "./net";
+import { fetchPublic, publicHttpUrl } from "./safe-url";
 import { circleOn, haikuFor, line, seal, unseal } from "./common";
 
 const DAY = 86400_000;
@@ -114,13 +115,16 @@ export async function runCircleUpdates(env: Env, userId: string, budget: Budget,
           await companiesHouse(env, userId, p, chKey, f, pending);
           await mark(p.person, "ch");
         }
-        if (p.feed_url && /^https?:\/\//.test(p.feed_url) && await due(p.person, "feed")) {
+        if (p.feed_url && publicHttpUrl(p.feed_url) && await due(p.person, "feed")) {
           looked = true;
-          const r = await f(p.feed_url);
-          if (r.ok) for (const i of parseFeed(await r.text()).slice(0, 5)) {
+          await mark(p.person, "feed");
+          let r: Response | null = null;
+          try { r = await fetchPublic(f, p.feed_url); } catch (e) {
+            console.warn(JSON.stringify({ event: "circle_feed_refused", person: p.person, error: String((e as Error)?.message ?? e).slice(0, 200) }));
+          }
+          if (r?.ok) for (const i of parseFeed(await r.text()).slice(0, 5)) {
             pending.push({ person: p, key: `post:${p.person}:${i.link}`, needsMatch: false, u: { kind: "post", title: i.title, detail: "", url: i.link, at: i.at, match: "possible" } });
           }
-          await mark(p.person, "feed");
         }
       } catch (e) {
         if ((e as Error)?.name === "BudgetExhausted" || /budget/i.test(String((e as Error)?.message))) break;
