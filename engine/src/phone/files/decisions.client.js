@@ -48,14 +48,42 @@
     await syncDecisions();
   }
 
-  async function syncDecisions() {
+  // Sends the queue when the confirmed account is the one it was made under. The engine checks that account again when
+  // it stores them (409 for another account: the queue is held, never sent elsewhere). One send at a time.
+  var decSending = false;
+  async function sendDecisionQueue() {
+    var body = decisionSendBody(decQueue, confirmedAccount());
+    if (!body || decSending) return;
+    decSending = true;
     try {
-      if (decisionQueueSendable(decQueue, confirmedAccount())) {
-        var sent = decQueue.actions.slice(0, 50);
-        var r = await api("/app/api/decisions/action", { method: "POST", body: { actions: sent } });
+      var r = await api("/app/api/decisions/action", { method: "POST", body: body });
+      if (r.account === body.account) {
         decQueue.actions = decisionQueueAfter(decQueue.actions, r.accepted || []);
         saveDecQueue();
       }
+    } catch (e) {
+      if (e instanceof SignedOut) throw e;
+      if (e && e.status === 400 && decQueue.actions.length) {   // a malformed action would block the queue: drop it
+        decQueue.actions = decQueue.actions.slice(1);
+        saveDecQueue();
+      }
+      // 409 (another account now) and offline: held for later.
+    } finally { decSending = false; }
+  }
+
+  // Reconnecting, coming back to the front, or a board sync that worked: try the waiting queue again (it is loaded from
+  // storage if the Decisions screen was never opened in this session).
+  function retryDecisionQueue() {
+    if (!decQueue.actions.length) loadDecisionCache();
+    if (!decQueue.actions.length) return;
+    sendDecisionQueue().then(function () { if (decisionsShown) renderDecisions(); }).catch(function () { /* signed out: the next sync shows Sign in */ });
+  }
+  window.addEventListener("online", retryDecisionQueue);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") retryDecisionQueue(); });
+
+  async function syncDecisions() {
+    try {
+      await sendDecisionQueue();
       var b = await api("/app/api/decisions");
       var acc = typeof b.account === "string" ? b.account : confirmedAccount();
       if (!acc || (confirmedAccount() && acc !== confirmedAccount())) { renderDecisions(); return; }   // not this session's account
@@ -64,10 +92,6 @@
       store(DEC_KEY, decisions);
     } catch (e) {
       if (e instanceof SignedOut) { showSignIn(); return; }
-      if (e && e.status === 400 && decQueue.actions.length) {   // a malformed action would block the queue: drop it
-        decQueue.actions = decQueue.actions.slice(1);
-        saveDecQueue();
-      }
     }
     renderDecisions();
   }

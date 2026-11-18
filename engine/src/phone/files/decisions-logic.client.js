@@ -58,3 +58,10 @@
   function decisionQueueSendable(queue, confirmed) {
     return !!(queue && confirmed && queue.account === confirmed && Array.isArray(queue.actions) && queue.actions.length);
   }
+
+  // The next request body: at most 50 actions, with the account the queue was made under (the engine refuses it for any
+  // other account, so a stale confirmation can never send them to the wrong one).
+  function decisionSendBody(queue, confirmed) {
+    if (!decisionQueueSendable(queue, confirmed)) return null;
+    return { account: queue.account, actions: queue.actions.slice(0, 50) };
+  }
