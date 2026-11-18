@@ -330,7 +330,7 @@ describe("circle: feed fetches stay on the public internet (Codex round 2, #1)",
     const { publicHttpUrl } = await import("../../src/circle/safe-url");
     for (const bad of ["file:///etc/passwd", "ftp://example.com/feed", "http://localhost/feed", "http://app.localhost/x", "http://127.0.0.1/feed",
       "http://2130706433/", "http://0x7f.0.0.1/", "http://10.1.2.3/", "http://172.16.0.1/", "http://192.168.1.1/", "http://169.254.169.254/latest",
-      "http://100.64.0.1/", "http://0.0.0.0/", "http://[::1]/", "http://[fe80::1]/", "http://[fd00::1]/", "http://[::ffff:127.0.0.1]/", "http://user:pw@example.com/"]) {
+      "http://100.64.0.1/", "http://0.0.0.0/", "http://[::1]/", "http://[::127.0.0.1]/", "http://[64:ff9b::7f00:1]/", "http://[64:ff9b::10.0.0.1]/", "http://[fe80::1]/", "http://[fd00::1]/", "http://[::ffff:127.0.0.1]/", "http://user:pw@example.com/"]) {
       expect(publicHttpUrl(bad), bad).toBeNull();
     }
     expect(publicHttpUrl("https://blog.example.com/feed")?.href).toBe("https://blog.example.com/feed");
@@ -389,5 +389,15 @@ describe("circle: notification buttons are bound to their account (Codex round 2
     expect((await (await call("/v2/circle/actions", { key: b.key })).json<any>()).actions).toEqual([]);
     expect((await send(await accountMarker(b.id))).status).toBe(200);
     expect((await (await call("/v2/circle/actions", { key: b.key })).json<any>()).actions).toHaveLength(1);
+  });
+});
+
+describe("circle: feed fetches on the Mac's engine (Codex round 3, #1)", () => {
+  it("marks_feed_fetches_public_only_for_the_mac_bridge", async () => {
+    const { fetchPublic } = await import("../../src/circle/safe-url");
+    const inits: any[] = [];
+    await fetchPublic((async (_u: RequestInfo | URL, init?: RequestInit) => { inits.push(init); return new Response("ok"); }) as typeof fetch, "https://blog.example.com/feed");
+    expect(inits[0]).toMatchObject({ redirect: "manual", fbPublicOnly: true });
+    // The Mac runtime passing these to the app is checked on the Mac (circleBridgeChecks reads engine/local/runtime.js).
   });
 });

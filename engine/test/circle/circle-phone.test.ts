@@ -66,7 +66,7 @@ describe("phone Circle", () => {
     // Circle uses the app's shared session check (sessionAccepts, tested in test/phone/foundation.test.ts).
     expect(CIRCLE_JS).toContain("var asked = sessionStamp();");
     expect(CIRCLE_JS).toContain("return sameSession(asked, respAccount);");
-    expect(CIRCLE_JS).not.toContain("circleEpoch");
+    expect(CIRCLE_JS).not.toMatch(/circleEpoch|circleSnap|circleAccept/);
   });
 
   it("sign_out_clears_circles_phone_cache", () => {
@@ -94,6 +94,21 @@ describe("phone Circle", () => {
     expect(SW_JS).toContain("account");
     expect(SW_JS).toMatch(/r\.status === 409/);
     expect(SW_JS).toMatch(/#circle=" \+ action \+ ":" \+ person \+ ":" \+ account/);
+  });
+
+  it("a_circle_sheet_never_acts_for_another_account_and_closes_on_sign_out", () => {
+    const fn = (name: string) => new RegExp("function " + name + "\\([^)]*\\) \\{([\\s\\S]*?)\\n  \\}\\n").exec(CIRCLE_JS)![1];
+    // Every tap is checked against the session and account the screen or sheet was opened under.
+    // The app's shared session check (sessionStamp / sameSession in app.client.js), as for sync.
+    expect(fn("circleAct")).toMatch(/sameSession\(asked\)/);
+    for (const name of ["circleFromHash", "personSheet", "draftSheet", "circlePlan"]) {
+      const body = fn(name);
+      expect(body, name).toMatch(/var asked = sessionStamp\(\)/);
+      for (const call of body.match(/circleAct\([^)]*\)/g) ?? []) expect(call, name).toMatch(/asked\)$/);
+    }
+    expect(fn("draftSheet")).toMatch(/if \(!sameSession\(asked\)\)/);   // a late draft for the old account is dropped
+    expect(fn("circleDrop")).toMatch(/\.sheet\[data-circle\][\s\S]*closeSheet\(\)/);
+    expect((CIRCLE_JS.match(/sheet\.dataset\.circle = "1"/g) ?? []).length).toBe(3);
   });
 
   it("service_worker_adds_contacted_and_snooze_to_circle_alerts", () => {
