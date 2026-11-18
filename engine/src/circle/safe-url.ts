@@ -4,8 +4,10 @@
  * whether named (localhost, *.localhost, *.local, *.internal) or written as an IP (any IPv4 form the URL parser accepts,
  * IPv6 including IPv4-mapped). Redirects are followed by hand, each hop checked again, at most 3.
  *
- * Not covered: a public name whose DNS answer is a private address (Workers can't resolve names before fetching; Cloudflare's
- * own egress doesn't reach the owner's private network).
+ * Names: Workers can't resolve a name before fetching (and Cloudflare's network doesn't reach the owner's home network). On
+ * the Mac (Mac only mode) the same code runs behind the app's fetch bridge, which can: `fbPublicOnly` makes the bridge resolve
+ * the name and refuse private, loopback and link-local answers, and `redirect: "manual"` makes it hand back each redirect
+ * (mac/Sources/FloatBoardConnectors/Local/LocalNetwork.swift).
  */
 
 const MAX_HOPS = 3;
@@ -46,7 +48,9 @@ export async function fetchPublic(f: typeof fetch, raw: string): Promise<Respons
   let url = publicHttpUrl(raw);
   for (let hop = 0; ; hop++) {
     if (!url) throw new Error("not a public web address");
-    const r = await f(url.href, { redirect: "manual" });
+    // fbPublicOnly: on the Mac (Mac only mode) the app's fetch bridge also resolves the name and refuses private answers;
+    // Workers ignore the field.
+    const r = await f(url.href, { redirect: "manual", fbPublicOnly: true } as RequestInit);
     if (r.status < 300 || r.status >= 400 || !r.headers.get("Location")) return r;
     if (hop >= MAX_HOPS) throw new Error("too many redirects");
     url = publicHttpUrl(r.headers.get("Location")!, url.href);
