@@ -29,7 +29,7 @@ public enum LocalMode {
         if let engine { return engine }
         let enc = try secret(encName, store: store) { Data((0..<32).map { _ in UInt8.random(in: 0...255) }).base64EncodedString() }
         let admin = try secret(adminName, store: store) { UUID().uuidString + UUID().uuidString }
-        let network: LocalEngine.Transport = transportOverride ?? { req in try await URLSession.shared.data(for: req) }
+        let network: LocalEngine.Transport = transportOverride ?? { req in try await LocalEngine.liveNetwork(req) }
         // Requests for "On this Mac" go to Apple's on-device model instead of the network.
         let transport: LocalEngine.Transport = { req in
             if req.url?.host == "api.anthropic.com", OnDeviceModel.wants(req.httpBody), let body = req.httpBody {

@@ -270,7 +270,9 @@ g.ReadableStream ??= class { constructor() { throw new Error("ReadableStream is 
 g.fetch = (input, init = {}) => new Promise((resolve, reject) => {
   const req = input instanceof RequestImpl && Object.keys(init).length === 0 ? input : new RequestImpl(input, init);
   if (req.signal?.aborted) return reject(req.signal.reason);
-  const payload = JSON.stringify({ url: req.url, method: req.method, headers: [...req.headers], body: req._bytes == null ? null : bytesToB64(req._bytes) });
+  // redirect: "manual" is honoured by the app (each hop comes back here); publicOnly asks it to refuse private addresses.
+  const payload = JSON.stringify({ url: req.url, method: req.method, headers: [...req.headers], body: req._bytes == null ? null : bytesToB64(req._bytes),
+    redirect: req.redirect, publicOnly: init.fbPublicOnly === true });
   let settled = false;
   req.signal?.addEventListener?.("abort", () => { if (!settled) { settled = true; reject(req.signal.reason); } });
   host.fetch(payload, (err, res) => {
