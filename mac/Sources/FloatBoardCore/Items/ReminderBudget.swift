@@ -160,6 +160,9 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
         self.store = store; self.claim = claim; self.schedule = schedule; self.release = release; self.phoneAvailable = phoneAvailable
     }
 
+    /// A reminder later than this is not shown late on the Mac (the engine sends one to the phone only within a day).
+    public static let lateLimit: TimeInterval = 86400
+
     static func claimedKey(_ id: String) -> String { "reminder_claimed:\(id)" }
     /// Written before a claim is sent and cleared once its answer is known: a claim whose answer was lost (the engine may
     /// hold it) is then handed back at handoff like a known one, so the phone is never blocked by it.
@@ -200,7 +203,12 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
         var changed = false
         for r in budget.pending() where !inFlight.contains(r.id) {
             if ReminderBudget.phoneTakesOver(r, now: now) && !phoneAvailable() && !claimed(r.id) && !intent(r.id) {
-                // Late (the Mac was asleep or busy) and no phone can be reached: shown here, late, rather than nowhere.
+                // Late (the Mac was asleep or busy) and no phone can be reached: shown here, late, rather than nowhere. More
+                // than a day late it is dropped (as the engine does); in quiet hours it waits for them to end.
+                if now.timeIntervalSince(r.fireAt) > Self.lateLimit {
+                    budget.markDelivered(r.id, by: "expired", at: now); changed = true; continue
+                }
+                if ReminderBudget.allowedTime(from: now, settings: budget.settings) > now { continue }
                 inFlight.insert(r.id)
                 defer { inFlight.remove(r.id) }
                 let title = ShortID.parse(r.item).flatMap { store.item($0)?.title } ?? "FloatBoard"

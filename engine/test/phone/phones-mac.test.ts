@@ -38,3 +38,24 @@ describe("paired phones from the Mac", () => {
     void env;
   });
 });
+
+// Round 14 (6): the Mac shows a late reminder itself unless the engine can reach a phone: a paired phone with a push
+// subscription, or an ntfy topic, with alerts on.
+describe("can the engine reach a phone", () => {
+  it("reachable_only_with_a_push_subscription_or_ntfy_and_alerts_on", async () => {
+    const a = await newUser("Reach");
+    const reach = async () => (await (await call("/v2/app/phones", { key: a.key })).json<any>()).reachable;
+    expect(await reach()).toBe(false);
+    await pairPhone(a.key, "Pixel");
+    expect(await reach()).toBe(false);   // paired, but no notifications
+    const dev = (await env.DB.prepare("SELECT id FROM app_devices WHERE user_id=?").bind(a.id).first<{ id: string }>())!.id;
+    await env.DB.prepare("INSERT INTO app_push(device_id,user_id,endpoint,p256dh,auth,origin,created) VALUES(?,?,?,?,?,?,?)")
+      .bind(dev, a.id, "https://fcm.googleapis.com/x", "k", "a", "https://engine.test", "2026-11-18T00:00:00Z").run();
+    expect(await reach()).toBe(true);
+    await env.DB.prepare("UPDATE settings SET alerts_on=0 WHERE user_id=?").bind(a.id).run();
+    expect(await reach()).toBe(false);
+    const b = await newUser("Reach2", { ntfyTopic: "t-1" });
+    expect((await (await call("/v2/app/phones", { key: b.key })).json<any>()).reachable).toBe(true);
+  });
+});
+

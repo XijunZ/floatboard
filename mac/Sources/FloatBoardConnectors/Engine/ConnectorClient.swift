@@ -294,7 +294,7 @@ public struct ConnectorClient {
     }
 
     /// Calls a phone app route; a 404 means this engine has no phone app (`ConnectorError.noPhoneApp`).
-    private func phoneCall(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
+    func phoneCall(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
         do { return try await call(method, path, body: body) } catch ConnectorError.http(404, _) { throw ConnectorError.noPhoneApp }
     }
 

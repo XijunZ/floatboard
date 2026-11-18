@@ -159,4 +159,45 @@ private struct Refused: Error {}
     let withPhone = ReminderDelivery(store: store, claim: { _ in .mine }, schedule: { scheduled.append($0.id) }, phoneAvailable: { true })
     _ = await withPhone.tick(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 60))
     check(scheduled.isEmpty && budget.forPhone(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 60)).contains { $0.id == b }, "late_reminder_with_a_phone_goes_to_the_phone")
+    // Round 14 (7): more than a day late it is dropped, never shown (the engine's "within a day"); in quiet hours it waits.
+    guard let c = grant(budget, 3, now) else { return }
+    scheduled = []
+    _ = await delivery.tick(now: now.addingTimeInterval(26 * 3600))
+    check(scheduled.isEmpty && !budget.pending().contains { $0.id == c }, "late_reminder_more_than_a_day_old_is_dropped_not_shown")
+    let cal = AppTime.calendar
+    let evening = cal.date(bySettingHour: 20, minute: 0, second: 0, of: now)!
+    budget.save(ReminderSettings(dailyLimit: 5, quietStart: 22 * 60, quietEnd: 8 * 60))
+    guard let d = grant(budget, 4, evening) else { check(false, "quiet setup"); return }
+    scheduled = []
+    let night = cal.date(bySettingHour: 23, minute: 0, second: 0, of: evening)!
+    _ = await delivery.tick(now: night)
+    let held = scheduled.isEmpty && budget.pending().contains { $0.id == d }
+    let morning = cal.date(byAdding: .day, value: 1, to: cal.date(bySettingHour: 8, minute: 5, second: 0, of: evening)!)!
+    _ = await delivery.tick(now: morning)
+    check(held && scheduled == [d], "late_reminder_waits_for_the_end_of_quiet_hours")
+}
+
+/// Round 14 (6): "a phone can be reached" comes from the engine (a paired phone with notifications, or ntfy), cached per
+/// connector; a connector never heard from counts as no phone, one that stops answering keeps its last answer, and an
+/// engine from before this answer counts as reachable (as before).
+@MainActor func phoneReachChecks() async {
+    var answer = "{\"phones\":[],\"reachable\":false}", status = 200
+    let client = ConnectorClient(baseURL: URL(string: "https://reach.test")!, key: "k") { req in
+        await MainActor.run { (Data(answer.utf8), HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!) }
+    }
+    PhoneReach.reset()
+    check(!PhoneReach.any(), "no_answer_yet_means_no_phone")
+    await PhoneReach.refresh(connector: "r1", client: client, now: Date(), force: true)
+    let off = PhoneReach.any()
+    answer = "{\"phones\":[],\"reachable\":true}"
+    await PhoneReach.refresh(connector: "r1", client: client, now: Date(), force: true)
+    let on = PhoneReach.any()
+    status = 500
+    await PhoneReach.refresh(connector: "r1", client: client, now: Date(), force: true)
+    let kept = PhoneReach.any()
+    status = 200; answer = "{\"phones\":[]}"
+    await PhoneReach.refresh(connector: "r2", client: client, now: Date(), force: true)
+    PhoneReach.forget("r1")
+    check(!off && on && kept && PhoneReach.any(), "phone_reach_follows_the_engine_and_keeps_the_last_answer")
+    PhoneReach.reset()
 }
