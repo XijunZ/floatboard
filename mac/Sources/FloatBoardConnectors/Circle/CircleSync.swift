@@ -74,11 +74,9 @@ public enum CircleSync {
             // Sorted keys: JSONEncoder's key order can differ from one encoding to the next, which changed the hash and sent
             // an unchanged list again.
             let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
-            let body = try enc.encode(["people": list])
-            let h = hash(body)
-            guard c.meta(watchHash + ":" + id) != h else { return }
-            try await client.putCircleWatch(body)
-            c.setMeta(watchHash + ":" + id, h)
+            // Per engine account (the hash includes it): a connector moved to another engine sends the list again.
+            try await PhoneInbox.sendIfChanged(try enc.encode(["people": list]), metaKey: watchHash + ":" + id, store: store, client: client,
+                                               send: client.putCircleWatch)
         }
         await step("apply the phone's Circle changes") {
             try await PhoneInbox.take(fetch: client.circleActions, apply: { actions in
@@ -93,7 +91,6 @@ public enum CircleSync {
         return problems
     }
 
-    static func hash(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
 }
 
 extension ConnectorClient {

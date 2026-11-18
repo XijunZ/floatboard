@@ -586,3 +586,28 @@ func integrationRebindingLiveChecks() async {
     check(o.screened == 0 && o.unreadable == 1 && DecisionScreening.pending(store: s, now: decisionsNow).contains { $0.ref == job.ref },
           "screening_keeps_a_version_whose_decision_could_not_be_saved")
 }
+
+/// Round 14 (4): the people-to-follow list is sent per engine account (like the phone copies), so a connector moved to
+/// another engine sends it again, and forgetting a connector forgets it.
+@MainActor func circleWatchPerEngineChecks() async {
+    let root = checkFolder("fb-watch")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = checkStore(root, "watch.sqlite", modules: [.circle]) else { return }
+    var puts: [String] = []
+    func engine(_ host: String) -> ConnectorClient {
+        ConnectorClient(baseURL: URL(string: "https://\(host)")!, key: "k") { req in
+            await MainActor.run {
+                let ok = req.httpMethod == "PUT" && req.url!.path == "/v2/circle/watch"
+                if ok { puts.append(host) }
+                return (Data("{}".utf8), HTTPURLResponse(url: req.url!, statusCode: ok ? 200 : 404, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+    }
+    let a = engine("a.test"), b = engine("b.test")
+    await CircleSync.run(store: s, client: a, connector: "cw", now: Date())
+    await CircleSync.run(store: s, client: a, connector: "cw", now: Date())
+    await CircleSync.run(store: s, client: b, connector: "cw", now: Date())
+    ConnectorMemory.forget(connector: "cw", store: s)
+    await CircleSync.run(store: s, client: b, connector: "cw", now: Date())
+    check(puts == ["a.test", "b.test", "b.test"], "circle_watch_list_sent_per_engine_account_and_again_after_forget")
+}
