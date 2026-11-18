@@ -199,5 +199,18 @@ private struct Refused: Error {}
     await PhoneReach.refresh(connector: "r2", client: client, now: Date(), force: true)
     PhoneReach.forget("r1")
     check(!off && on && kept && PhoneReach.any(), "phone_reach_follows_the_engine_and_keeps_the_last_answer")
+    // Round 15: an engine that fails (or hangs until the timeout) is asked again only after 10 minutes, even with no answer
+    // yet ("unknown": no phone), so it never slows every minute's tick.
+    PhoneReach.reset()
+    var asked = 0
+    let down = ConnectorClient(baseURL: URL(string: "https://down.test")!, key: "k") { req in
+        await MainActor.run { asked += 1; return (Data(), HTTPURLResponse(url: req.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!) }
+    }
+    let t0 = Date()
+    await PhoneReach.refresh(connector: "d1", client: down, now: t0)
+    await PhoneReach.refresh(connector: "d1", client: down, now: t0.addingTimeInterval(60))
+    let quiet = asked
+    await PhoneReach.refresh(connector: "d1", client: down, now: t0.addingTimeInterval(PhoneReach.every + 1))
+    check(quiet == 1 && asked == 2 && !PhoneReach.any(), "an_engine_that_fails_is_asked_again_only_after_10_minutes")
     PhoneReach.reset()
 }

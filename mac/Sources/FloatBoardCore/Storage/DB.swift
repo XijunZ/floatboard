@@ -342,7 +342,8 @@ public final class DB {
     ///   each other's state). `jot_sync.pushed` is no longer used.
     /// - `jots.screen_seq`: the place in the same write order as `change_seq`, moved only by an insert or a change of text,
     ///   kind or deletion (never by tags or the linked task), so the weekly screening never re-reads an old jot for a tag.
-    ///   Existing jots start at their id (at or below any mark a screening run kept).
+    ///   Existing jots start at their change_seq: the screening's saved mark is a change_seq, so a jot written or edited
+    ///   after the last run stays after it (a version already screened is still skipped by decision_screened).
     static let v18Tables = """
     CREATE TABLE jot_pushed (
         connector TEXT NOT NULL,
@@ -351,7 +352,7 @@ public final class DB {
         PRIMARY KEY (connector, jot_id)
     );
     ALTER TABLE jots ADD COLUMN screen_seq INTEGER NOT NULL DEFAULT 0;
-    UPDATE jots SET screen_seq = id;
+    UPDATE jots SET screen_seq = change_seq;
     CREATE INDEX jots_screen_seq ON jots(screen_seq);
     DROP TRIGGER jots_seq_insert;
     DROP TRIGGER jots_seq_update;

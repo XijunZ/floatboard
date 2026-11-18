@@ -13,7 +13,7 @@ extension ConnectorClient {
 
 /// Whether any engine can reach a phone with a reminder, asked at most every 10 minutes per connector. The Mac shows a
 /// late reminder itself unless one can (ReminderDelivery's `phoneAvailable`). Never heard from: no phone; an engine that
-/// stops answering keeps its last answer; an engine from before this answer counts as reachable (the earlier behaviour).
+/// stops answering keeps its last answer (or stays unknown) for 10 minutes; an engine from before this answer counts as reachable (the earlier behaviour).
 @MainActor public enum PhoneReach {
     static var known: [String: (reachable: Bool, at: Date)] = [:]
     public static let every: TimeInterval = 600
@@ -23,7 +23,9 @@ extension ConnectorClient {
     public static func refresh(connector id: String, client: ConnectorClient, now: Date = Date(), force: Bool = false) async {
         if !force, let k = known[id], now.timeIntervalSince(k.at) < every { return }
         do { known[id] = ((try await client.phoneReach()) ?? true, now) } catch {
-            if let k = known[id] { known[id] = (k.reachable, now) }   // keep the last answer; asked again later
+            // Keep the last answer (none yet: unknown, counted as no phone); either way asked again only after `every`, so an
+            // engine that hangs until the timeout never slows each minute's tick.
+            known[id] = (known[id]?.reachable ?? false, now)
         }
     }
 
