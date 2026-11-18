@@ -60,12 +60,13 @@ public struct JotAck: Equatable {
     public static let window: TimeInterval = 30 * 86400
 
     /// Jots added in the last 30 days that changed since the engine last accepted them (deleted ones too), oldest change first.
-    public func toPush(now: Date = Date(), limit: Int = 200) -> [PushJot] {
+    /// Kept per connector: each engine holds its own copy.
+    public func toPush(connector: String, now: Date = Date(), limit: Int = 200) -> [PushJot] {
         let sql = """
-            SELECT j.id FROM jots j LEFT JOIN jot_sync s ON s.jot_id=j.id
+            SELECT j.id FROM jots j LEFT JOIN jot_pushed s ON s.jot_id=j.id AND s.connector=?
             WHERE j.added>=? AND (s.pushed IS NULL OR j.updated>s.pushed) ORDER BY j.updated, j.id LIMIT ?
             """
-        let rows = (try? store.db.query(sql, [now.addingTimeInterval(-Self.window), limit]) { DB.int($0, 0) }) ?? [] // try?-ok: unreadable = nothing sent this time; the next pass sends it
+        let rows = (try? store.db.query(sql, [connector, now.addingTimeInterval(-Self.window), limit]) { DB.int($0, 0) }) ?? [] // try?-ok: unreadable = nothing sent this time; the next pass sends it
         let js = JotStore(store: store)
         return rows.compactMap { js.jot($0) }.map {
             PushJot(id: $0.id, text: $0.text, kind: $0.kind, source: $0.source, tags: store.itemTags($0.shortID).all, added: $0.added,
@@ -73,11 +74,13 @@ public struct JotAck: Equatable {
         }
     }
 
-    /// The engine accepted these versions.
-    public func markPushed(_ jots: [PushJot]) {
+    /// The connector's engine accepted these versions.
+    public func markPushed(_ jots: [PushJot], connector: String) {
         store.perform {
             for j in jots {
-                try store.db.run("INSERT INTO jot_sync(jot_id, pushed) VALUES(?,?) ON CONFLICT(jot_id) DO UPDATE SET pushed=excluded.pushed", [j.id, j.updated])
+                try store.db.run("""
+                    INSERT INTO jot_pushed(connector, jot_id, pushed) VALUES(?,?,?) ON CONFLICT(connector, jot_id) DO UPDATE SET pushed=excluded.pushed
+                    """, [connector, j.id, j.updated])
             }
         }
     }
@@ -209,21 +212,29 @@ public struct JotAck: Equatable {
         }
     }
 
-    public static let engineKey = "jots.pushed_engine"
+    /// Where a connector's engine account (fingerprint) is kept.
+    public static func engineKey(_ connector: String) -> String { "jots.pushed_engine.\(connector)" }
 
-    /// The engine account the phone's copy is sent to (a fingerprint of its address and key). Another one (a new engine, a
-    /// re-pointed connector, a new key) holds none of this Mac's jots: every recent jot is sent again.
-    public func useEngine(_ fingerprint: String) {
-        let current = (try? store.db.query("SELECT value FROM meta WHERE key=?", [Self.engineKey]) { DB.text($0, 0) })?.first // try?-ok: unknown = treated as another engine (sent again: harmless)
+    /// The engine account `connector` sends the phone's copy to (a fingerprint of its address and key). Another one (a new
+    /// engine, a re-pointed connector, a new key) holds none of this Mac's jots: every recent jot is sent to it again.
+    /// Other connectors keep their own state.
+    public func useEngine(_ fingerprint: String, connector: String) {
+        let current = (try? store.db.query("SELECT value FROM meta WHERE key=?", [Self.engineKey(connector)]) { DB.text($0, 0) })?.first // try?-ok: unknown = treated as another engine (sent again: harmless)
         guard current != fingerprint else { return }
         store.perform {
-            try store.db.run("UPDATE jot_sync SET pushed=NULL")
-            try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [Self.engineKey, fingerprint])
+            try store.db.run("DELETE FROM jot_pushed WHERE connector=?", [connector])
+            try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [Self.engineKey(connector), fingerprint])
         }
     }
 
-    /// Makes the engine get this jot again at the next push.
+    /// Forgets what `connector` was sent (it was added again or moved): its engine gets every recent jot.
+    public func forget(connector: String) throws {
+        try store.db.run("DELETE FROM jot_pushed WHERE connector=?", [connector])
+        try store.db.run("DELETE FROM meta WHERE key=?", [Self.engineKey(connector)])
+    }
+
+    /// Makes every engine get this jot again at the next push.
     func resend(_ id: Int64) {
-        store.perform { try store.db.run("UPDATE jot_sync SET pushed=NULL WHERE jot_id=?", [id]) }
+        store.perform { try store.db.run("DELETE FROM jot_pushed WHERE jot_id=?", [id]) }
     }
 }

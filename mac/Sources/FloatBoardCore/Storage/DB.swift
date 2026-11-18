@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 17
+    public static let schemaVersion = 18
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -226,6 +226,10 @@ public final class DB {
             // 16 -> 17: a write order for jots kept on this Mac (change_seq), for change detection.
             sql += v17JotSeq
         }
+        if version < 18 {
+            // 17 -> 18: what each connector's phone copy holds (per connector), and a screening order that tag changes don't move.
+            sql += v18Tables
+        }
         return sql
     }
 
@@ -329,6 +333,39 @@ public final class DB {
     END;
     CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN
         UPDATE cards SET notes=CASE WHEN NEW.deleted=1 THEN '' ELSE NEW.text END, updated=NEW.updated WHERE id=NEW.task_id;
+    END;
+
+    """
+
+    /// Version 18:
+    /// - `jot_pushed`: which version of each jot each connector's engine accepted (per connector: two engines never undo
+    ///   each other's state). `jot_sync.pushed` is no longer used.
+    /// - `jots.screen_seq`: the place in the same write order as `change_seq`, moved only by an insert or a change of text,
+    ///   kind or deletion (never by tags or the linked task), so the weekly screening never re-reads an old jot for a tag.
+    ///   Existing jots start at their id (at or below any mark a screening run kept).
+    static let v18Tables = """
+    CREATE TABLE jot_pushed (
+        connector TEXT NOT NULL,
+        jot_id INTEGER NOT NULL,
+        pushed REAL NOT NULL,
+        PRIMARY KEY (connector, jot_id)
+    );
+    ALTER TABLE jots ADD COLUMN screen_seq INTEGER NOT NULL DEFAULT 0;
+    UPDATE jots SET screen_seq = id;
+    CREATE INDEX jots_screen_seq ON jots(screen_seq);
+    DROP TRIGGER jots_seq_insert;
+    DROP TRIGGER jots_seq_update;
+    CREATE TRIGGER jots_seq_insert AFTER INSERT ON jots BEGIN
+        UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots),
+                        screen_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER jots_seq_update AFTER UPDATE OF text, kind, deleted ON jots WHEN NEW.change_seq = OLD.change_seq BEGIN
+        UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots),
+                        screen_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER jots_seq_task AFTER UPDATE OF task_id ON jots
+        WHEN NEW.change_seq = OLD.change_seq AND NEW.text IS OLD.text AND NEW.kind IS OLD.kind AND NEW.deleted IS OLD.deleted BEGIN
+        UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;
     END;
 
     """
@@ -538,7 +575,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq
+    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq + v18Tables
 
     /// The tables Circle adds in version 14 (the same text for a new board and an upgraded one).
     static let v14Tables = """

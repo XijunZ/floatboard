@@ -577,27 +577,37 @@ extension ISO8601DateFormatter {
     check(DecisionScreening.pending(store: store, now: now.addingTimeInterval(60)).contains { $0.ref.hasPrefix("J-\(first.id)@") }, "late_edit_of_an_older_jot_is_screened")
 }
 
-/// Round 13 (J4): what was sent to the phone's copy is remembered per engine account, so moving to another engine (or
-/// another key) sends every recent jot again, and the Decisions copy is sent again too.
-@MainActor func jotPushedPerEngineChecks() {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-jot-fp-\(UUID().uuidString)")
-    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+/// Round 13 (J4), round 14: what was sent to the phone's copy is remembered per connector and engine account, so moving a
+/// connector to another engine (or another key) sends every recent jot again, two connectors never undo each other's
+/// state, and the Decisions copy is sent again too.
+@MainActor func jotPushedPerEngineChecks() async {
+    let root = checkFolder("fb-jot-fp")
     defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
-    let store: Store
-    do { store = Store(db: try DB(url: root.appendingPathComponent("fp.sqlite"))) } catch { check(false, "fp setup: \(error)"); return }
-    store.setModule(.jots, on: true)
+    guard let store = checkStore(root, "fp.sqlite", modules: [.jots]) else { return }
     let js = JotStore(store: store), core = JotsSyncCore(store: store), now = Date()
     _ = js.create(text: "One", now: now); _ = js.create(text: "Two", now: now)
-    core.useEngine("engine-A")
-    core.markPushed(core.toPush(now: now))
-    check(core.toPush(now: now).isEmpty, "jots_pushed_once_to_an_engine")
-    core.useEngine("engine-A")
-    check(core.toPush(now: now).isEmpty, "same_engine_keeps_what_was_pushed")
-    core.useEngine("engine-B")
-    check(core.toPush(now: now).count == 2, "another_engine_gets_every_recent_jot_again")
+    core.useEngine("engine-A", connector: "c1")
+    core.markPushed(core.toPush(connector: "c1", now: now), connector: "c1")
+    check(core.toPush(connector: "c1", now: now).isEmpty, "jots_pushed_once_to_an_engine")
+    core.useEngine("engine-A", connector: "c1")
+    check(core.toPush(connector: "c1", now: now).isEmpty, "same_engine_keeps_what_was_pushed")
+    core.useEngine("engine-B", connector: "c1")
+    check(core.toPush(connector: "c1", now: now).count == 2, "another_engine_gets_every_recent_jot_again")
     DecisionPhone.setSentHash("abc", store: store, connector: "c1")
+    core.markPushed(core.toPush(connector: "c1", now: now), connector: "c1")
     ConnectorMemory.forget(connector: "c1", store: store)
-    check(DecisionPhone.sentHash(store: store, connector: "c1") == nil && core.toPush(now: now).count == 2, "repointing_a_connector_forgets_what_it_was_sent")
+    check(DecisionPhone.sentHash(store: store, connector: "c1") == nil && core.toPush(connector: "c1", now: now).count == 2, "repointing_a_connector_forgets_what_it_was_sent")
+
+    // Round 14: two connectors on two engines, several ticks each, alternating: after each one's first push, nothing again.
+    let e1 = FakeJotsEngine(), e2 = FakeJotsEngine()
+    let c1 = ConnectorClient(baseURL: URL(string: "https://one.test")!, key: "k1") { req in await MainActor.run { e1.handle(req) } }
+    let c2 = ConnectorClient(baseURL: URL(string: "https://two.test")!, key: "k2") { req in await MainActor.run { e2.handle(req) } }
+    for _ in 0..<4 {
+        await JotsSync.tick(connector: "two-a", store: store, client: c1)
+        await JotsSync.tick(connector: "two-b", store: store, client: c2)
+    }
+    let ids1 = e1.pushed.compactMap { ($0["id"] as? NSNumber)?.int64Value }, ids2 = e2.pushed.compactMap { ($0["id"] as? NSNumber)?.int64Value }
+    check(ids1.count == 2 && ids2.count == 2, "two_connectors_never_push_the_same_jots_again_and_again")
 }
 
 /// Round 13 (B6): a phone "Make task" whose write fails part-way leaves nothing behind (no task marked typed) and stays on
@@ -672,4 +682,21 @@ extension ISO8601DateFormatter {
     let s2 = try? await PhoneInbox.sendIfChanged(body, metaKey: "b2.hash", store: store, client: client) { _ in sent += 1 } // try?-ok: nil fails the check
     let s3 = try? await PhoneInbox.sendIfChanged(body, metaKey: "b2.hash", store: store, client: other) { _ in sent += 1 } // try?-ok: nil fails the check
     check(failed && s1 == true && s2 == false && s3 == true && sent == 2, "phone_copy_sent_only_when_changed_for_this_engine_account")
+}
+
+/// Round 14: a tag added to or removed from an old jot moves it for the daily files, never into the weekly screening.
+@MainActor func screeningIgnoresTagChangesChecks() {
+    let root = checkFolder("fb-screen-tags")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = checkStore(root, "st.sqlite", modules: [.jots, .decisions]) else { return }
+    let js = JotStore(store: store), now = Date()
+    guard let old = js.create(text: "We decided to close the London office", now: now.addingTimeInterval(-40 * 86400)) else { check(false, "st setup"); return }
+    let s0 = DecisionScreening.lastJotID(store: store)
+    DecisionScreening.finishRun(store: store, started: now, readFrom: now, complete: true, now: now, jotsUpTo: s0)
+    let filesMark = js.lastChangeSeq()
+    _ = js.setTags(old.id, ["Work"])
+    _ = js.setTags(old.id, [])
+    check(!DecisionScreening.pending(store: store, now: now.addingTimeInterval(60)).contains { $0.ref.hasPrefix("J-\(old.id)@") },
+          "a_tag_change_never_sends_an_old_jot_to_screening")
+    check(js.changed(afterSeq: filesMark).map(\.id) == [old.id], "a_tag_change_still_counts_for_the_daily_files")
 }
