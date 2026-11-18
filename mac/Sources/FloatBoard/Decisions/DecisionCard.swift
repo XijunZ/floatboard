@@ -113,15 +113,9 @@ struct DecisionCard: View {
     }
 
     private func tagsAndPeople(_ d: Decision) -> some View {
-        let tags = store.itemTags(d.shortID).all
         let people = ds.people(of: d.id)
         return HStack(spacing: 6) {
-            Text("Tags").foregroundStyle(.secondary)
-            if tags.isEmpty { Text("untagged").foregroundStyle(.tertiary) }
-            ForEach(tags, id: \.self) { t in
-                HStack(spacing: 3) { Circle().fill(store.color(t)).frame(width: 7, height: 7); Text(t) }
-                    .padding(.horizontal, 6).padding(.vertical, 2).background(Capsule().fill(Color.primary.opacity(0.07)))
-            }
+            ItemTagRow(id: d.shortID, editable: false)
             Text("People").foregroundStyle(.secondary).padding(.leading, 10)
             if people.isEmpty { Text("none named").foregroundStyle(.tertiary) }
             ForEach(people, id: \.id) { p in Text("\(p.shortID.text) \(p.name)") }

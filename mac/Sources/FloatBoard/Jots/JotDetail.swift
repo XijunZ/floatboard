@@ -148,24 +148,7 @@ struct JotTagRow: View {
         let tags = store.itemTags(id).all
         let suggestions = JotSuggestions(store: store).open(jotID).filter { s in !tags.contains { $0.caseInsensitiveCompare(s) == .orderedSame } }
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("Tags").foregroundStyle(.secondary)
-                if tags.isEmpty { Text("untagged").italic().foregroundStyle(.tertiary) }
-                ForEach(tags, id: \.self) { t in
-                    HStack(spacing: 3) {
-                        Circle().fill(store.color(t)).frame(width: 7, height: 7)
-                        Text(t)
-                        Button { set(tags.filter { $0 != t }) } label: { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
-                            .buttonStyle(.borderless).help("Remove this tag")
-                    }
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Capsule().fill(Color.primary.opacity(0.07)))
-                }
-                Menu {
-                    ForEach(store.tags.map(\.name).filter { !tags.contains($0) }, id: \.self) { n in Button(n) { set(tags + [n]) } }
-                } label: { Image(systemName: "plus") }
-                .menuStyle(.borderlessButton).fixedSize().help("Add a tag")
-            }
+            ItemTagRow(id: id, problem: $refusal) { store, all in JotStore(store: store).setTags(jotID, all) }
             if !suggestions.isEmpty {
                 HStack(spacing: 6) {
                     Label("Claude suggests", systemImage: "sparkles").foregroundStyle(.secondary)
@@ -185,7 +168,6 @@ struct JotTagRow: View {
         .font(.system(size: 12))
     }
 
-    private func set(_ tags: [String]) { refusal = JotStore(store: store).setTags(jotID, tags) }
 }
 
 /// Earlier texts of a jot, newest first, each with Restore.
