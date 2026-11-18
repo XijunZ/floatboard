@@ -235,6 +235,16 @@ private func fakeWhatsAppForCircle(_ folder: URL, now: Date) -> Bool {
     check(CircleReaders.lastReadOnMainThread == false, "whatsapp_reader_reads_off_the_main_thread")
     let st = CircleStore(store: s).channel("whatsapp")
     check(st?.asOf == now && st?.completeFrom != nil && CircleStore(store: s).conversationSuggestions().first?.name == "Jo Example", "whatsapp_reader_records_data_as_of")
+    // Round 18 (a): when what the reader found can't be stored, its place (cursor) doesn't move: the next run reads it again.
+    if let s2 = circleStore(root, "war-fail.sqlite") {
+        s2.performForTest("CREATE TRIGGER fail_x BEFORE INSERT ON circle_exchanges BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+        await CircleReaders.runWhatsApp(store: s2, folder: folder, now: now)
+        let kept = CircleStore(store: s2).channel("whatsapp")?.cursor ?? ""
+        s2.performForTest("DROP TRIGGER fail_x")
+        await CircleReaders.runWhatsApp(store: s2, folder: folder, now: now)
+        let n = (try? s2.db.query("SELECT count(*) FROM circle_exchanges") { DB.int($0, 0) })?.first ?? 0 // try?-ok: 0 fails the check
+        check((Double(kept) ?? 0) == 0 && n == 2, "a_whatsapp_read_that_cannot_be_stored_keeps_its_place")
+    }
     await CircleReaders.runWhatsApp(store: s, folder: root.appendingPathComponent("missing"), now: now)
     check(CircleStore(store: s).channel("whatsapp")?.note.contains("isn't set up") == true, "whatsapp_reader_says_what_it_cannot_see")
 }

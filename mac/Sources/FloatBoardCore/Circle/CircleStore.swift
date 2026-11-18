@@ -198,6 +198,17 @@ import Foundation
         store.perform { try recordRows(inputs, now: now) }
     }
 
+    /// What a reader on this Mac found and its new place, written together: when the write fails nothing is kept (the old
+    /// place stays, so the next run reads the same again) and the error is thrown.
+    public func importRead(_ inputs: [ExchangeInput], channel: String, asOf: Date?, completeFrom: Date?, cursor: String, note: String,
+                           now: Date = Date()) throws {
+        try store.performThrowing {
+            try recordRows(inputs, now: now)
+            try store.db.run("INSERT OR REPLACE INTO circle_channels(channel, as_of, complete_from, cursor, note) VALUES(?,?,?,?,?)",
+                             [channel, asOf, completeFrom, cursor, note])
+        }
+    }
+
     /// One page of the engine's metadata and its cursor, written together: when the write fails nothing is kept (the old
     /// cursor stays, so the page comes again) and the error is thrown.
     public func importExchangePage(_ inputs: [ExchangeInput], cursorKey: String, cursor: String, now: Date = Date()) throws {

@@ -111,9 +111,9 @@ public enum CircleWeChatReader {
                 (try CircleWhatsAppReader.read(folder: folder, after: after, backfillMonths: months, now: now), Thread.isMainThread)
             }.value
             lastReadOnMainThread = onMain
-            c.record(r.exchanges, now: now)
             let from = prev?.completeFrom ?? AppTime.calendar.date(byAdding: .month, value: -c.backfillMonths, to: now)
-            c.setChannel("whatsapp", asOf: now, completeFrom: from, cursor: String(r.cursor), note: "one-to-one chats only")
+            // What was found and the new cursor in one write: a failed write keeps the old cursor (read again next time).
+            try c.importRead(r.exchanges, channel: "whatsapp", asOf: now, completeFrom: from, cursor: String(r.cursor), note: "one-to-one chats only", now: now)
             await resolveLinkedIDs(store: store, folder: folder, now: now)
         } catch {
             c.setChannel("whatsapp", asOf: prev?.asOf, completeFrom: prev?.completeFrom, cursor: prev?.cursor ?? "", note: "\(error)")
@@ -149,9 +149,9 @@ public enum CircleWeChatReader {
         let prev = c.channel("wechat")
         do {
             let rows = try await Task.detached { try CircleWeChatReader.read(folder: folder, now: now) }.value   // off the main thread
-            c.record(rows, now: now)
             let earliest = rows.map(\.at).min()
-            c.setChannel("wechat", asOf: now, completeFrom: [prev?.completeFrom, earliest].compactMap { $0 }.min(), cursor: "", note: Channel.wechat.limits ?? "")
+            try c.importRead(rows, channel: "wechat", asOf: now, completeFrom: [prev?.completeFrom, earliest].compactMap { $0 }.min(), cursor: "",
+                             note: Channel.wechat.limits ?? "", now: now)
         } catch {
             c.setChannel("wechat", asOf: prev?.asOf, completeFrom: prev?.completeFrom, cursor: "", note: "\(error)")
             if prev?.note != "\(error)" { store.activity("circle", .warning, "Circle could not read WeChat notifications", detail: "\(error)") }
