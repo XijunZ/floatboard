@@ -33,12 +33,23 @@ public struct JotVersion: Equatable {
     /// Saves a new jot. Empty text saves nothing (nil). Ids typed in it are linked.
     @discardableResult
     public func create(text: String, kind: JotKind = .jot, source: ItemSource = .typed, now: Date = Date()) -> Jot? {
+        create(text: text, kind: kind, source: source, now: now, linkFirst: [])
+    }
+
+    /// The same, with links made in the same transaction before the typed ids are linked, so a link the jot is made for
+    /// (a review note's `review-of`) is never displaced by an id typed in its text. Each: (other, kind, made by); the jot
+    /// is the subject.
+    @discardableResult
+    public func create(text: String, kind: JotKind = .jot, source: ItemSource = .typed, now: Date = Date(),
+                       linkFirst: [(ShortID, ItemLinkKind, LinkMaker)]) -> Jot? {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         var id: Int64?
         store.perform {
             let n = try store.db.run("INSERT INTO jots(text, kind, source, added, updated) VALUES(?,?,?,?,?)",
                                      [text, kind.rawValue, source.rawValue, now, now])
-            try store.linkMentionsRow(in: text, previous: "", from: ShortID(kind: .jot, number: n), now: now)
+            let me = ShortID(kind: .jot, number: n)
+            for (other, k, by) in linkFirst { try store.linkRow(me, other, kind: k, madeBy: by, actor: .user, now: now) }
+            try store.linkMentionsRow(in: text, previous: "", from: me, now: now)
             id = n
         }
         return id.flatMap { jot($0) }
