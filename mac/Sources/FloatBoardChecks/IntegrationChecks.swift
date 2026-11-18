@@ -469,14 +469,18 @@ func integrationRebindingLiveChecks() async {
     let server = Process()
     server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
     server.arguments = ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", root.path]
-    server.standardOutput = FileHandle.nullDevice; server.standardError = FileHandle.nullDevice
+    // The server's request log: round 18 checks that the bridge's request never reaches it (refused before connecting).
+    let log = root.appendingPathComponent("requests.log")
+    FileManager.default.createFile(atPath: log.path, contents: nil)
+    server.standardOutput = FileHandle.nullDevice
+    server.standardError = (try? FileHandle(forWritingTo: log)) ?? FileHandle.nullDevice // try?-ok: no log fails the check below
     do { try server.run() } catch { print("SKIP live rebinding check: no python3 (\(error))"); return }
     defer { server.terminate() }
     // Wait for it to answer (plain fetch, not checked).
     var up = false
     for _ in 0..<50 where !up {
         try? await Task.sleep(nanoseconds: 100_000_000) // try?-ok: a cancelled sleep just checks again
-        up = (try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/secret.txt")!)) != nil // try?-ok: not up yet
+        up = (try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/")!)) != nil // try?-ok: not up yet
     }
     guard up else { check(false, "live rebinding setup: local server"); return }
     guard let req = try? LocalEngine.request(from: ["url": "http://localhost:\(port)/secret.txt", "method": "GET", "publicOnly": true, "redirect": "manual"], // try?-ok: nil fails below
@@ -484,6 +488,24 @@ func integrationRebindingLiveChecks() async {
     var leaked: Data?, refused = false
     do { leaked = try await LocalEngine.liveNetwork(req).0 } catch { refused = "\(error)".contains("not a public") }
     check(refused && leaked == nil, "live_bridge_throws_away_an_answer_from_a_private_connection")
+    // Round 18 (b): the bridge resolves the name itself and connects only to the public address it checked, so a name
+    // that resolves to this Mac (or the home network) when connecting is refused before any request is sent.
+    try? await Task.sleep(nanoseconds: 300_000_000) // try?-ok: only gives the server time to write its log
+    let seen = (try? String(contentsOf: log, encoding: .utf8)) ?? "" // try?-ok: empty passes only if nothing was logged
+    check(!seen.contains("/secret.txt"), "live_bridge_sends_nothing_to_a_private_address")
+    // The pinned GET itself works end to end (to this Mac on purpose, past the public check): status, headers and body.
+    var pinned: (Data, HTTPURLResponse)?
+    do { pinned = try await PinnedHTTP.get(URLRequest(url: URL(string: "http://localhost:\(port)/secret.txt")!), ip: "127.0.0.1", timeout: 10) }
+    catch { check(false, "pinned get: \(error)") }
+    check(pinned?.1.statusCode == 200 && pinned.map { String(decoding: $0.0, as: UTF8.self) } == "home router admin", "pinned_get_reads_the_answer")
+    // The answer parser: chunked bodies, Content-Length, folded duplicate headers, and a bad status line.
+    let chunked = Data("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nX-A: 1\r\nX-A: 2\r\n\r\n5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\n\r\n".utf8)
+    let p1 = try? PinnedHTTP.parse(chunked) // try?-ok: nil fails the check
+    let p2 = try? PinnedHTTP.parse(Data("HTTP/1.1 301 Moved\r\nLocation: https://x.example/\r\nContent-Length: 3\r\n\r\nabcdef".utf8)) // try?-ok: nil fails the check
+    let p3 = try? PinnedHTTP.parse(Data("garbage\r\n\r\n".utf8)) // try?-ok: nil is expected
+    check(p1.map { String(decoding: $0.2, as: UTF8.self) } == "hello world" && p1?.1["X-A"] == "1, 2" && p1?.1["Transfer-Encoding"] == nil
+          && p2?.0 == 301 && p2?.1["Location"] == "https://x.example/" && p2.map { String(decoding: $0.2, as: UTF8.self) } == "abc" && p3 == nil,
+          "pinned_get_parses_http_answers")
 }
 
 /// Round 13 (A4): Search everything keeps each person's and each event's search text until the board changes, instead of
