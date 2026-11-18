@@ -720,3 +720,41 @@ extension ISO8601DateFormatter {
     let copies = (try? store.db.query("SELECT count(*) FROM jots WHERE text='Edited on the phone'") { DB.int($0, 0) })?.first // try?-ok: nil fails the check
     check(again.count == 1 && copies == 1, "a_recovered_jot_is_recovered_once")
 }
+
+/// Round 18 (4): sending the phone's copy respects the engine's limits (100,000 characters a jot, 4 MB and 200 jots a
+/// request): large jots go in several requests; one jot over the text limit is left out of the phone copy with a note in
+/// Activity (never cut on the Mac) and blocks nothing else.
+@MainActor func jotPushLimitsChecks() async {
+    let root = checkFolder("fb-jot-limits")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = checkStore(root, "lim.sqlite", modules: [.jots]) else { return }
+    var requests = 0, accepted: [Int64] = []
+    let client = ConnectorClient(baseURL: URL(string: "https://limits.test")!, key: "k") { req in
+        await MainActor.run {
+            var status = 200, out: Any = [:]
+            if req.httpMethod == "PUT" && req.url!.path == "/v2/jots" {
+                requests += 1
+                let body = req.httpBody ?? Data()
+                let o = (try? JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:] // try?-ok: test stand-in
+                let jots = o["jots"] as? [[String: Any]] ?? []
+                if body.count > 4_000_000 || jots.count > 200 || jots.contains(where: { (($0["text"] as? String) ?? "").utf16.count > 100_000 }) {
+                    status = 400; out = ["error": "too large"]
+                } else {
+                    let ids = jots.compactMap { ($0["id"] as? NSNumber)?.int64Value }
+                    accepted += ids; out = ["accepted": ids]
+                }
+            } else if req.url!.path == "/v2/jots/waiting" { out = ["jots": []] }
+            let data = (try? JSONSerialization.data(withJSONObject: out)) ?? Data() // try?-ok: test stand-in
+            return (data, HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+    let js = JotStore(store: store), now = Date()
+    let long = String(repeating: "a", count: 100_001)
+    guard let big = js.create(text: long, now: now.addingTimeInterval(-60)) else { check(false, "lim setup"); return }
+    for i in 0..<199 { _ = js.create(text: "Note \(i) " + String(repeating: "é", count: 25_000), now: now) }
+    for _ in 0..<3 { await JotsSync.tick(connector: "lim", store: store, client: client) }
+    check(Set(accepted).count == 199 && !accepted.contains(big.id), "large_jots_go_in_several_requests_and_one_too_long_blocks_nothing")
+    check(js.jot(big.id)?.text.count == 100_001, "a_jot_too_long_for_the_phone_is_never_cut_on_the_mac")
+    let noted = (try? store.db.query("SELECT count(*) FROM activity WHERE message LIKE '%too long for the phone%'") { DB.int($0, 0) })?.first ?? 0 // try?-ok: 0 fails the check
+    check(noted == 1, "a_jot_too_long_for_the_phone_is_noted_once")
+}

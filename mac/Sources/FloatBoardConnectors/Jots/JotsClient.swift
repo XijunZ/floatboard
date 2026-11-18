@@ -24,12 +24,27 @@ extension ConnectorClient {
         return o
     }
 
+    private static func pushRow(_ j: PushJot) -> [String: Any] {
+        ["id": j.id, "text": j.text, "kind": j.kind.rawValue, "source": j.source.rawValue, "tags": j.tags,
+         "added": iso(j.added), "updated": iso(j.updated), "deleted": j.deleted]
+    }
+
+    /// Jots split into requests the engine takes: at most `maxCount` each and under `maxBytes` encoded (its limits are 200
+    /// and 4 MB; a little room is kept for the nudge). In order; each jot in exactly one request.
+    public static func jotBatches(_ jots: [PushJot], maxCount: Int = 200, maxBytes: Int = 3_800_000) -> [[PushJot]] {
+        var out: [[PushJot]] = [], cur: [PushJot] = [], size = 0
+        for j in jots {
+            let n = ((try? JSONSerialization.data(withJSONObject: pushRow(j)))?.count ?? j.text.utf8.count * 6) + 1 // try?-ok: the worst case is counted instead
+            if !cur.isEmpty && (cur.count >= maxCount || size + n > maxBytes) { out.append(cur); cur = []; size = 0 }
+            cur.append(j); size += n
+        }
+        if !cur.isEmpty { out.append(cur) }
+        return out
+    }
+
     /// Sends jots to the online copy, with the nudge's state. Returns the numbers the engine accepted.
     public func putJots(_ jots: [PushJot], nudge: JotNudgeState?) async throws -> [Int64] {
-        var body: [String: Any] = ["jots": jots.map { j in
-            ["id": j.id, "text": j.text, "kind": j.kind.rawValue, "source": j.source.rawValue, "tags": j.tags,
-             "added": Self.iso(j.added), "updated": Self.iso(j.updated), "deleted": j.deleted] as [String: Any]
-        }]
+        var body: [String: Any] = ["jots": jots.map(Self.pushRow)]
         if let n = nudge {
             body["nudge"] = ["minutes": n.minutes.map { $0 as Any } ?? NSNull(), "zone": n.zone, "shown_day": n.shownDay.map { $0 as Any } ?? NSNull(),
                              "jotted_day": n.jottedDay.map { $0 as Any } ?? NSNull(), "done_today": n.doneToday]
