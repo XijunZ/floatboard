@@ -490,6 +490,24 @@ private func dueMentionChecks() {
     let edited = js.jot(ed.id)
     check(edited?.deleted == true && edited?.text == "Latest phone text" && js.history(ed.id).map(\.text).contains("Text before the phone edit")
           && engine.waiting.isEmpty, "phone_edit_then_delete_keeps_the_latest_text")
+    // Codex round 3, finding 4: if the history write fails, nothing is saved and nothing is acked (the engine keeps its copies),
+    // on both the newer path and the older/equal path.
+    guard let hf = js.add("Text on the Mac before", now: t0) else { return }
+    store.performForTest("CREATE TRIGGER fail_history BEFORE INSERT ON jot_history WHEN NEW.text LIKE 'Poison%' BEGIN SELECT RAISE(ABORT, 'injected'); END")
+    let poison: [[String: Any]] = [["text": "Poison earlier phone text", "at": iso(t0 - 30)]]
+    engine.acked = []
+    engine.waiting = [["key": "J-\(hf.id)", "mac_id": hf.id, "text": "Newer phone text", "kind": "jot", "source": "typed", "tags": [], "added": iso(t0),
+                       "updated": iso(Date()), "deleted": false, "rev": 9, "versions": poison]]
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(engine.acked.isEmpty && engine.waiting.count == 1 && js.jot(hf.id)?.text == "Text on the Mac before",
+          "history_failure_newer_path_saves_nothing_and_acks_nothing")
+    engine.waiting = [["key": "J-\(hf.id)", "mac_id": hf.id, "text": "Text on the Mac before", "kind": "jot", "source": "typed", "tags": [], "added": iso(t0),
+                       "updated": iso(t0 - 60), "deleted": false, "rev": 10, "versions": poison]]
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(engine.acked.isEmpty && engine.waiting.count == 1, "history_failure_older_path_acks_nothing")
+    store.performForTest("DROP TRIGGER fail_history")
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(engine.waiting.isEmpty && js.history(hf.id).map(\.text).contains("Poison earlier phone text"), "history_saved_once_the_write_works")
     // Tags: asked once, in one call; a 409 (no Claude key) stops asking on that engine.
     let tagStore = jotsStore(root, "synctags.sqlite")!
     tagStore.setModule(.jots, on: true)

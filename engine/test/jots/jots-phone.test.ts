@@ -95,6 +95,53 @@ describe("jots on the phone: account changes", () => {
   });
 });
 
+describe("jots on the phone: account changes (Codex round 3)", () => {
+  function phone(account: () => string) {
+    const stored: Record<string, any> = {};
+    const sheets: number[] = [];
+    let answer: (v: any) => void = () => {};
+    const h = { $: () => null, el: () => ({ appendChild() {}, addEventListener() {} }), toast: () => {}, newId: () => "id-00000002", offline: () => true,
+      SignedOut: class extends Error {}, store: (k: string, v: any) => { stored[k] = v; }, load: (k: string) => stored[k] ?? null, account,
+      modules: () => ({ jots: true }), zone: () => "Europe/London", openSheet: () => { sheets.push(1); }, closeSheet: () => {},
+      api: () => new Promise((r, rej) => { answer = r; }) };
+    return { h, stored, sheets, answer: (v: any) => answer(v) };
+  }
+
+  it("an_offline_jot_after_an_account_switch_is_saved_for_the_new_account", () => {
+    let account = "A";
+    const p = phone(() => account);
+    const screen = L.JotsScreen(p.h);
+    screen.restore();
+    // gotBoard(): the session now belongs to B; the app drops A's data (drop) and switches account.
+    screen.drop();
+    account = "B";
+    screen.add("Written offline after the switch");
+    expect(p.stored["floatboard.jotqueue"]?.account).toBe("B");
+    expect(JSON.stringify(p.stored["floatboard.jotqueue"])).toContain("Written offline after the switch");
+  });
+
+  it("gotBoard_rebinds_jots_right_after_an_account_switch", () => {
+    const body = /function gotBoard\(b\) \{([\s\S]*?)\n    board = /.exec(APP_JS)?.[1] ?? "";
+    expect(body).toMatch(/dropAccountData\(\);[\s\S]*jots\.restore\(\);/);
+  });
+
+  it("a_late_cleanup_answer_is_not_shown_to_another_account", async () => {
+    let account = "A";
+    const p = phone(() => account);
+    const screen = L.JotsScreen(p.h);
+    screen.restore();
+    let used: string | null = null;
+    const pending = screen.cleanup("A's private draft", (c: string) => { used = c; });
+    screen.drop();
+    account = "B";
+    screen.restore();
+    p.answer({ cleaned: "A's private draft, cleaned" });
+    await pending;
+    expect(p.sheets).toHaveLength(0);
+    expect(used).toBeNull();
+  });
+});
+
 describe("jots on the phone: page and manifest", () => {
   it("jots_screen_has_a_writing_box_search_and_tag_filter", async () => {
     const html = await (await call("/app/")).text();

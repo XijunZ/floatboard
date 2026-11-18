@@ -155,7 +155,11 @@
 
     function drop() { heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null); }
 
+    // Jots: account binding (Codex round 3). Before any change is queued, the screen is bound to the account signed in now.
+    function bound() { if (h.account() && heldBy !== h.account()) restore(); }
+
     function queueAction(a) {
+      bound();
       a.id = a.id || h.newId();
       a.made_at = a.made_at || new Date().toISOString();
       queue.push(a);
@@ -255,12 +259,16 @@
     async function cleanup(text, use) {
       if (!text.trim()) return;
       var r;
+      // Jots: account binding (Codex round 3). The answer and "Use cleaned" count only for the account and session that asked.
+      var gen = generation, acct = h.account();
+      var current = function () { return gen === generation && h.account() === acct; };
       try { r = await h.api("/app/api/jots/cleanup", { method: "POST", body: { text: text } }); }
       catch (e) {
         if (e instanceof h.SignedOut) throw e;
-        h.toast(h.offline(e) ? "Clean up needs a connection." : (e.status === 409 ? "Clean up needs Claude, set up on your Mac." : "Couldn't clean up. Try again."));
+        if (current()) h.toast(h.offline(e) ? "Clean up needs a connection." : (e.status === 409 ? "Clean up needs Claude, set up on your Mac." : "Couldn't clean up. Try again."));
         return;
       }
+      if (!current()) return;
       h.openSheet(function (sheet) {
         sheet.appendChild(h.el("h3", null, "Clean up"));
         sheet.appendChild(h.el("p", "sub", "Claude fixed grammar and structure only. Your text is kept in the jot's history."));
@@ -270,7 +278,7 @@
         cmp.appendChild(a); cmp.appendChild(b);
         sheet.appendChild(cmp);
         var ok = h.el("button", "btn", "Use cleaned");
-        ok.addEventListener("click", function () { h.closeSheet(); use(r.cleaned); });
+        ok.addEventListener("click", function () { h.closeSheet(); if (current()) use(r.cleaned); });
         var keep = h.el("button", "btn secondary", "Keep mine");
         keep.addEventListener("click", h.closeSheet);
         sheet.appendChild(ok);
@@ -415,6 +423,7 @@
       h.$("jot-tag").addEventListener("change", render);
     }
 
-    return { restore: restore, drop: drop, sync: pull, render: render, wire: wire, shareSheet: shareSheet,
+    return { restore: restore, drop: drop, sync: pull, render: render, wire: wire, shareSheet: shareSheet, cleanup: cleanup,
+      add: function (text) { return queueAction({ op: "add", text: text }); },
       focus: function () { setTimeout(function () { h.$("jot-text").focus(); }, 80); } };
   }

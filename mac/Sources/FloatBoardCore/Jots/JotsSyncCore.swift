@@ -95,20 +95,20 @@ public struct JotAck: Equatable {
             }
             if let id = r.macID ?? js.jot(origin: r.key)?.id {
                 guard let j = js.jot(id) else { acks.append(JotAck(key: r.key, rev: r.rev, macID: id)); continue }
-                js.keepInHistory(id, r.versions + (r.updated > j.updated ? [] : [EarlierText(text: r.text, at: r.updated)]))
-                if r.updated > j.updated {
-                    // The phone's text is kept even when its last step was a delete (edit then delete before this Mac synced):
-                    // the jot takes the text first (its old text goes to the history), then the delete.
-                    let hasText = !r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    if j.deleted && (!r.deleted || (hasText && r.text != j.text)) { js.undoDelete(id, now: r.updated) }
-                    if hasText && r.text != j.text { js.update(id, text: r.text, now: r.updated) }
-                    if r.deleted { js.delete(id, now: r.updated) }
-                    // Acked only once it is saved here; otherwise it stays waiting on the engine (the failure is in Activity).
-                    guard let after = js.jot(id), after.deleted == r.deleted, !hasText || after.text == r.text else { continue }
-                    store.activity("jots", .info, "Took in a change from the phone", detail: j.shortID.text)
-                } else {
-                    resend(id)   // this Mac's version is newer: the engine's copy gets it again
+                // History, text and deletion in ONE transaction that throws; acked only after it commits. A failure (in Activity)
+                // leaves the row waiting on the engine, which keeps its copies.
+                let newer = r.updated > j.updated
+                do {
+                    try store.performThrowing {
+                        try js.keepInHistoryRow(id, r.versions + (newer ? [] : [EarlierText(text: r.text, at: r.updated)]))
+                        if newer { try applyPhoneRow(id, r) }
+                    }
+                } catch {
+                    store.activity("jots", .error, "Could not take in a change from the phone; it stays on the engine and is tried again",
+                                   detail: "\(j.shortID.text): \(error)")
+                    continue
                 }
+                if newer { store.activity("jots", .info, "Took in a change from the phone", detail: j.shortID.text) } else { resend(id) }
                 acks.append(JotAck(key: r.key, rev: r.rev, macID: id))
                 continue
             }
@@ -127,7 +127,11 @@ public struct JotAck: Equatable {
                 if let s = saved, r.deleted { js.delete(s.id, now: r.updated) }
             }
             guard let saved else { continue }   // the write failed (it is in Activity): it stays waiting
-            js.keepInHistory(saved.id, r.versions)
+            do { try store.performThrowing { try js.keepInHistoryRow(saved.id, r.versions) } } catch {
+                // The jot is saved; its earlier texts are not: not acked, so the next pass (finding it by key) tries the history again.
+                store.activity("jots", .error, "Could not keep a jot's earlier texts from the phone; tried again", detail: "\(saved.shortID.text): \(error)")
+                continue
+            }
             acks.append(JotAck(key: r.key, rev: r.rev, macID: saved.id))
         }
         return acks
@@ -147,6 +151,24 @@ public struct JotAck: Equatable {
         guard let id = store.makeTask(draft, due: due?.date, dueHasTime: due?.hasTime ?? false, from: source, now: r.updated) else { return false }
         store.perform { try store.db.run("UPDATE cards SET item_source='phone' WHERE id=?", [id]) }
         return true
+    }
+
+    /// The phone's newer version of a jot, inside the caller's transaction (throws, never swallows): its text first (the old
+    /// text to the history, ids typed in it linked), then restore or delete, so an edit followed by a delete keeps the latest text.
+    private func applyPhoneRow(_ id: Int64, _ r: EngineJot) throws {
+        guard let cur = try store.db.query("SELECT text, deleted FROM jots WHERE id=?", [id], { (DB.text($0, 0), DB.int($0, 1) != 0) }).first else { return }
+        let hasText = !r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if hasText && r.text != cur.0 {
+            try store.db.run("INSERT INTO jot_history(jot_id, text, at) VALUES(?,?,?)", [id, cur.0, r.updated])
+            try store.db.run("UPDATE jots SET text=?, updated=? WHERE id=?", [r.text, r.updated, id])
+            try store.linkMentionsRow(in: r.text, previous: cur.0, from: ShortID(kind: .jot, number: id), now: r.updated)
+        }
+        if r.deleted != cur.1 {
+            try store.db.run("UPDATE jots SET deleted=?, updated=? WHERE id=?", [r.deleted ? 1 : 0, r.updated, id])
+            if r.deleted { _ = try store.hideLinks(of: ShortID(kind: .jot, number: id)) } else { try store.unhideLinks(of: ShortID(kind: .jot, number: id)) }
+        } else {
+            try store.db.run("UPDATE jots SET updated=max(updated, ?) WHERE id=?", [r.updated, id])
+        }
     }
 
     /// Makes the engine get this jot again at the next push.
