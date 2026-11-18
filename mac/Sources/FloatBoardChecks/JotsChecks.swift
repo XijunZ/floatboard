@@ -758,3 +758,41 @@ extension ISO8601DateFormatter {
     let noted = (try? store.db.query("SELECT count(*) FROM activity WHERE message LIKE '%too long for the phone%'") { DB.int($0, 0) })?.first ?? 0 // try?-ok: 0 fails the check
     check(noted == 1, "a_jot_too_long_for_the_phone_is_noted_once")
 }
+
+/// Round 19: after an older backup is restored, a new jot here can get the number the phone still uses for another jot.
+/// A phone change is applied to the local jot only when it is the same jot (the same added time); otherwise the local
+/// jot is left alone and the phone's jot is recovered as a new one. Covers a Mac jot and a phone capture.
+@MainActor func reusedJotNumberChecks() {
+    let root = checkFolder("fb-reused")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = checkStore(root, "reuse.sqlite", modules: [.jots]) else { return }
+    let js = JotStore(store: store), core = JotsSyncCore(store: store), t0 = Date().addingTimeInterval(-86400)
+    // The board as it was: jot A (typed here) and a phone capture C, both known to the phone by their numbers.
+    guard let a = js.create(text: "A as the phone knows it", now: t0) else { check(false, "reuse setup"); return }
+    let cap = EngineJot(key: "phone:cap-r1", macID: nil, text: "Captured on the bus", kind: "jot", source: "phone", added: t0.addingTimeInterval(60),
+                        updated: t0.addingTimeInterval(60), rev: 1)
+    guard let c = core.apply([cap]).first?.macID else { check(false, "reuse capture"); return }
+    // An older backup comes back (neither A nor C), and two new jots take their numbers.
+    store.performForTest("DELETE FROM jots WHERE id IN (\(a.id), \(c))")
+    store.performForTest("UPDATE sqlite_sequence SET seq=\(min(a.id, c) - 1) WHERE name='jots'")
+    guard let b = js.create(text: "B, new on the restored board", now: Date()), let d = js.create(text: "D, also new", now: Date()) else { check(false, "reuse new"); return }
+    check(Set([b.id, d.id]) == Set([a.id, c]), "reuse_setup_numbers_are_reused")
+    let editA = EngineJot(key: "J-\(a.id)", macID: a.id, text: "A edited on the phone", kind: "jot", source: "typed", added: t0,
+                          updated: Date().addingTimeInterval(-60), rev: 4)
+    let editC = EngineJot(key: "phone:cap-r1", macID: c, text: "Captured on the bus, edited", kind: "jot", source: "phone", added: t0.addingTimeInterval(60),
+                          updated: Date().addingTimeInterval(-30), rev: 2)
+    let acks = core.apply([editA, editC])
+    check(js.jot(b.id)?.text == "B, new on the restored board" && js.jot(d.id)?.text == "D, also new", "a_phone_edit_never_lands_on_a_jot_that_reused_its_number")
+    let texts = Set(acks.compactMap { $0.macID }.compactMap { js.jot($0)?.text })
+    check(acks.count == 2 && texts == ["A edited on the phone", "Captured on the bus, edited"] && !acks.contains { $0.macID == b.id || $0.macID == d.id },
+          "the_phone_jots_are_recovered_as_new_jots")
+    // The same jot (same added time) is still updated in place.
+    let editB = EngineJot(key: "J-\(b.id)", macID: b.id, text: "B edited on the phone", kind: "jot", source: "typed", added: js.jot(b.id)!.added,
+                          updated: Date(), rev: 1)
+    _ = core.apply([editB])
+    check(js.jot(b.id)?.text == "B edited on the phone", "the_same_jot_is_still_edited_in_place")
+    // A delete from the phone of the old jot never deletes the new one.
+    let delA = EngineJot(key: "J-\(a.id)", macID: a.id, text: "", kind: "jot", source: "typed", added: t0, updated: Date(), deleted: true, rev: 5)
+    _ = core.apply([delA])
+    check(js.jot(b.id)?.deleted == false, "a_phone_delete_never_deletes_a_jot_that_reused_its_number")
+}
