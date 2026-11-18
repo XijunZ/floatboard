@@ -552,6 +552,7 @@
     lastSync = Date.now();
     isOffline = false;
     if (me && me.account) store(BOARD_KEY, { account: me.account, board: board, at: lastSync });
+    retryDecisionQueue();   // Decisions: its own queue goes too once the connection is back (files/decisions.client.js)
     return sup.count;
   }
 

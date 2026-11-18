@@ -15,4 +15,4 @@ import UI from "./files/decisions.client.js";
 export const DECISIONS_LOGIC_JS: string = LOGIC;
 export const DECISIONS_UI_JS: string = UI;
 export const DECISIONS_EXPORTS = ["decisionSections", "canDismiss", "reviewAction", "notDecisionAction", "decisionQueueAfter", "decisionDetail",
-  "decisionPrediction", "decisionsWaiting", "decisionQueueSendable"];
+  "decisionPrediction", "decisionsWaiting", "decisionQueueSendable", "decisionSendBody"];
