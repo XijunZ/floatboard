@@ -101,4 +101,12 @@ import SQLite3
               ExchangeInput(channel: .wechat, direction: .incoming, at: now - day, handle: Handle(kind: .wechat, value: "李雷"), name: "李雷")], now: now)
     let wc = BulkAdd.wechatRows(store: s)
     check(wc.count == 1 && wc[0].name == "李雷" && wc[0].messages == 2 && wc[0].handles == [Handle(kind: .wechat, value: "李雷")], "bulk_wechat_lists_who_the_notifications_showed")
+    // 2,000 contacts are listed fast (built, marked and filtered well under a second).
+    let many = (0..<2000).map { i in WASession(jid: "4477009\(String(format: "%05d", i))@s.whatsapp.net", name: "Person \(i)", messages: i % 50, last: now) }
+    let manyContacts = (0..<1000).map { i in WAContact(lid: "\(900000000000 + i)@lid", phone: "4477009\(String(format: "%05d", i))", name: "Contact \(i)") }
+    let start = Date()
+    let big = BulkAdd.mark(BulkAdd.whatsappRows(sessions: many, contacts: manyContacts, known: [:]), store: s)
+    let shown = BulkAdd.visible(big, messagedOnly: true, showDismissed: false, query: "")
+    let took = Date().timeIntervalSince(start)
+    check(big.count == 2000 && !shown.isEmpty && took < 1.0, "bulk_two_thousand_contacts_list_fast (\(String(format: "%.2f", took)) s)")
 }

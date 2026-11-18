@@ -14,6 +14,7 @@ struct CircleTab: View {
     @State private var dueOnly = false
     @State private var picked: Set<Int64> = []
     @State private var editing: PersonFormRequest?
+    @State private var bulkAdding = false
     @State private var drafting: Int64?
     @State private var bulkProblem: String?
 
@@ -45,6 +46,7 @@ struct CircleTab: View {
         .sheet(item: Binding(get: { drafting.map(DraftTarget.init) }, set: { drafting = $0?.id })) { t in
             DraftSheet(personID: t.id) { drafting = nil }
         }
+        .sheet(isPresented: $bulkAdding) { BulkAddSheet(close: { bulkAdding = false }) }
         .sheet(isPresented: $nav.showSuggestions) {
             SuggestionsSheet(close: { nav.showSuggestions = false }, add: { r in nav.showSuggestions = false; editing = r })
         }
@@ -81,6 +83,8 @@ struct CircleTab: View {
                     if !tagFilter.isEmpty { Divider(); Button("Clear") { tagFilter = [] } }
                 }.frame(width: 120)
                 Picker("Sort", selection: $sort) { ForEach(Sort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.frame(width: 150)
+                Button { bulkAdding = true } label: { Label("Bulk add…", systemImage: "person.3") }.fixedSize()
+                    .help("Add many people at once from WhatsApp or WeChat")
                 Button { nav.showSuggestions = true } label: { Label(suggestions > 0 ? "Suggestions \(suggestions)" : "Suggestions", systemImage: "person.badge.plus") }.fixedSize()
                 Button { editing = PersonFormRequest(personID: nil) } label: { Label("Add", systemImage: "plus") }.keyboardShortcut("n", modifiers: [.command, .shift]).fixedSize()
             }
