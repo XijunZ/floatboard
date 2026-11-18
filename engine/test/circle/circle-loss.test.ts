@@ -52,9 +52,32 @@ describe("circle: a failing news match never loses Companies House changes (roun
     await call("/v2/circle/watch", { method: "PUT", key: u.key, body: JSON.stringify({ people: [ivy] }) });
     const a1 = { appointed_to: { company_name: "BETA LTD", company_number: "123" }, appointed_on: "2020-01-01", officer_role: "director" };
     // Budget too small for even one person: nothing is looked at, nothing is marked.
-    await runCircleUpdates(env as any, u.id, new Budget(2), { now: NOW, fetchFn: world(200, [a1]) });
+    await runCircleUpdates(env as any, u.id, new Budget(0), { now: NOW, fetchFn: world(200, [a1]) });   // round 14: need is 1 call now
     const marks = await env.DB.prepare("SELECT count(*) AS n FROM circle_checked WHERE user_id=?").bind(u.id).first<{ n: number }>();
     const cursor = await env.DB.prepare("SELECT count(*) AS n FROM circle_readers WHERE user_id=? AND reader LIKE 'ch:%'").bind(u.id).first<{ n: number }>();
     expect([marks!.n, cursor!.n]).toEqual([0, 0]);
+  });
+});
+
+// Round 14: the start guard is the person's actual need (news only: 2 searches) plus the match's share reserved once per
+// run, so a user with a few calls left (the cron's share after triage) still gets What's new.
+describe("circle: What's new runs on a small call budget", () => {
+  it("one_user_with_6_calls_left_still_runs", async () => {
+    const u = await newUser("small", { claudeKey: "sk-test" });
+    await env.DB.prepare("UPDATE settings SET modules=? WHERE user_id=?").bind(JSON.stringify({ circle: true }), u.id).run();
+    const ivy = { person: "P-3", name: "Ivy Example", firm: "Acme", company: "", officer_id: "", born: "", feed_url: "", news: true, ch: false };
+    expect((await call("/v2/circle/watch", { method: "PUT", key: u.key, body: JSON.stringify({ people: [ivy] }) })).status).toBe(200);
+    const r = await runCircleUpdates(env as any, u.id, new Budget(6), { now: NOW, fetchFn: world(200, []) });
+    expect(r.checked).toBe(1);
+    expect(r.found).toBeGreaterThan(0);
+  });
+
+  it("a_person_whose_need_does_not_fit_waits_for_the_next_run", async () => {
+    const u = await newUser("tiny", { claudeKey: "sk-test" });
+    await env.DB.prepare("UPDATE settings SET modules=? WHERE user_id=?").bind(JSON.stringify({ circle: true }), u.id).run();
+    const ivy = { person: "P-3", name: "Ivy Example", firm: "Acme", company: "", officer_id: "", born: "", feed_url: "https://example.com/feed", news: true, ch: false };
+    await call("/v2/circle/watch", { method: "PUT", key: u.key, body: JSON.stringify({ people: [ivy] }) });
+    const r = await runCircleUpdates(env as any, u.id, new Budget(6), { now: NOW, fetchFn: world(200, []) });
+    expect(r.checked).toBe(0);   // 2 searches + a feed with up to 3 redirects + the match: more than 6
   });
 });
