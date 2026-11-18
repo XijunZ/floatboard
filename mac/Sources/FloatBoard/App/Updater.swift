@@ -132,7 +132,8 @@ final class Updater: ObservableObject {
             let full = (try? String(contentsOf: log, encoding: .utf8)) ?? "" // try?-ok: only for the message and where it installed
             let tail = full.split(separator: "\n").suffix(3).joined(separator: " · ")
             let installed = UpdateCheck.installedApp(fromLog: full)
-            await MainActor.run { Updater.shared.finished(code: code, tail: tail, installed: installed) }
+            let exit = code
+            await MainActor.run { Updater.shared.finished(code: exit, tail: tail, installed: installed) }
         }
     }
 

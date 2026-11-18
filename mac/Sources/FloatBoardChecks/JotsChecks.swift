@@ -645,3 +645,31 @@ extension ISO8601DateFormatter {
     _ = core.apply([dec]); let acks = core.apply([dec])
     check(acks.count == 1 && DecisionStore(store: store).all().filter { $0.text == "We go with the blue plan" }.count == 1, "legacy_make_decision_applied_once_when_sent_again")
 }
+
+/// Round 13 (B2): the shared phone inbox: acknowledgements go in batches of 200, in order, and only for what was applied;
+/// a copy is sent only when it changed for this engine account, and remembered only after the send worked.
+@MainActor func phoneInboxChecks() async {
+    let root = checkFolder("fb-b2")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = checkStore(root, "b2.sqlite") else { return }
+    var acked: [[Int]] = []
+    let n = try? await PhoneInbox.take(fetch: { Array(1...450) }, apply: { $0.filter { $0 != 7 } }, ack: { acked.append($0) }) // try?-ok: nil fails the check
+    check(n == 449 && acked.map(\.count) == [200, 200, 49] && !acked.joined().contains(7), "phone_inbox_acks_applied_ones_in_batches_of_200")
+    var none = 0
+    _ = try? await PhoneInbox.take(fetch: { [Int]() }, apply: { $0 }, ack: { _ in none += 1 }) // try?-ok: the count below is the check
+    check(none == 0, "phone_inbox_acks_nothing_when_nothing_waits")
+    let client = ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k") { req in
+        (Data("{}".utf8), HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+    let other = ConnectorClient(baseURL: URL(string: "https://engine2.test")!, key: "k") { req in
+        (Data("{}".utf8), HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+    var sent = 0
+    let body = Data("{\"a\":1}".utf8)
+    struct Down: Error {}
+    let failed = (try? await PhoneInbox.sendIfChanged(body, metaKey: "b2.hash", store: store, client: client) { _ in throw Down() }) == nil // try?-ok: the failure is the check
+    let s1 = try? await PhoneInbox.sendIfChanged(body, metaKey: "b2.hash", store: store, client: client) { _ in sent += 1 } // try?-ok: nil fails the check
+    let s2 = try? await PhoneInbox.sendIfChanged(body, metaKey: "b2.hash", store: store, client: client) { _ in sent += 1 } // try?-ok: nil fails the check
+    let s3 = try? await PhoneInbox.sendIfChanged(body, metaKey: "b2.hash", store: store, client: other) { _ in sent += 1 } // try?-ok: nil fails the check
+    check(failed && s1 == true && s2 == false && s3 == true && sent == 2, "phone_copy_sent_only_when_changed_for_this_engine_account")
+}

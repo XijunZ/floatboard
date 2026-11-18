@@ -89,7 +89,7 @@ extension ConnectorClient {
     static var lastFailure: Date?
     public static let retryAfter: TimeInterval = 3600
     /// The last phone problem logged per connector, so a poll every 2 minutes doesn't repeat it.
-    private static var phoneReported: [String: String] = [:]
+    private static var phoneReports = PhoneInbox.Reports()
 
     /// The engine that does Claude's work: this Mac's engine in Mac only mode, else the first online one.
     public static func client(store: Store) -> (id: String, client: ConnectorClient)? {
@@ -186,31 +186,25 @@ extension ConnectorClient {
     /// copy when it changed. Problems are logged once per distinct message.
     public static func phoneStep(connector id: String, store: Store, client: ConnectorClient, now: Date = Date()) async {
         do {
-            let actions = try await client.decisionActions()
-            if !actions.isEmpty {
+            try await PhoneInbox.take(fetch: client.decisionActions, apply: { actions in
                 let r = DecisionPhone.apply(actions, store: store, now: now)
                 for (aid, why) in r.skipped { store.activity("decisions", .info, "A change from the phone was not applied: \(why)", detail: aid) }
-                let done = r.applied + r.skipped.map(\.0)   // `r.waiting` stays on the engine for the next sync
-                if !done.isEmpty { try await client.ackDecisionActions(done) }
-            }
+                return r.applied + r.skipped.map(\.0)   // `r.waiting` stays on the engine for the next sync
+            }, ack: client.ackDecisionActions)
             // Examples go into the rulebook of the engine that screens (this Mac's in Mac only mode).
             if DecisionsEngine.client(store: store)?.id == id { DecisionRulebook.applyPending(store: store, connector: id, now: now) }
             let copy = DecisionPhone.copy(store: store, now: now)
             let enc = JSONEncoder()
             enc.outputFormatting = [.sortedKeys]   // a stable hash: key order is otherwise not guaranteed
-            let data = try enc.encode(copy)
-            let hash = SHA256.hash(data: data + Data(client.accountFingerprint.utf8)).map { String(format: "%02x", $0) }.joined()
-            if hash != DecisionPhone.sentHash(store: store, connector: id) {
+            try await PhoneInbox.sendIfChanged(try enc.encode(copy), metaKey: DecisionPhone.hashKey(id), store: store, client: client) { _ in
                 try await client.putDecisions(copy)
-                DecisionPhone.setSentHash(hash, store: store, connector: id)
             }
-            phoneReported.removeValue(forKey: id)
+            phoneReports.cleared(id)
         } catch ConnectorError.http(404, _) {
             return   // an engine from before Decisions: nothing to sync
         } catch {
             let why = (error as? ConnectorError)?.description ?? "\(error)"
-            if phoneReported[id] != why {
-                phoneReported[id] = why
+            if phoneReports.failed(id, why) {
                 store.activity("connector:\(id)", .warning, "Could not sync Decisions with the phone; will try again", detail: why)
             }
         }
