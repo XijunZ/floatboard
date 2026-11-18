@@ -176,7 +176,7 @@ public struct ScreenOutcome: Equatable {
                 d.sourceItem == jot.shortID || job.references.contains { $0.id == d.shortID.text }
             }.flatMap { [$0.quote, $0.text] }
             known += job.references.map(\.text)
-            var found = 0
+            var found = 0, failed = false
             for f in r.decisions {
                 let text = f.decision.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { continue }
@@ -186,11 +186,13 @@ public struct ScreenOutcome: Equatable {
                                           why: f.why ?? "", type: DecisionType(rawValue: f.type.lowercased()) ?? .operational,
                                           status: f.sure && verified ? .decided : .maybe, foundByClaude: true, source: .claude,
                                           sourceItem: jot.shortID, decided: f.decidedOn ?? "")
-                guard let d = ds.record(draft, now: now) else { continue }
+                // A decision that couldn't be saved (in Activity) leaves this version unscreened, so the next run reads it again.
+                guard let d = ds.record(draft, now: now) else { failed = true; continue }
                 if d.status == .maybe { out.maybe.append(d.id) } else { out.recorded.append(d.id) }
                 known += [f.quote, text]
                 found += 1
             }
+            if failed { out.unreadable += 1; continue }
             store.perform {
                 try store.db.run("INSERT OR IGNORE INTO decision_screened(jot_id, version, screened, found) VALUES(?,?,?,?)", [jotID, v, now, found])
                 // A chunk: the whole version is screened only once every chunk of it is.
