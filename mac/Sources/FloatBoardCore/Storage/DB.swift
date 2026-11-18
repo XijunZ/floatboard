@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 16
+    public static let schemaVersion = 17
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -222,6 +222,10 @@ public final class DB {
             // 15 -> 16: Resolutions (docs/superpowers/specs/2026-11-17-resolutions-design.md). Depends on none of the blocks above.
             sql += v16Tables
         }
+        if version < 17 {
+            // 16 -> 17: a write order for jots kept on this Mac (change_seq), for change detection (round 13, J1).
+            sql += v17JotSeq
+        }
         return sql
     }
 
@@ -325,6 +329,28 @@ public final class DB {
     END;
     CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN
         UPDATE cards SET notes=CASE WHEN NEW.deleted=1 THEN '' ELSE NEW.text END, updated=NEW.updated WHERE id=NEW.task_id;
+    END;
+
+    """
+
+    /// Version 17: each jot's place in this Mac's write order. Every insert, every change of its text, kind, deletion or task,
+    /// and every change of its tags moves it to the end, so "changed since" never depends on the jot's own time (a phone
+    /// capture made offline, an older edit arriving late). Existing jots start in id order.
+    static let v17JotSeq = """
+    ALTER TABLE jots ADD COLUMN change_seq INTEGER NOT NULL DEFAULT 0;
+    UPDATE jots SET change_seq = id;
+    CREATE INDEX jots_change_seq ON jots(change_seq);
+    CREATE TRIGGER jots_seq_insert AFTER INSERT ON jots BEGIN
+        UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER jots_seq_update AFTER UPDATE OF text, kind, deleted, task_id ON jots WHEN NEW.change_seq = OLD.change_seq BEGIN
+        UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER jots_seq_tag_added AFTER INSERT ON item_tags WHEN NEW.item LIKE 'J-%' BEGIN
+        UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = CAST(substr(NEW.item, 3) AS INTEGER);
+    END;
+    CREATE TRIGGER jots_seq_tag_removed AFTER DELETE ON item_tags WHEN OLD.item LIKE 'J-%' BEGIN
+        UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = CAST(substr(OLD.item, 3) AS INTEGER);
     END;
 
     """
@@ -506,7 +532,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables
+    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq
 
     /// The tables Circle adds in version 14 (the same text for a new board and an upgraded one).
     static let v14Tables = """

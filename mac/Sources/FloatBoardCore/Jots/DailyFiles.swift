@@ -15,7 +15,7 @@ public struct DailyFilesSettings: Codable, Equatable {
     public init(store: Store) { self.store = store }
     /// The first line of every file FloatBoard writes (so it never removes a file it did not write).
     public static let marker = "<!-- Written by FloatBoard from your jots; edits here are replaced. -->"
-    static let settingsKey = "jot_daily_files", passKey = "jot_files_at"
+    static let settingsKey = "jot_daily_files", passKey = "jot_files_at", seqKey = "jot_files_seq"
 
     public var settings: DailyFilesSettings {
         guard let raw = (try? store.db.query("SELECT value FROM meta WHERE key=?", [Self.settingsKey]) { DB.text($0, 0) })?.first, // try?-ok: unreadable = defaults
@@ -72,7 +72,12 @@ public struct DailyFilesSettings: Codable, Equatable {
         guard s.on else { return [] }
         let last = (try? store.db.query("SELECT value FROM meta WHERE key=?", [Self.passKey]) { DB.text($0, 0) })?.first.flatMap(Double.init) // try?-ok: unknown = write every day
         let since = last.map(Date.init(timeIntervalSince1970:)) ?? .distantPast
-        let changed = JotStore(store: store).changed(since: since)
+        // Changed since the last pass by this Mac's write order (a jot arriving late with an older time still counts); a board
+        // whose last pass predates the write order uses the time once.
+        let js = JotStore(store: store)
+        let upTo = js.lastChangeSeq()
+        let lastSeq = (try? store.db.query("SELECT value FROM meta WHERE key=?", [Self.seqKey]) { DB.text($0, 0) })?.first.flatMap { Int64($0) } // try?-ok: unknown = use the time this once
+        let changed = lastSeq.map { js.changed(afterSeq: $0) } ?? js.changed(since: since)
         let days = Dictionary(grouping: changed, by: { Self.dayKey($0.added) }).compactMapValues { $0.first?.added }
         if days.isEmpty && last != nil { return [] }   // nothing changed: no write (so the pass never feeds itself)
         var done: [String] = []
@@ -110,7 +115,10 @@ public struct DailyFilesSettings: Codable, Equatable {
                     }
                 }
             }
-            store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [Self.passKey, String(now.timeIntervalSince1970)]) }
+            store.perform {
+                try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [Self.passKey, String(now.timeIntervalSince1970)])
+                try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [Self.seqKey, String(upTo)])
+            }
         } catch {
             store.activity("jots", .error, "Could not write the daily jot files", detail: "\(s.folder): \(error)")
         }

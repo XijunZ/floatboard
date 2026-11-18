@@ -159,6 +159,17 @@ extension JotStore {
     /// Jots changed (added, edited, deleted or restored) since `date`, deleted ones too.
     public func changed(since date: Date) -> [Jot] { rows("WHERE updated>? ORDER BY updated", [date]) }
 
+    /// Jots written on this Mac after write-order mark `seq` (`lastChangeSeq`), whatever their own times say.
+    public func changed(afterSeq seq: Int64) -> [Jot] { rows("WHERE change_seq>? ORDER BY change_seq", [seq]) }
+
+    /// The newest write-order mark (0 with no jots); nil when it can't be read.
+    public func lastChangeSeq() -> Int64 {
+        do { return try store.db.query("SELECT coalesce(max(change_seq), 0) FROM jots") { DB.int($0, 0) }.first ?? 0 } catch {
+            store.activity("jots", .error, "Could not read the jots' change order", detail: "\(error)")
+            return 0
+        }
+    }
+
     func rows(_ tail: String, _ args: [Any?]) -> [Jot] {
         do {
             return try store.db.query("SELECT id, text, kind, source, added, updated, deleted FROM jots \(tail)", args) { s in

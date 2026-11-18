@@ -538,3 +538,41 @@ extension ISO8601DateFormatter {
         return f.date(from: s)
     }
 }
+
+/// Round 13 (J1): change detection uses a write order kept on this Mac (change_seq), not the jot's own time, so a jot
+/// that arrives late with an older time (a phone capture made offline, an edit of an older jot) still counts as changed.
+@MainActor func jotChangeOrderChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-jot-seq-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let store: Store
+    do { store = Store(db: try DB(url: root.appendingPathComponent("seq.sqlite"))) } catch { check(false, "seq setup: \(error)"); return }
+    store.setModule(.jots, on: true); store.setModule(.decisions, on: true)
+    let js = JotStore(store: store), now = Date()
+    guard let first = js.create(text: "Morning note", now: now.addingTimeInterval(-3600)) else { check(false, "seq first"); return }
+    let mark = js.lastChangeSeq()
+    // Arrives now, written two days ago on the phone (offline).
+    _ = js.add("Captured offline on Saturday", kind: .jot, source: .phone, origin: "phone:late", tags: [], now: now.addingTimeInterval(-2 * 86400))
+    check(js.changed(afterSeq: mark).map(\.text) == ["Captured offline on Saturday"], "late_arriving_jot_counts_as_changed")
+    // An edit carrying an older time than the last pass.
+    let mark2 = js.lastChangeSeq()
+    js.update(first.id, text: "Morning note, edited on the phone yesterday", now: now.addingTimeInterval(-86400))
+    check(js.changed(afterSeq: mark2).map(\.id) == [first.id], "late_edit_counts_as_changed")
+    // A tag change counts too (meeting tags copied onto meeting notes).
+    let mark3 = js.lastChangeSeq()
+    _ = js.setTags(first.id, ["Work"])
+    check(js.changed(afterSeq: mark3).map(\.id) == [first.id], "tag_change_counts_as_changed")
+    // Daily files: the late jot's day is written at the next pass.
+    let folder = root.appendingPathComponent("Daily")
+    let daily = DailyFiles(store: store)
+    daily.save(DailyFilesSettings(on: true, folder: folder.path))
+    _ = daily.refresh(now: now)
+    _ = js.add("Another offline capture", kind: .jot, source: .phone, origin: "phone:late2", tags: [], now: now.addingTimeInterval(-3 * 86400))
+    let written = daily.refresh(now: now.addingTimeInterval(60))
+    check(written == [DailyFiles.dayKey(now.addingTimeInterval(-3 * 86400))], "daily_files_write_the_day_of_a_late_jot")
+    // Screening: a phone edit of an older jot, arriving after a run with an older time, is screened at the next run.
+    let s0 = DecisionScreening.lastJotID(store: store)
+    DecisionScreening.finishRun(store: store, started: now, readFrom: now, complete: true, now: now, jotsUpTo: s0)
+    js.update(first.id, text: "We decided to move the offsite", now: now.addingTimeInterval(-5 * 86400))
+    check(DecisionScreening.pending(store: store, now: now.addingTimeInterval(60)).contains { $0.ref.hasPrefix("J-\(first.id)@") }, "late_edit_of_an_older_jot_is_screened")
+}
