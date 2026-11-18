@@ -128,7 +128,10 @@ public struct DecisionFilter: Equatable {
     /// (auto when Claude found it, else made by you), takes the source's tags, is linked to the people it names, and its review
     /// is scheduled. Empty text records nothing (nil).
     @discardableResult
-    public func record(_ d: DecisionDraft, now: Date = Date()) -> Decision? {
+    public func record(_ d: DecisionDraft, now: Date = Date()) -> Decision? { record(d, now: now, alsoInTransaction: nil) }
+
+    /// `record`, with `also` run in the same transaction once the decision exists (its id given): both are written or neither.
+    func record(_ d: DecisionDraft, now: Date, alsoInTransaction also: ((ShortID) throws -> Void)?) -> Decision? {
         let text = d.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         let src = d.sourceItem.flatMap { store.item($0) }
@@ -158,6 +161,7 @@ public struct DecisionFilter: Equatable {
             try linkPeopleRow(me, text: [text, d.quote, why].joined(separator: "\n"), now: now)
             try linkMentionsRow(me, text: Self.typedText(text: text, why: why, expected: d.expected, alternatives: d.alternatives), previous: "",
                                 source: d.sourceItem, now: now)
+            try also?(me)
             id = n
         }
         return id.flatMap { decision($0) }
