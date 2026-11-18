@@ -140,16 +140,21 @@
     var syncing = false;
     var lastSel = { text: "", key: null };
     var undoTimer = 0;
+    // Which account and session the cache and queue belong to: a sign-out (drop) or another account starts a new generation,
+    // and an answer to a request sent in an older generation is thrown away (never cached under the new account).
+    var generation = 0;
+    var heldBy = null;
 
     function restore() {
       var acct = h.account();
       var c = h.load(CACHE_KEY), q = h.load(QUEUE_KEY);
+      if (acct !== heldBy) { generation += 1; heldBy = acct; syncing = false; }
       cache = c && c.account === acct && Array.isArray(c.jots) ? c.jots : [];
       queue = q && q.account === acct && Array.isArray(q.actions) ? q.actions : [];
     }
-    function saveQueue() { h.store(QUEUE_KEY, queue.length ? { account: h.account(), actions: queue } : null); }
+    function saveQueue() { if (heldBy) h.store(QUEUE_KEY, queue.length ? { account: heldBy, actions: queue } : null); }
 
-    function drop() { cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null); }
+    function drop() { generation += 1; heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null); }
 
     function queueAction(a) {
       a.id = a.id || h.newId();
@@ -164,6 +169,8 @@
     async function pull() {
       if (syncing || !h.account() || !(h.modules() || {}).jots) return;
       syncing = true;
+      var gen = generation, acct = h.account();
+      var current = function () { return gen === generation && h.account() === acct; };
       try {
         var r;
         if (queue.length) {
@@ -171,20 +178,21 @@
           queue = markJotsAttempted(queue, body.actions.map(function (a) { return a.id; }));
           saveQueue();
           r = await h.api("/app/api/jots", { method: "POST", body: body });
+          if (!current()) return;   // signed out or another account meanwhile: this answer belongs to nobody here now
           queue = afterJotSend(queue, r);
           saveQueue();
           var lost = (r.superseded || []).length;
           if (lost) h.toast(lost === 1 ? "Your Mac had a newer version; your edit is kept in the jot's history." : "Your Mac had newer versions; your " + lost + " edits are kept in the jots' history.");
         } else {
           r = await h.api("/app/api/jots");
+          if (!current()) return;
         }
-        if (Array.isArray(r.jots)) { cache = r.jots; h.store(CACHE_KEY, { account: h.account(), jots: cache, at: Date.now() }); }
+        if (Array.isArray(r.jots)) { cache = r.jots; h.store(CACHE_KEY, { account: acct, jots: cache, at: Date.now() }); }
       } catch (e) {
         if (e instanceof h.SignedOut) throw e;
         // Offline or refused: the queue stays and goes with the next sync; the list shows the last copy.
       } finally {
-        syncing = false;
-        render();
+        if (gen === generation) { syncing = false; render(); }
       }
     }
 

@@ -72,6 +72,27 @@ describe("jots on the phone: logic", () => {
   });
 });
 
+describe("jots on the phone: account changes", () => {
+  it("a_late_answer_is_never_kept_for_another_account", async () => {
+    // Codex round 2, finding 4: a request still out when the account changes (or the phone is signed out) is discarded.
+    const stored: Record<string, any> = {};
+    let account = "A";
+    let answer: (v: any) => void = () => {};
+    const h = { $: () => null, el: () => null, toast: () => {}, newId: () => "id-00000001", offline: () => false, SignedOut: class extends Error {},
+      store: (k: string, v: any) => { stored[k] = v; }, load: (k: string) => stored[k] ?? null, account: () => account, modules: () => ({ jots: true }),
+      zone: () => "Europe/London", api: () => new Promise((r) => { answer = r; }) };
+    const screen = L.JotsScreen(h);
+    screen.restore();
+    const pending = screen.sync();
+    screen.drop();
+    account = "B";
+    screen.restore();
+    answer({ jots: [{ key: "J-1", text: "A's private note", kind: "jot", source: "typed", tags: [], added: iso(now), updated: iso(now) }] });
+    await pending;
+    expect(JSON.stringify(stored)).not.toContain("A's private note");
+  });
+});
+
 describe("jots on the phone: page and manifest", () => {
   it("jots_screen_has_a_writing_box_search_and_tag_filter", async () => {
     const html = await (await call("/app/")).text();

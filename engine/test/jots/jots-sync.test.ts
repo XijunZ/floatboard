@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
 import { BASE, call, fathomHookPath, newUser } from "../helpers";
 import { pairPhone } from "../phone-helpers";
-import { purgeJots, runJotNudges } from "../../src/jots/copies";
+import { purgeJots, runJotNudges, setJotsPutRaceHook } from "../../src/jots/copies";
 
 // Jots (docs/superpowers/specs/2026-11-17-jots-design.md §4): the 30-day online copy, phone captures and edits waiting for
 // the Mac (newest wins), meeting notes from Fathom, and the daily nudge on the phone.
@@ -156,6 +156,41 @@ describe("jots: phone captures and edits reach the Mac", () => {
     expect(by["J-2"]).toMatchObject({ mac_id: 2, deleted: true });
     expect(by["phone:gone-0001"]).toMatchObject({ mac_id: null, text: "Edit of a capture the engine never had" });
     expect(by["action:mk-000304"]).toMatchObject({ ref: "J-1", text: "Call Ann" });
+  });
+
+  it("a_phone_edit_landing_during_a_mac_upload_is_not_lost", async () => {
+    const u = await setup("Race");
+    const t0 = Date.now() - 60_000;
+    await putJots(u.key, { jots: [jot(1, { text: "Mac text", updated: iso(t0) })] });
+    // The phone's edit lands after the upload read the row and before it writes (Codex round 2, finding 1).
+    let fired = false;
+    setJotsPutRaceHook(async () => {
+      if (fired) return;
+      fired = true;
+      await phoneSend(u.cookie, [{ id: "edit-0401", op: "edit", key: "J-1", text: "Phone words in between", made_at: iso(t0 + 5000) }]);
+    });
+    try {
+      await putJots(u.key, { jots: [jot(1, { text: "Mac newer", updated: iso(t0 + 10_000) })] });
+    } finally { setJotsPutRaceHook(undefined); }
+    expect(fired).toBe(true);
+    const w = await waiting(u.key);
+    const texts = w.jots.flatMap((j) => [j.text, ...(j.versions ?? []).map((v: any) => v.text)]);
+    expect(texts).toContain("Phone words in between");
+    expect((await phoneJots(u.cookie)).jots[0].text).toBe("Mac newer");
+  });
+
+  it("an_upload_with_the_same_text_keeps_unacked_history_waiting", async () => {
+    const u = await setup("Same text");
+    const t0 = Date.now() - 60_000;
+    await putJots(u.key, { jots: [jot(1, { text: "Mac text", updated: iso(t0) })] });
+    // An older phone edit is kept only as a version (finding 2); the Mac then uploads the same text with a newer stamp.
+    await phoneSend(u.cookie, [{ id: "edit-0501", op: "edit", key: "J-1", text: "Older phone words", made_at: iso(t0 - 5000) }]);
+    await putJots(u.key, { jots: [jot(1, { text: "Mac text", updated: iso(t0 + 10_000) })] });
+    const w = await waiting(u.key);
+    expect(w.jots).toHaveLength(1);
+    expect(w.jots[0].versions.map((v: any) => v.text)).toContain("Older phone words");
+    await purgeJots(env, Date.now() + 40 * DAY);
+    expect(await env.DB.prepare("SELECT count(*) n FROM jot_copy_versions WHERE user_id=?").bind(u.id).first<number>("n")).toBe(1);
   });
 
   it("phone_delete_and_make_task_wait_for_the_mac", async () => {
