@@ -259,9 +259,10 @@
     async function cleanup(text, use) {
       if (!text.trim()) return;
       var r;
-      // Jots: account binding (Codex round 3). The answer and "Use cleaned" count only for the account and session that asked.
-      var gen = generation, acct = h.account();
-      var current = function () { return gen === generation && h.account() === acct; };
+      // Jots: account binding (Codex round 3). The answer and "Use cleaned" count only for the account and session that asked:
+      // the app's shared session check (h.stamp / h.sameSession), as for sync.
+      var stamp = h.stamp();
+      var current = function () { return h.sameSession(stamp); };
       try { r = await h.api("/app/api/jots/cleanup", { method: "POST", body: { text: text } }); }
       catch (e) {
         if (e instanceof h.SignedOut) throw e;
