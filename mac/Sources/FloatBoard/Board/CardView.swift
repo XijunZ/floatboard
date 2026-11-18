@@ -4,6 +4,7 @@ import SwiftUI
 struct CardView: View {
     @EnvironmentObject var ui: UIState
     @EnvironmentObject var store: Store
+    @Environment(\.colorScheme) private var scheme
     let card: Card
     @State private var hover = false
     @State private var editing = false
@@ -72,7 +73,7 @@ struct CardView: View {
                     .fixedSize()
                     .padding(.horizontal, 6).padding(.vertical, 1)
                     .background(Capsule().fill(store.color(card.area).opacity(0.18)))
-                    .foregroundStyle(store.color(card.area))
+                    .foregroundStyle(store.ink(card.area, scheme))   // light colours darkened in light mode (ChipInk)
                     .contentShape(Capsule())
                     // Click: next group. Right-click: pick one.
                     .onTapGesture { store.setArea(card, store.shift(card.area, by: 1)) }
