@@ -21,6 +21,9 @@ import { circleFetch } from "./net";
 import { fetchPublic, publicHttpUrl } from "./safe-url";
 import { circleOn, haikuFor, line, seal, unseal } from "./common";
 
+/** The most calls one person can take in a run, and the news match's share (one call, the client retries up to twice). */
+const PER_PERSON_CALLS = 7;
+const MATCH_CALLS = 3;
 const DAY = 86400_000;
 export const RECHECK_MS = 7 * DAY;
 const CH = "https://api.company-information.service.gov.uk";
@@ -79,16 +82,22 @@ export async function runCircleUpdates(env: Env, userId: string, budget: Budget,
     const u = await env.DB.prepare("SELECT companies_house_key_enc FROM users WHERE id=?").bind(userId).first<{ companies_house_key_enc: string | null }>();
     const chKey = u?.companies_house_key_enc ? await decrypt(env, u.companies_house_key_enc) : null;
     const pending: Pending[] = [];
+    // "Checked" marks and Companies House cursors are written only in the same batch as what was found (never before it):
+    // a run that stops early (Claude overloaded, the call budget used up) loses nothing and looks again next time.
+    const deferred: D1PreparedStatement[] = [];
     let checked = 0;
     const due = async (person: string, kind: string) => {
       const r = await env.DB.prepare("SELECT checked_at FROM circle_checked WHERE user_id=? AND person=? AND kind=?").bind(userId, person, kind).first<{ checked_at: string }>();
       return !r || now - Date.parse(r.checked_at) >= RECHECK_MS;
     };
-    const mark = (person: string, kind: string) => env.DB.prepare(`INSERT INTO circle_checked(user_id,person,kind,checked_at) VALUES(?,?,?,?)
-        ON CONFLICT(user_id,person,kind) DO UPDATE SET checked_at=excluded.checked_at`).bind(userId, person, kind, new Date(now).toISOString()).run();
+    const mark = (person: string, kind: string) => { deferred.push(env.DB.prepare(`INSERT INTO circle_checked(user_id,person,kind,checked_at) VALUES(?,?,?,?)
+        ON CONFLICT(user_id,person,kind) DO UPDATE SET checked_at=excluded.checked_at`).bind(userId, person, kind, new Date(now).toISOString())); };
     for (const p of people) {
-      if (budget.remaining < 4) break;
+      // Up to 7 calls for one person (2 news searches, Companies House, a feed with 3 redirects), plus the news match at the end
+      // (one call, up to 3 with the client's retries).
+      if (budget.remaining < PER_PERSON_CALLS + MATCH_CALLS) break;
       let looked = false;
+      const ownPending = pending.length, ownDeferred = deferred.length;
       try {
         if (p.news && await due(p.person, "news")) {
           looked = true;
@@ -108,16 +117,16 @@ export async function runCircleUpdates(env: Env, userId: string, budget: Budget,
                 u: { kind, title: cleanTitle(i.title), detail: i.source, url: i.link, at: i.at, match: "possible" } });
             }
           }
-          await mark(p.person, "news");
+          mark(p.person, "news");
         }
         if (p.ch && chKey && await due(p.person, "ch")) {
           looked = true;
-          await companiesHouse(env, userId, p, chKey, f, pending);
-          await mark(p.person, "ch");
+          await companiesHouse(env, userId, p, chKey, f, pending, deferred);
+          mark(p.person, "ch");
         }
         if (p.feed_url && publicHttpUrl(p.feed_url) && await due(p.person, "feed")) {
           looked = true;
-          await mark(p.person, "feed");
+          mark(p.person, "feed");
           let r: Response | null = null;
           try { r = await fetchPublic(f, p.feed_url); } catch (e) {
             console.warn(JSON.stringify({ event: "circle_feed_refused", person: p.person, error: String((e as Error)?.message ?? e).slice(0, 200) }));
@@ -127,6 +136,8 @@ export async function runCircleUpdates(env: Env, userId: string, budget: Budget,
           }
         }
       } catch (e) {
+        // A person not finished keeps nothing from this run (looked at again next time).
+        pending.length = ownPending; deferred.length = ownDeferred;
         if ((e as Error)?.name === "BudgetExhausted" || /budget/i.test(String((e as Error)?.message))) break;
         console.warn(JSON.stringify({ event: "circle_update_failed", person: p.person, error: String((e as Error)?.message ?? e).slice(0, 200) }));
       }
@@ -138,14 +149,20 @@ export async function runCircleUpdates(env: Env, userId: string, budget: Budget,
       const known = await env.DB.prepare("SELECT 1 AS x FROM circle_updates WHERE user_id=? AND key=?").bind(userId, x.key).first();
       if (!known) fresh.push(x);
     }
-    await matchNews(env, userId, fresh.filter((x) => x.needsMatch).slice(0, MATCH_BATCH), f);
+    // The match never stops the run: overloaded, rate limited or out of calls, those headlines simply stay "possible".
+    if (budget.remaining >= 1) {
+      try { await matchNews(env, userId, fresh.filter((x) => x.needsMatch).slice(0, MATCH_BATCH), f); } catch (e) {
+        console.warn(JSON.stringify({ event: "circle_news_match_failed", error: String((e as Error)?.message ?? e).slice(0, 200) }));
+      }
+    }
     const stmts: D1PreparedStatement[] = [];
     for (const x of fresh) {
       stmts.push(env.DB.prepare("INSERT OR IGNORE INTO circle_updates(user_id,key,person,data_enc,created) VALUES(?,?,?,?,?)")
         .bind(userId, x.key, x.person.person, await seal(env, x.u), nowISO()));
     }
-    const res = stmts.length ? await env.DB.batch(stmts) : [];
-    return { checked, found: res.filter((r) => r.meta.changes > 0).length };
+    const all = [...stmts, ...deferred];
+    const res = all.length ? await env.DB.batch(all) : [];
+    return { checked, found: res.slice(0, stmts.length).filter((r) => r.meta.changes > 0).length };
   } catch (e) {
     console.warn(JSON.stringify({ event: "circle_updates_failed", error: String((e as Error)?.message ?? e).slice(0, 300) }));
     return { checked: 0, found: 0 };
@@ -174,7 +191,7 @@ async function matchNews(env: Env, userId: string, items: Pending[], f: typeof f
 }
 
 /** Companies House: candidates by name, or a confirmed officer's appointments (first read = current directorships). */
-async function companiesHouse(env: Env, userId: string, p: WatchPerson, key: string, f: typeof fetch, out: Pending[]) {
+async function companiesHouse(env: Env, userId: string, p: WatchPerson, key: string, f: typeof fetch, out: Pending[], deferred: D1PreparedStatement[]) {
   const auth = { Authorization: "Basic " + btoa(`${key}:`) };
   if (!p.officer_id) {
     const r = await f(`${CH}/search/officers?${new URLSearchParams({ q: p.name, items_per_page: "10" })}`, { headers: auth });
@@ -213,6 +230,6 @@ async function companiesHouse(env: Env, userId: string, p: WatchPerson, key: str
   }
   for (const a of view) if (!first && known.has(a.base) && a.resigned) push(`${a.base}:r`, "resignation", a, `Resigned ${a.resigned}`, a.resigned);
   for (const a of view) known.add(a.base);
-  await env.DB.prepare(`INSERT INTO circle_readers(user_id,reader,as_of,cursor,note) VALUES(?,?,?,?,'')
-      ON CONFLICT(user_id,reader) DO UPDATE SET as_of=excluded.as_of, cursor=excluded.cursor`).bind(userId, reader, nowISO(), JSON.stringify([...known])).run();
+  deferred.push(env.DB.prepare(`INSERT INTO circle_readers(user_id,reader,as_of,cursor,note) VALUES(?,?,?,?,'')
+      ON CONFLICT(user_id,reader) DO UPDATE SET as_of=excluded.as_of, cursor=excluded.cursor`).bind(userId, reader, nowISO(), JSON.stringify([...known])));   // saved with what was found
 }
