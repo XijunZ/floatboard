@@ -91,9 +91,9 @@ public struct PhoneDecisionAction: Codable, Equatable {
         for a in actions {
             if a.action == "make" {
                 switch make(a, store: store, now: now) {
-                case .some(true): applied.append(a.id)
-                case .some(false): skipped.append((a.id, "empty decision"))
-                case .none: waiting.append(a.id)
+                case .recorded: applied.append(a.id)
+                case .invalid(let why): skipped.append((a.id, why))   // acknowledged and dropped: it can never be recorded
+                case .later: waiting.append(a.id)                     // not acknowledged: the engine keeps it for the next sync
                 }
                 continue
             }
@@ -117,21 +117,29 @@ public struct PhoneDecisionAction: Codable, Equatable {
         return (applied, skipped, waiting)
     }
 
+    /// What became of a phone decision: recorded (or already recorded: a repeat), invalid (can never be recorded: acknowledge
+    /// and drop), or later (its jot is on its way, or this Mac could not write it: leave it on the engine, not acknowledged).
+    enum MakeOutcome: Equatable { case recorded, invalid(String), later }
+
     /// Records a decision from the phone's Make decision form: made by you on the phone, linked to its jot (`J-n` or the jot's
     /// key) with the jot's tags. While Decisions is off it is kept as a Maybe draft (nothing is dropped, nothing waits on the
-    /// switch). True when recorded (or already recorded: a repeat), false when empty, nil when its jot hasn't arrived yet.
-    static func make(_ a: PhoneDecisionAction, store: Store, now: Date) -> Bool? {
+    /// switch). The decision and its repeat marker are written in one transaction, so it is acknowledged only once both are kept.
+    static func make(_ a: PhoneDecisionAction, store: Store, now: Date) -> MakeOutcome {
         let doneKey = "decisions.phone_made:\(a.id)"
-        let seen = (try? store.db.query("SELECT value FROM meta WHERE key=?", [doneKey]) { DB.text($0, 0) })?.first // try?-ok: unknown = not recorded yet (a repeat is then recorded again, never lost)
-        if seen != nil { return true }
+        let seen: String?
+        do { seen = try store.db.query("SELECT value FROM meta WHERE key=?", [doneKey]) { DB.text($0, 0) }.first } catch {
+            store.activity("decisions", .error, "Could not check a decision from the phone; it waits for the next sync", detail: "\(error)")
+            return .later
+        }
+        if seen != nil { return .recorded }
         let text = (a.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return false }
+        guard !text.isEmpty else { return .invalid("empty decision") }
         let made = a.madeAt.flatMap { ISO8601DateFormatter().date(from: $0) ?? fractionalISO.date(from: $0) } ?? now
         var source: ShortID?
         if let ref = a.source?.trimmingCharacters(in: .whitespaces), !ref.isEmpty {
             if let id = ShortID.parse(ref), id.kind == .jot, JotStore(store: store).jot(id.number) != nil { source = id }
             else if let j = JotStore(store: store).jot(origin: ref) { source = j.shortID }
-            else if now.timeIntervalSince(made) < sourceWait { return nil }   // its jot is on its way: try at the next sync
+            else if now.timeIntervalSince(made) < sourceWait { return .later }   // its jot is on its way: try at the next sync
             else { store.activity("decisions", .warning, "A decision from the phone was recorded without its jot (the jot never reached this Mac)", detail: a.id) }
         }
         let on = store.isOn(.decisions)
@@ -139,11 +147,14 @@ public struct PhoneDecisionAction: Codable, Equatable {
                                   confidence: a.confidence.flatMap(Confidence.init(rawValue:)), type: a.type.flatMap(DecisionType.init(rawValue:)) ?? .operational,
                                   status: on ? .decided : .maybe, foundByClaude: false, source: .phone, sourceItem: source)
         if draft.quote.count > 4000 { draft.quote = String(draft.quote.prefix(4000)) }
-        guard let d = DecisionStore(store: store).record(draft, now: now) else { return false }
-        store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [doneKey, d.shortID.text]) }
+        let recorded = DecisionStore(store: store).record(draft, now: now) { me in
+            try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [doneKey, me.text])
+        }
+        // A failed write was rolled back and is in Activity (Store.perform): nothing kept, so it stays on the engine.
+        guard let d = recorded else { return .later }
         store.activity("decisions", .info, on ? "Recorded a decision made on the phone" : "Kept a decision from the phone as a Maybe draft (Decisions is off)",
                        detail: d.shortID.text)
-        return true
+        return .recorded
     }
 
     private static let fractionalISO: ISO8601DateFormatter = {

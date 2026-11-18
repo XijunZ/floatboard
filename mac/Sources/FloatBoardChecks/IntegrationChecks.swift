@@ -295,3 +295,34 @@ import SQLite3
           && ["my_rules", "chat_rules", "learned"].allSatisfy { (sent?[$0] as? String)?.count == 50_000 } && warnings.count == 1,
           "only_settings_the_engine_refuses_are_held_back_trimmed_ones_sent_whole")
 }
+
+// MARK: A phone decision the Mac could not save stays on the engine (Codex review 3, finding 3)
+
+@MainActor func integrationPhoneDecisionStorageChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-int-dec-store-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "dec-store.sqlite") else { return }
+    DecisionsArea.registerCore()
+    let ds = DecisionStore(store: s)
+    func make(_ id: String, _ text: String) -> PhoneDecisionAction {
+        var a = PhoneDecisionAction(id: id, decision: "", action: "make", madeAt: ISO8601DateFormatter().string(from: decisionsNow))
+        a.text = text
+        return a
+    }
+    // The decision row can't be written (a transient storage failure): not acknowledged, nothing recorded.
+    s.performForTest("CREATE TRIGGER fail_dec BEFORE INSERT ON decisions BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    let r1 = DecisionPhone.apply([make("s1", "Keep the old supplier"), make("s2", "  ")], store: s, now: decisionsNow)
+    check(r1.applied.isEmpty && r1.waiting == ["s1"] && r1.skipped.map(\.0) == ["s2"] && ds.all().isEmpty,
+          "phone_decision_storage_failure_is_retried_not_acked_empty_one_dropped")
+    s.performForTest("DROP TRIGGER fail_dec")
+    // The dedupe marker can't be written: the decision is rolled back with it (never saved without its marker).
+    s.performForTest("CREATE TRIGGER fail_mark BEFORE INSERT ON meta WHEN NEW.key LIKE 'decisions.phone_made:%' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    let r2 = DecisionPhone.apply([make("s1", "Keep the old supplier")], store: s, now: decisionsNow)
+    check(r2.applied.isEmpty && r2.waiting == ["s1"] && ds.all().isEmpty, "phone_decision_and_its_marker_commit_together")
+    s.performForTest("DROP TRIGGER fail_mark")
+    // Storage back: recorded once, acknowledged, and a repeat after that is acknowledged without a second decision.
+    let r3 = DecisionPhone.apply([make("s1", "Keep the old supplier")], store: s, now: decisionsNow)
+    let r4 = DecisionPhone.apply([make("s1", "Keep the old supplier")], store: s, now: decisionsNow)
+    check(r3.applied == ["s1"] && r4.applied == ["s1"] && ds.all().filter { $0.text == "Keep the old supplier" }.count == 1, "phone_decision_recorded_once_after_retry")
+}
