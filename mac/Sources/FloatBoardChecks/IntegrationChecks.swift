@@ -127,7 +127,7 @@ import SQLite3
           "phone_decision_kept_as_maybe_while_decisions_is_off")
     check(DecisionPhone.apply([make("m6", source: "", text: "   ")], store: s, now: decisionsNow).skipped.map(\.0) == ["m6"], "empty_phone_decision_skipped")
     // An older phone's jot action never opens a form and never waits: a Maybe draft linked to the jot.
-    check(JotActions.makeDecision?(s, "We go with plan B\nbecause it is cheaper", jot.shortID) == true
+    check(JotActions.makeDecision?(s, "We go with plan B\nbecause it is cheaper", jot.shortID, { _ in }) == true
           && byText("We go with plan B").map { $0.status == .maybe && $0.source == .phone } == true, "older_phone_make_decision_kept_as_maybe_draft")
 }
 
@@ -398,7 +398,7 @@ import SQLite3
     // An older phone's jot Make decision whose decision can't be written is not acknowledged.
     guard let j = JotStore(store: s).create(text: "We go with plan B", now: decisionsNow) else { check(false, "sweep jot"); return }
     s.performForTest("CREATE TRIGGER fail_dec2 BEFORE INSERT ON decisions BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
-    let handed = JotActions.makeDecision?(s, "We go with plan B", j.shortID)
+    let handed = JotActions.makeDecision?(s, "We go with plan B", j.shortID, { _ in })
     s.performForTest("DROP TRIGGER fail_dec2")
     check(handed == false, "older_phone_make_decision_storage_failure_is_not_acked")
 }

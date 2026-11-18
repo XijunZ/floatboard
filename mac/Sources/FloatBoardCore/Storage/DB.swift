@@ -333,6 +333,8 @@ public final class DB {
 
     """
 
+    /// Version 17 also keeps which phone actions (Make task, the legacy Make decision) were applied, written with what they
+    /// made, so one sent again after a lost acknowledgement is not applied twice (kept 30 days).
     /// Version 17: each jot's place in this Mac's write order. Every insert, every change of its text, kind, deletion or task,
     /// and every change of its tags moves it to the end, so "changed since" never depends on the jot's own time (a phone
     /// capture made offline, an older edit arriving late). Existing jots start in id order.
@@ -352,6 +354,10 @@ public final class DB {
     CREATE TRIGGER jots_seq_tag_removed AFTER DELETE ON item_tags WHEN OLD.item LIKE 'J-%' BEGIN
         UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = CAST(substr(OLD.item, 3) AS INTEGER);
     END;
+    CREATE TABLE jot_actions_done (
+        key TEXT PRIMARY KEY,
+        done DATE NOT NULL
+    );
 
     """
 

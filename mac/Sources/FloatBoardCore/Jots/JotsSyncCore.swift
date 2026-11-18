@@ -151,9 +151,20 @@ public struct JotAck: Equatable {
         return acks
     }
 
-    /// Phone Make task / Make decision on a jot's text. True when done (acked).
+    /// Phone Make task / Make decision on a jot's text. True when done (acked). Applied once: a marker written in the same
+    /// transaction as the task or decision makes one sent again (its acknowledgement lost) an ack with nothing made.
     private func applyAction(_ r: EngineJot, now: Date) -> Bool {
         let js = JotStore(store: store)
+        do {
+            if try store.db.query("SELECT 1 FROM jot_actions_done WHERE key=?", [r.key], { DB.int($0, 0) }).first != nil { return true }
+        } catch {
+            store.activity("jots", .error, "Could not read which phone actions were applied; it stays on the engine and is tried again", detail: "\(r.key): \(error)")
+            return false
+        }
+        let marker: (ShortID) throws -> Void = { [store] _ in
+            try store.db.run("DELETE FROM jot_actions_done WHERE done<?", [now.addingTimeInterval(-30 * 86400)])
+            try store.db.run("INSERT OR IGNORE INTO jot_actions_done(key, done) VALUES(?,?)", [r.key, now])
+        }
         // The jot it was made from; a lookup that fails is not "no jot": the action waits (not acked) and comes again.
         let source: ShortID?
         do {
@@ -165,14 +176,15 @@ public struct JotAck: Equatable {
         // Legacy (phones before the Decisions queue, 17 Nov 2026): remove with the engine's "make_decision" op, not before 1 Feb 2027.
         if r.kind == "action:make_decision" {
             guard let hook = JotActions.makeDecision, let source else { return false }
-            return hook(store, r.text, source)
+            return hook(store, r.text, source, marker)
         }
         guard r.kind == "action:make_task" else { return true }   // an action this version does not know: dropped
         let draft = MakeTask.draft(selection: r.text, sourceTags: source.map(store.itemTags), groups: store.areas.map(\.name))
         let due = MakeTask.dueMentioned(in: r.text, now: r.added)
         do {
             // One transaction: a task half made (say, not marked as from the phone) never stays; the action is tried again.
-            return try store.makeTaskOrThrow(draft, due: due?.date, dueHasTime: due?.hasTime ?? false, from: source, itemSource: .phone, now: r.updated) != nil
+            return try store.makeTaskOrThrow(draft, due: due?.date, dueHasTime: due?.hasTime ?? false, from: source, itemSource: .phone, now: r.updated,
+                                             extra: { try marker(ShortID(kind: .task, number: $0)) }) != nil
         } catch {
             store.activity("jots", .error, "Could not make the phone's task; it stays on the engine and is tried again", detail: "\(r.key): \(error)")
             return false
