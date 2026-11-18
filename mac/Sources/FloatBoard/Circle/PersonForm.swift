@@ -158,7 +158,7 @@ struct PersonForm: View {
             let (ids, rest) = Self.splitChatIDs(c.handles(id))
             chatIDs = ids
             for (k, hs) in Dictionary(grouping: rest, by: \.kind) {
-                handlesText[k] = hs.map { $0.kind == .linkedin ? "https://www." + $0.value : $0.value }.joined(separator: ", ")
+                handlesText[k] = hs.map { $0.kind == .linkedin ? "https://www." + $0.value : ($0.kind == .phone ? Handles.phoneText($0.value) : $0.value) }.joined(separator: ", ")
             }
         } else {
             name = request.name; d.company = request.company; d.role = request.role
@@ -167,7 +167,7 @@ struct PersonForm: View {
             let normalized = request.handles.map { h in h.kind == .whatsapp ? (Handles.fromWhatsApp(h.value) ?? h) : h }
             let (ids, rest) = Self.splitChatIDs(normalized)
             chatIDs = ids
-            for (k, hs) in Dictionary(grouping: rest, by: \.kind) { handlesText[k] = hs.map(\.value).joined(separator: ", ") }
+            for (k, hs) in Dictionary(grouping: rest, by: \.kind) { handlesText[k] = hs.map { $0.kind == .phone ? Handles.phoneText($0.value) : $0.value }.joined(separator: ", ") }
         }
     }
 

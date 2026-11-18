@@ -61,7 +61,7 @@ import SQLite3
     let bobClock = c.clocks(PeopleStore(store: s).person(bob.id)!, now: now)
     check(bobClock.lastConversation != nil || bobClock.lastHeard != nil, "messages_under_the_lid_count_for_the_numbers_person")
     check(LIDBook.link(store: s, now: now) == 0, "lid_linking_runs_once")
-    check(LIDBook.display(store: s, Handle(kind: .whatsapp, value: "111111111111@lid")) == "447700900111"
+    check(LIDBook.display(store: s, Handle(kind: .whatsapp, value: "111111111111@lid")) == "+447700900111"
           && LIDBook.display(store: s, Handle(kind: .whatsapp, value: "333333333333@lid")) == "WhatsApp contact (no number shared)", "suggestions_show_the_real_number")
 
     // Fill: the number is filled without Claude, the note gives the real count; nothing found is said so.
@@ -112,5 +112,5 @@ import SQLite3
     for _ in 0..<200 { _ = LIDBook.display(store: s, Handle(kind: .whatsapp, value: "700000000001@lid")) }
     check(LIDBook.parses - p0 <= 1, "lid_map_is_parsed_once_for_many_rows")
     LIDBook.save(store: s, ["799999999999@lid": ResolvedContact(phone: "447700899999", name: "", business: "")])
-    check(LIDBook.display(store: s, Handle(kind: .whatsapp, value: "799999999999@lid")) == "447700899999", "lid_map_cache_follows_changes")
+    check(LIDBook.display(store: s, Handle(kind: .whatsapp, value: "799999999999@lid")) == "+447700899999", "lid_map_cache_follows_changes")
 }

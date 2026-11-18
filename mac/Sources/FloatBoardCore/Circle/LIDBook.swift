@@ -45,7 +45,7 @@ public struct ResolvedContact: Equatable, Sendable {
 
     /// How a handle is shown: a linked id with a known number shows the number; otherwise as `Handles.display`.
     public static func display(store: Store, _ h: Handle) -> String {
-        if Handles.isLinkedID(h), let p = phone(store: store, h.value) { return p }
+        if Handles.isLinkedID(h), let p = phone(store: store, h.value) { return Handles.phoneText(p) }
         return Handles.display(h)
     }
 
