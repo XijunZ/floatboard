@@ -76,30 +76,18 @@
   // One send: the oldest changes, at most 100 and under the engine's 512 KB cap (a long queue goes in several sends). One
   // change is at most 20,000 characters, so a single one always fits.
   var JOT_SEND_BYTES = 400000;
-  function jotBytes(s) {
-    var n = 0;
-    for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); n += c < 0x80 ? 1 : c < 0x800 ? 2 : (c >= 0xd800 && c <= 0xdfff) ? 2 : 3; }
-    return n;
-  }
+  // At most 100 actions under the engine's cap (the shared queueTake); one too big for any send is named in `tooBig`.
   function takeJotBatch(queue, sentAt) {
-    var out = [], size = 200;
-    (queue || []).some(function (a) {
-      var n = jotBytes(JSON.stringify(a)) + 1;
-      if (out.length >= 100 || (out.length && size + n > JOT_SEND_BYTES)) return true;
-      out.push(a); size += n;
-      return false;
-    });
-    return { sent_at: sentAt, actions: out };
+    var t = queueTake(queue, 100, JOT_SEND_BYTES, 200);
+    return t.tooBig ? { sent_at: sentAt, actions: t.actions, tooBig: t.tooBig } : { sent_at: sentAt, actions: t.actions };
   }
 
   // Only malformed actions leave the queue without being taken; anything else stays queued and is sent again.
   var JOT_PERMANENT = { "bad id": true, "bad key": true, "unknown op": true, "text is required": true, "text too long": true };
   // Drops what the engine took (accepted) or can never take (malformed) from the queue.
   function afterJotSend(queue, result) {
-    var done = {};
-    (result.accepted || []).forEach(function (id) { done[id] = true; });
-    (result.dropped || []).forEach(function (d) { if (d && d.id && JOT_PERMANENT[d.reason]) done[d.id] = true; });
-    return (queue || []).filter(function (a) { return !done[a.id]; });
+    var dropped = (result.dropped || []).filter(function (d) { return d && d.id && JOT_PERMANENT[d.reason]; }).map(function (d) { return d.id; });
+    return queueWithout(queue, (result.accepted || []).concat(dropped));
   }
 
   // Actions about to be sent are marked: if the answer is lost, Undo must not assume they never arrived.
@@ -206,8 +194,13 @@
       var current = function () { return h.sameSession(stamp); };
       try {
         var r;
-        if (queue.length && heldBy) {
-          var body = takeJotBatch(queue, new Date().toISOString());
+        var body = queue.length && heldBy ? takeJotBatch(queue, new Date().toISOString()) : null;
+        while (body && body.tooBig) {   // too big for any send: dropped with a message, never holding up the queue
+          queue = queueWithout(queue, [body.tooBig]); saveQueue();
+          h.toast("A change was too big to send and was removed.");
+          body = queue.length ? takeJotBatch(queue, new Date().toISOString()) : null;
+        }
+        if (body) {
           queue = markJotsAttempted(queue, body.actions.map(function (a) { return a.id; }));
           saveQueue();
           // The queue's own account goes with it: the engine refuses another account's (409; the queue stays here).

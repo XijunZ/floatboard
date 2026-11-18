@@ -33,11 +33,7 @@
 
   function notDecisionAction(d, id, nowIso) { return { id: id, decision: d.id, action: "not_decision", made_at: nowIso }; }
 
-  function decisionQueueAfter(queue, accepted) {
-    var done = {};
-    (accepted || []).forEach(function (id) { done[id] = true; });
-    return (queue || []).filter(function (a) { return !done[a.id]; });
-  }
+  function decisionQueueAfter(queue, accepted) { return queueWithout(queue, accepted); }
 
   function decisionDetail(d) {
     var parts = [DECISION_TYPES[d.type] || "Operational", "recorded " + d.recorded];
@@ -99,24 +95,12 @@
   // sends). An oldest action too big to send at all is named in `tooBig` (the app drops it with a message), so it can never
   // hold up the queue.
   var DECISION_SEND_BYTES = 250000;
-  function decisionBytes(s) {
-    var n = 0;
-    for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); n += c < 0x80 ? 1 : c < 0x800 ? 2 : (c >= 0xd800 && c <= 0xdfff) ? 2 : 3; }
-    return n;
-  }
   function decisionSendBody(queue, confirmed) {
     if (!decisionQueueSendable(queue, confirmed)) return null;
-    var out = [], size = decisionBytes(JSON.stringify({ account: queue.account, actions: [] }));
-    for (var i = 0; i < queue.actions.length && out.length < 50; i++) {
-      var n = decisionBytes(JSON.stringify(queue.actions[i])) + 1;
-      if (size + n > DECISION_SEND_BYTES) {
-        if (!out.length) return { account: queue.account, actions: [], tooBig: queue.actions[i].id };
-        break;
-      }
-      out.push(queue.actions[i]); size += n;
-    }
-    return { account: queue.account, actions: out };
+    var t = queueTake(queue.actions, 50, DECISION_SEND_BYTES, byteLength(JSON.stringify({ account: queue.account, actions: [] })));
+    return t.tooBig ? { account: queue.account, actions: [], tooBig: t.tooBig } : { account: queue.account, actions: t.actions };
   }
+
 
   // The queue with one more action, made under `account` (the account the form or sheet was opened in). Null when there is
   // no account, or when the queue holds another account's waiting changes (never mixed, never overwritten).
@@ -125,11 +109,4 @@
     var q = queue && Array.isArray(queue.actions) ? queue : { account: null, actions: [] };
     if (q.actions.length && q.account !== account) return null;
     return { account: account, actions: (q.account === account ? q.actions : []).concat([action]) };
-  }
-
-  // A refused batch (400): drop the action the engine named; an older engine names none, then the first (as before).
-  function decisionQueueAfterRefusal(queue, id) {
-    var q = queue || [];
-    if (typeof id === "string" && q.some(function (a) { return a.id === id; })) return q.filter(function (a) { return a.id !== id; });
-    return q.slice(1);
   }

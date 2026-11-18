@@ -3,9 +3,10 @@ import { call } from "../helpers";
 import { JOTS_EXPORTS, JOTS_JS } from "../../src/phone/jots-logic";
 import { MANIFEST } from "../../src/phone/page";
 import { APP_JS } from "../../src/phone/client";
+import { SYNC_JS } from "../../src/phone/sync-logic";
 
 // The phone's Jots screen (design §5): the same text the phone runs, tested on its own.
-const L: any = new Function(JOTS_JS + "\nreturn {" + JOTS_EXPORTS.join(",") + "};")();
+const L: any = new Function(SYNC_JS + JOTS_JS + "\nreturn {" + JOTS_EXPORTS.join(",") + "};")();
 const DAY = 86400_000;
 const now = Date.parse("2026-11-17T12:00:00Z");
 const iso = (ms: number) => new Date(ms).toISOString();

@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import { DECISIONS_EXPORTS, DECISIONS_LOGIC_JS, DECISIONS_UI_JS } from "../../src/phone/decisions-client";
 import { APP_JS } from "../../src/phone/client";
 import { PAGE_HTML } from "../../src/phone/page";
+import { SYNC_JS } from "../../src/phone/sync-logic";
 
 /** More › Decisions on the phone: the pure parts, run here on their own (the same text the phone runs). */
 // eslint-disable-next-line no-new-func
-const L: any = new Function(DECISIONS_LOGIC_JS + "\nreturn {" + DECISIONS_EXPORTS.join(",") + "};")();
+const L: any = new Function(SYNC_JS + DECISIONS_LOGIC_JS + "\nreturn {" + DECISIONS_EXPORTS.concat(["queueAfterRefusal"]).join(",") + "};")();
 
 const d = (n: number, over: Record<string, unknown> = {}) => ({ id: `D-${n}`, text: `Decision ${n}`, quote: "", source: "J-1", recorded: "2026-11-10",
   decided: "", type: "operational", status: "decided", found_by: "claude", why: "", expected: "", expected_later: false, confidence: "",
@@ -117,8 +118,8 @@ describe("phone decisions", () => {
 
   it("a_400_drops_only_the_action_the_engine_named", () => {
     const q = [{ id: "a1" }, { id: "a2" }, { id: "a3" }];
-    expect(L.decisionQueueAfterRefusal(q, "a2").map((a: any) => a.id)).toEqual(["a1", "a3"]);
-    expect(L.decisionQueueAfterRefusal(q, undefined).map((a: any) => a.id)).toEqual(["a2", "a3"]);   // an older engine: the first, as before
-    expect(DECISIONS_UI_JS).toMatch(/decisionQueueAfterRefusal\(decQueue\.actions, e\.id\)/);
+    expect(L.queueAfterRefusal(q, "a2").map((a: any) => a.id)).toEqual(["a1", "a3"]);
+    expect(L.queueAfterRefusal(q, undefined).map((a: any) => a.id)).toEqual(["a2", "a3"]);   // an older engine: the first, as before
+    expect(DECISIONS_UI_JS).toMatch(/queueAfterRefusal\(decQueue\.actions, e\.id\)/);
   });
 });

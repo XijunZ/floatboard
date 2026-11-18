@@ -71,7 +71,7 @@
     } catch (e) {
       if (e instanceof SignedOut) throw e;
       if (e && e.status === 400 && decQueue.actions.length) {   // a malformed action would block the queue: drop that one
-        decQueue.actions = decisionQueueAfterRefusal(decQueue.actions, e.id);
+        decQueue.actions = queueAfterRefusal(decQueue.actions, e.id);
         saveDecQueue();
       }
       // 409 (another account now) and offline: held for later.
