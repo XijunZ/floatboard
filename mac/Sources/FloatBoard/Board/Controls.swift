@@ -135,7 +135,7 @@ struct FlowLayout: Layout {
         let maxW = proposal.width ?? .infinity
         var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0, widest: CGFloat = 0
         for v in subviews {
-            let s = v.sizeThatFits(.unspecified)
+            let s = fitted(v, maxW)
             if x > 0 && x + s.width > maxW { y += rowH + vSpacing; x = 0; rowH = 0 }
             x += s.width + hSpacing
             rowH = max(rowH, s.height)
@@ -147,12 +147,19 @@ struct FlowLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var x = bounds.minX, y = bounds.minY, rowH: CGFloat = 0
         for v in subviews {
-            let s = v.sizeThatFits(.unspecified)
+            let s = fitted(v, bounds.width)
             if x > bounds.minX && x + s.width > bounds.maxX { y += rowH + vSpacing; x = bounds.minX; rowH = 0 }
             v.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
             x += s.width + hSpacing
             rowH = max(rowH, s.height)
         }
+    }
+
+    /// An item's own size, but never wider than the row: a long name is then cut (or wrapped) instead of running past the edge.
+    private func fitted(_ v: LayoutSubview, _ maxW: CGFloat) -> CGSize {
+        let s = v.sizeThatFits(.unspecified)
+        guard maxW.isFinite, s.width > maxW else { return s }
+        return v.sizeThatFits(ProposedViewSize(width: maxW, height: nil))
     }
 }
 
