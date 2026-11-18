@@ -91,6 +91,12 @@
   ],
   [
     "index",
+    "jots_screen_seq",
+    "jots",
+    "CREATE INDEX jots_screen_seq ON jots(screen_seq)"
+  ],
+  [
+    "index",
     "jots_task",
     "jots",
     "CREATE INDEX jots_task ON jots(task_id)"
@@ -225,6 +231,12 @@
     "index",
     "sqlite_autoindex_jot_actions_done_1",
     "jot_actions_done",
+    null
+  ],
+  [
+    "index",
+    "sqlite_autoindex_jot_pushed_1",
+    "jot_pushed",
     null
   ],
   [
@@ -451,6 +463,12 @@
   ],
   [
     "table",
+    "jot_pushed",
+    "jot_pushed",
+    "CREATE TABLE jot_pushed (\n    connector TEXT NOT NULL,\n    jot_id INTEGER NOT NULL,\n    pushed REAL NOT NULL,\n    PRIMARY KEY (connector, jot_id)\n)"
+  ],
+  [
+    "table",
     "jot_suggestions",
     "jot_suggestions",
     "CREATE TABLE jot_suggestions(\n    jot_id INTEGER NOT NULL, tag TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'open', at REAL NOT NULL, PRIMARY KEY(jot_id, tag)\n)"
@@ -465,7 +483,7 @@
     "table",
     "jots",
     "jots",
-    "CREATE TABLE jots(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'jot',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n, task_id INTEGER, origin TEXT NOT NULL DEFAULT '', change_seq INTEGER NOT NULL DEFAULT 0)"
+    "CREATE TABLE jots(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'jot',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n, task_id INTEGER, origin TEXT NOT NULL DEFAULT '', change_seq INTEGER NOT NULL DEFAULT 0, screen_seq INTEGER NOT NULL DEFAULT 0)"
   ],
   [
     "table",
@@ -555,7 +573,7 @@
     "trigger",
     "jots_seq_insert",
     "jots",
-    "CREATE TRIGGER jots_seq_insert AFTER INSERT ON jots BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;\nEND"
+    "CREATE TRIGGER jots_seq_insert AFTER INSERT ON jots BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots),\n                    screen_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;\nEND"
   ],
   [
     "trigger",
@@ -571,9 +589,15 @@
   ],
   [
     "trigger",
+    "jots_seq_task",
+    "jots",
+    "CREATE TRIGGER jots_seq_task AFTER UPDATE OF task_id ON jots\n    WHEN NEW.change_seq = OLD.change_seq AND NEW.text IS OLD.text AND NEW.kind IS OLD.kind AND NEW.deleted IS OLD.deleted BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;\nEND"
+  ],
+  [
+    "trigger",
     "jots_seq_update",
     "jots",
-    "CREATE TRIGGER jots_seq_update AFTER UPDATE OF text, kind, deleted, task_id ON jots WHEN NEW.change_seq = OLD.change_seq BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;\nEND"
+    "CREATE TRIGGER jots_seq_update AFTER UPDATE OF text, kind, deleted ON jots WHEN NEW.change_seq = OLD.change_seq BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots),\n                    screen_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;\nEND"
   ],
   [
     "trigger",

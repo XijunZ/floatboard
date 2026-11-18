@@ -187,7 +187,7 @@ public struct PhoneDecisionAction: Codable, Equatable {
     public static func forget(connector id: String, store: Store) {
         store.perform {
             try store.db.run("DELETE FROM meta WHERE key=?", [DecisionPhone.hashKey(id)])
-            try store.db.run("DELETE FROM meta WHERE key=?", [JotsSyncCore.engineKey])
+            try JotsSyncCore(store: store).forget(connector: id)
         }
     }
 }

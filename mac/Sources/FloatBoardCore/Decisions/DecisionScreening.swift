@@ -99,9 +99,13 @@ public struct ScreenOutcome: Equatable {
         let seenID = ((try? store.db.query("SELECT value FROM meta WHERE key=?", [seenIDKey]) { DB.text($0, 0) })?.first).flatMap { Int64($0) } // try?-ok: unknown = arrival not tracked yet (times only)
         let rows: [(Int64, String, String, Date)]
         do {
-            rows = try store.db.query("""
-                SELECT id, text, kind, added FROM jots WHERE deleted=0 AND ((updated>=? AND updated<=?) OR change_seq>?) ORDER BY updated, id
-                """, [since, now, seenID ?? Int64.max]) { (DB.int($0, 0), DB.text($0, 1), DB.text($0, 2), DB.date($0, 3) ?? now) }
+            // Once a run has kept its place in the write order, only jots written after it count (screen_seq moves on a new
+            // jot or a change of text, kind or deletion, never on tags, and `updated` moves on tags too). The first run
+            // reads by time.
+            let (filter, args): (String, [Any?]) = seenID.map { ("screen_seq>?", [$0]) } ?? ("updated>=? AND updated<=?", [since, now])
+            rows = try store.db.query("SELECT id, text, kind, added FROM jots WHERE deleted=0 AND \(filter) ORDER BY updated, id", args) {
+                (DB.int($0, 0), DB.text($0, 1), DB.text($0, 2), DB.date($0, 3) ?? now)
+            }
         } catch {
             store.activity("decisions", .error, "Could not read the week's jots for screening", detail: "\(error)")
             return []

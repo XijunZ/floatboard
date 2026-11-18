@@ -31,12 +31,12 @@ public enum JotsSync {
             }, ack: client.ackJots)
             JotStore(store: store).attachPendingMeetingNotes(now: now)
             step = "send jots to the phone"
-            core.useEngine(client.accountFingerprint)   // another engine account: every recent jot goes again
-            let push = core.toPush(now: now)
+            core.useEngine(client.accountFingerprint, connector: id)   // another engine account: every recent jot goes again
+            let push = core.toPush(connector: id, now: now)
             let nudge = JotNudge(store: store).state(now: now)
             if !push.isEmpty || lastNudge[id] != nudge {
                 let accepted = Set(try await client.putJots(push, nudge: nudge))
-                core.markPushed(push.filter { accepted.contains($0.id) })
+                core.markPushed(push.filter { accepted.contains($0.id) }, connector: id)
                 lastNudge[id] = nudge
                 r.pushed = accepted.count
             }
