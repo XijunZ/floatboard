@@ -53,7 +53,13 @@
   var decSending = false;
   async function sendDecisionQueue() {
     var body = decisionSendBody(decQueue, confirmedAccount());
-    if (!body || decSending) return;
+    if (body && body.tooBig) {   // could never be sent (over the engine's size limit): dropped, said once, the rest go on
+      decQueue.actions = decQueue.actions.filter(function (a) { return a.id !== body.tooBig; });
+      saveDecQueue();
+      toast("One change was too large to send and was removed. Shorten it and try again.");
+      body = decisionSendBody(decQueue, confirmedAccount());
+    }
+    if (!body || !body.actions.length || decSending) return;
     decSending = true;
     var stamp = sessionStamp();   // the shared session check (app.client.js)
     try {

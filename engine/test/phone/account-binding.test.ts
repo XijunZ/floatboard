@@ -72,3 +72,25 @@ describe("circle: in-app taps and notification buttons are bound to the account"
     expect(APP_JS).toMatch(/if \(!still\(r\.account\)\) return;/);   // Circle
   });
 });
+
+describe("jots: an applied phone change and its 'seen' mark are written together (round 7, F)", () => {
+  it("the_seen_mark_is_inside_the_changes_batch", async () => {
+    const src = (await import("../../src/jots/copies?raw")).default as string;
+    // The no-copy insert and the version-checked update each carry the seen mark in the same batch (conditional on the
+    // change itself), never as a separate write after it.
+    expect(src).not.toMatch(/await seen\.run\(\); return "ok";/);
+    expect(src).toMatch(/seenIfChanged/);
+    expect((src.match(/\.push\(seenIfChanged\)|, seenIfChanged\]/g) ?? []).length).toBe(2);
+  });
+
+  it("a_change_is_applied_once_and_a_repeat_is_harmless", async () => {
+    const p = await phone("Jots seen");
+    const send = (actions: unknown[]) => post(p.cookie, "/app/api/jots", { account: p.account, sent_at: new Date().toISOString(), actions });
+    const edit = { id: "jsn-00000001", op: "edit", key: "J-77", text: "Edited where the copy has nothing", made_at: new Date().toISOString() };
+    expect((await (await send([edit])).json<any>()).accepted).toEqual([edit.id]);
+    expect((await (await send([edit])).json<any>()).accepted).toEqual([edit.id]);
+    const seen = await env.DB.prepare("SELECT count(*) AS n FROM jot_actions_seen WHERE user_id=? AND id=?").bind(p.id, edit.id).first<{ n: number }>();
+    const rows = await env.DB.prepare("SELECT count(*) AS n FROM jot_copies WHERE user_id=? AND key='J-77'").bind(p.id).first<{ n: number }>();
+    expect([seen!.n, rows!.n]).toEqual([1, 1]);
+  });
+});
