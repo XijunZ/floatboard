@@ -52,16 +52,17 @@ import SwiftUI
     func tick(now: Date = Date()) {
         guard let store, store.isOn(.circle), !running else { return }
         running = true
-        CircleReaders.runAll(store: store, now: now)
-        CircleLinker.run(store: store, now: now)
-        CircleDue.settleTasks(store: store, now: now)
-        CircleDue.requestReminders(store: store, now: now)
-        if CircleStore(store: store).linkedInNudgeDue(now: now) {
-            show?(DueReminder(id: "circle-linkedin-\(Int(now.timeIntervalSince1970))", cardID: 0, title: "LinkedIn export",
-                              body: "Time for this month's LinkedIn connections export: download it and import it in Circle › Suggestions.",
-                              fireAt: now.addingTimeInterval(1)))
-        }
         Task { @MainActor in
+            // The WhatsApp and WeChat readers copy and scan off the main thread; what they found is recorded here.
+            await CircleReaders.runAll(store: store, now: now)
+            CircleLinker.run(store: store, now: now)
+            CircleDue.settleTasks(store: store, now: now)
+            CircleDue.requestReminders(store: store, now: now)
+            if CircleStore(store: store).linkedInNudgeDue(now: now) {
+                show?(DueReminder(id: "circle-linkedin-\(Int(now.timeIntervalSince1970))", cardID: 0, title: "LinkedIn export",
+                                  body: "Time for this month's LinkedIn connections export: download it and import it in Circle › Suggestions.",
+                                  fireAt: now.addingTimeInterval(1)))
+            }
             for info in store.connectors where info.id != LocalMode.connectorID {
                 guard let client = ConnectorAccounts.client(for: info, store: store) else { continue }
                 await CircleSync.run(store: store, client: client, connector: info.id, now: now)

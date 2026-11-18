@@ -5,7 +5,7 @@ import FloatBoardConnectors
 
 /// Circle beyond the core: imports (LinkedIn, Google Contacts), What's new (Companies House, news, posts), auto links,
 /// the readers (WhatsApp, WeChat, calendar) on fixtures, the phone copy, the watch list and the phone's actions.
-@MainActor func circleMoreChecks() {
+@MainActor func circleMoreChecks() async {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-circle-more-\(UUID().uuidString)")
     try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
     defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
@@ -14,7 +14,7 @@ import FloatBoardConnectors
     circleUpdateChecks(root)
     circleLinkerChecks(root)
     circleCalendarReaderChecks(root)
-    circleWhatsAppReaderChecks(root)
+    await circleWhatsAppReaderChecks(root)
     circleWeChatReaderChecks(root)
     circleCopyChecks(root)
 }
@@ -213,7 +213,7 @@ private func fakeWhatsAppForCircle(_ folder: URL, now: Date) -> Bool {
     return sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
 }
 
-@MainActor private func circleWhatsAppReaderChecks(_ root: URL) {
+@MainActor private func circleWhatsAppReaderChecks(_ root: URL) async {
     let now = circleDay(18)
     let folder = root.appendingPathComponent("wa")
     guard fakeWhatsAppForCircle(folder, now: now) else { check(false, "wa fixture"); return }
@@ -226,10 +226,12 @@ private func fakeWhatsAppForCircle(_ folder: URL, now: Date) -> Bool {
         check(again.exchanges.isEmpty, "whatsapp_reader_resumes_from_cursor")
     } catch { check(false, "whatsapp_reader: \(error)") }
     guard let s = circleStore(root, "war.sqlite") else { return }
-    CircleReaders.runWhatsApp(store: s, folder: folder, now: now)
+    await CircleReaders.runWhatsApp(store: s, folder: folder, now: now)
+    // Round 13 (C2): the copy and the scan of WhatsApp's database run off the main thread.
+    check(CircleReaders.lastReadOnMainThread == false, "whatsapp_reader_reads_off_the_main_thread")
     let st = CircleStore(store: s).channel("whatsapp")
     check(st?.asOf == now && st?.completeFrom != nil && CircleStore(store: s).conversationSuggestions().first?.name == "Jo Example", "whatsapp_reader_records_data_as_of")
-    CircleReaders.runWhatsApp(store: s, folder: root.appendingPathComponent("missing"), now: now)
+    await CircleReaders.runWhatsApp(store: s, folder: root.appendingPathComponent("missing"), now: now)
     check(CircleStore(store: s).channel("whatsapp")?.note.contains("isn't set up") == true, "whatsapp_reader_says_what_it_cannot_see")
 }
 

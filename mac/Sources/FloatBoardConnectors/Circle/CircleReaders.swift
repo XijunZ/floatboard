@@ -98,15 +98,23 @@ public enum CircleWeChatReader {
 /// Runs Circle's Mac readers and records their state ("data as of", how far back, what they can't see).
 @MainActor public enum CircleReaders {
     /// WhatsApp: from the cursor, or the backfill period the first time.
-    public static func runWhatsApp(store: Store, folder: URL = WhatsAppLocal.folder, now: Date = Date()) {
+    /// Whether the last reader copy and scan ran on the main thread (checks; it must not).
+    public private(set) static var lastReadOnMainThread: Bool?
+
+    /// The copy of WhatsApp's database and the scan run off the main thread; what they found is recorded here.
+    public static func runWhatsApp(store: Store, folder: URL = WhatsAppLocal.folder, now: Date = Date()) async {
         let c = CircleStore(store: store)
         let prev = c.channel("whatsapp")
+        let after = prev.flatMap { Double($0.cursor) }, months = c.backfillMonths
         do {
-            let r = try CircleWhatsAppReader.read(folder: folder, after: prev.flatMap { Double($0.cursor) }, backfillMonths: c.backfillMonths, now: now)
+            let (r, onMain) = try await Task.detached { () throws -> (CircleWhatsAppReader.Result, Bool) in
+                (try CircleWhatsAppReader.read(folder: folder, after: after, backfillMonths: months, now: now), Thread.isMainThread)
+            }.value
+            lastReadOnMainThread = onMain
             c.record(r.exchanges, now: now)
             let from = prev?.completeFrom ?? AppTime.calendar.date(byAdding: .month, value: -c.backfillMonths, to: now)
             c.setChannel("whatsapp", asOf: now, completeFrom: from, cursor: String(r.cursor), note: "one-to-one chats only")
-            Task { @MainActor in await resolveLinkedIDs(store: store, folder: folder, now: now) }
+            await resolveLinkedIDs(store: store, folder: folder, now: now)
         } catch {
             c.setChannel("whatsapp", asOf: prev?.asOf, completeFrom: prev?.completeFrom, cursor: prev?.cursor ?? "", note: "\(error)")
             if prev?.note != "\(error)" { store.activity("circle", .warning, "Circle could not read WhatsApp", detail: "\(error)") }
@@ -136,11 +144,11 @@ public enum CircleWeChatReader {
         return LIDBook.link(store: store, now: now)
     }
 
-    public static func runWeChat(store: Store, folder: URL = WeChatNotifications.folder, now: Date = Date()) {
+    public static func runWeChat(store: Store, folder: URL = WeChatNotifications.folder, now: Date = Date()) async {
         let c = CircleStore(store: store)
         let prev = c.channel("wechat")
         do {
-            let rows = try CircleWeChatReader.read(folder: folder, now: now)
+            let rows = try await Task.detached { try CircleWeChatReader.read(folder: folder, now: now) }.value   // off the main thread
             c.record(rows, now: now)
             let earliest = rows.map(\.at).min()
             c.setChannel("wechat", asOf: now, completeFrom: [prev?.completeFrom, earliest].compactMap { $0 }.min(), cursor: "", note: Channel.wechat.limits ?? "")
@@ -151,10 +159,10 @@ public enum CircleWeChatReader {
     }
 
     /// Every Mac reader whose connector is set up (same access as the task connectors), plus the calendar.
-    public static func runAll(store: Store, now: Date = Date()) {
+    public static func runAll(store: Store, now: Date = Date()) async {
         guard store.isOn(.circle) else { return }
-        if store.connectors.contains(where: { WhatsAppSync.isOn(connector: $0.id, store: store) }) { runWhatsApp(store: store, now: now) }
-        if store.connectors.contains(where: { WeChatSync.isOn(connector: $0.id, store: store) }) { runWeChat(store: store, now: now) }
+        if store.connectors.contains(where: { WhatsAppSync.isOn(connector: $0.id, store: store) }) { await runWhatsApp(store: store, now: now) }
+        if store.connectors.contains(where: { WeChatSync.isOn(connector: $0.id, store: store) }) { await runWeChat(store: store, now: now) }
         CircleCalendarReader.read(store: store, now: now)
     }
 }
