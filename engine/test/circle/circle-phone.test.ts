@@ -93,7 +93,7 @@ describe("phone Circle", () => {
     expect(L.circleConfirm(h, copy.people.slice(0, 3), other)).toBeNull();
     expect(SW_JS).toContain("account");
     expect(SW_JS).toMatch(/r\.status === 409/);
-    expect(SW_JS).toMatch(/#circle=" \+ action \+ ":" \+ person \+ ":" \+ account/);
+    expect(SW_JS).toMatch(/#circle=" \+ action \+ ":" \+ person \+ \(account \? ":" \+ account : ""\)/);   // none for an old alert
   });
 
   it("a_circle_sheet_never_acts_for_another_account_and_closes_on_sign_out", () => {

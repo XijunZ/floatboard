@@ -252,7 +252,7 @@ describe("circle: phone copy and actions", () => {
     expect(got.pending).toBe(0);
     // Refused without the same origin; then accepted, once per id.
     const made = iso(Date.now() - 60_000);
-    const body = JSON.stringify({ actions: [{ id: "cact-0001", person: "P-1", action: "contacted", made_at: made },
+    const body = JSON.stringify({ account: me.account, actions: [{ id: "cact-0001", person: "P-1", action: "contacted", made_at: made },
       { id: "cact-0002", person: "P-1", action: "dance", made_at: made }] });
     expect((await call("/app/api/circle/action", { method: "POST", headers: { Cookie: cookie }, body })).status).toBe(403);
     const r = await (await call("/app/api/circle/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body })).json<any>();

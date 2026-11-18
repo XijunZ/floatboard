@@ -38,9 +38,11 @@ export async function handleCircleApp(req: Request, env: Env): Promise<Response 
     if (!s) return appJSON({ error: "not signed in" }, 401);
     const b = await readCappedJSON(req, 32_000);
     if (!b.ok) return appJSON({ error: "Invalid JSON" }, 400, s.setCookie);
-    // A notification button names the account its reminder came from: tapped after switching account, it is refused.
-    const from = (b.body as any)?.account;
-    if (from !== undefined && from !== await accountMarker(s.userId)) return appJSON({ error: "This alert belongs to another account" }, 409, s.setCookie);
+    // Every tap names its account: the queue's (in the app) or the reminder's (a notification button). Missing or empty is
+    // refused (400; an old notification then opens the app, which asks first); another account's is refused (409).
+    const from = (b.body as any)?.account, mine = await accountMarker(s.userId);
+    if (typeof from !== "string" || !from) return appJSON({ error: "account is required" }, 400, s.setCookie);
+    if (from !== mine) return appJSON({ error: "This belongs to another account", account: mine }, 409, s.setCookie);
     const list = (b.body as any)?.actions;
     if (!Array.isArray(list) || list.length > MAX_BATCH) return appJSON({ error: `actions must be a list of at most ${MAX_BATCH}` }, 400, s.setCookie);
     const accepted: string[] = [], dropped: { id: string | null; reason: string }[] = [];
@@ -58,7 +60,7 @@ export async function handleCircleApp(req: Request, env: Env): Promise<Response 
       accepted.push(id);
     }
     if (stmts.length) await env.DB.batch(stmts);
-    return appJSON({ accepted, dropped }, 200, s.setCookie);
+    return appJSON({ account: mine, accepted, dropped }, 200, s.setCookie);
   }
   if (path === "/app/api/circle/draft" && req.method === "POST") {
     if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);

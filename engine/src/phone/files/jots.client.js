@@ -176,19 +176,20 @@
       var current = function () { return h.sameSession(stamp); };
       try {
         var r;
-        if (queue.length) {
+        if (queue.length && heldBy) {
           var body = takeJotBatch(queue, new Date().toISOString());
           queue = markJotsAttempted(queue, body.actions.map(function (a) { return a.id; }));
           saveQueue();
-          r = await h.api("/app/api/jots", { method: "POST", body: body });
-          if (!current()) return;   // signed out or another account meanwhile: this answer belongs to nobody here now
+          // The queue's own account goes with it: the engine refuses another account's (409; the queue stays here).
+          r = await h.api("/app/api/jots", { method: "POST", body: Object.assign({ account: heldBy }, body) });
+          if (!h.sameSession(stamp, r.account)) return;   // signed out or another account meanwhile: this answer belongs to nobody here now
           queue = afterJotSend(queue, r);
           saveQueue();
           var lost = (r.superseded || []).length;
           if (lost) h.toast(lost === 1 ? "Your Mac had a newer version; your edit is kept in the jot's history." : "Your Mac had newer versions; your " + lost + " edits are kept in the jots' history.");
         } else {
           r = await h.api("/app/api/jots");
-          if (!current()) return;
+          if (!h.sameSession(stamp, r.account)) return;
         }
         if (Array.isArray(r.jots)) { cache = r.jots; h.store(CACHE_KEY, { account: acct, jots: cache, at: Date.now() }); }
       } catch (e) {

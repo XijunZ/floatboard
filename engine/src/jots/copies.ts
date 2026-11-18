@@ -24,7 +24,7 @@ import { alertFor } from "../reminders/alerts";
 import type { AlertItem } from "../triage/run";
 import { recapKey } from "../sources/fathom";
 import type { Message } from "../sources/types";
-import { appJSON, requireAppSession, sameOrigin } from "../phone/auth";
+import { accountMarker, appJSON, requireAppSession, sameOrigin } from "../phone/auth";
 import { corrected, skewOf } from "../phone/board";
 
 const DAY = 86400_000;
@@ -336,11 +336,17 @@ export async function handleJotsApp(req: Request, env: Env): Promise<Response | 
   const s = await requireAppSession(req, env);
   if (!s) return appJSON({ error: "not signed in" }, 401);
   if (!(await jotsOn(env, s.userId))) return appJSON({ error: "jots_off" }, 409, s.setCookie);
-  if (req.method === "GET") return appJSON({ jots: await phoneList(env, s.userId) }, 200, s.setCookie);
+  // `account`: which account this session belongs to (the phone drops an answer for another one, and names its queue's).
+  const account = await accountMarker(s.userId);
+  if (req.method === "GET") return appJSON({ account, jots: await phoneList(env, s.userId) }, 200, s.setCookie);
   if (req.method !== "POST") return appJSON({ error: "not found" }, 404, s.setCookie);
   const receivedMs = Date.now();
   const rb = await readCappedJSON(req, MAX_PHONE_BYTES);
   if (!rb.ok) return appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie);
+  // The account the phone's queue was made under, checked at the moment of storing (the Decisions rule): a page still
+  // holding another account's queue is refused (409) and keeps it.
+  if (typeof rb.body?.account !== "string" || !rb.body.account) return appJSON({ error: "account is required" }, 400, s.setCookie);
+  if (rb.body.account !== account) return appJSON({ error: "These changes belong to another account.", account }, 409, s.setCookie);
   const actions = rb.body.actions;
   if (!Array.isArray(actions) || actions.length > MAX_ACTIONS) return appJSON({ error: `actions must be a list of at most ${MAX_ACTIONS}` }, 400, s.setCookie);
   const skew = skewOf(isISO(rb.body.sent_at) ? rb.body.sent_at : null, receivedMs);
@@ -351,7 +357,7 @@ export async function handleJotsApp(req: Request, env: Env): Promise<Response | 
     else if (r.kept) { accepted.push(a.id); superseded.push(a.id); }   // older than the Mac's version: kept for the history
     else dropped.push(r);
   }
-  return appJSON({ accepted, dropped, superseded, jots: await phoneList(env, s.userId) }, 200, s.setCookie);
+  return appJSON({ account, accepted, dropped, superseded, jots: await phoneList(env, s.userId) }, 200, s.setCookie);
 }
 
 // ---- Housekeeping and the nudge -----------------------------------------------------------------
