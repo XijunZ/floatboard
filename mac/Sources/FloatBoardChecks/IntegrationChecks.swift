@@ -611,3 +611,44 @@ func integrationRebindingLiveChecks() async {
     await CircleSync.run(store: s, client: b, connector: "cw", now: Date())
     check(puts == ["a.test", "b.test", "b.test"], "circle_watch_list_sent_per_engine_account_and_again_after_forget")
 }
+
+/// Round 15: a board upgraded from 17 to 18 keeps its screening place. The saved mark is the newest change_seq, which runs
+/// ahead of the ids, so the new screen_seq starts as change_seq: a jot added and a jot edited after the mark are screened
+/// after the upgrade, and a version screened before it is not sent again.
+@MainActor func screenSeqUpgradeChecks() {
+    let root = checkFolder("fb-v17-18")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let url = root.appendingPathComponent("v17.sqlite")
+    do { _ = try DB(url: url) } catch { check(false, "v17 setup: \(error)"); return }
+    var h: OpaquePointer?
+    guard sqlite3_open(url.path, &h) == SQLITE_OK else { check(false, "v17 open"); return }
+    func exec(_ sql: String) -> Bool { sqlite3_exec(h, sql, nil, nil, nil) == SQLITE_OK }
+    let seq = "(SELECT coalesce(max(change_seq), 0) + 1 FROM jots)"
+    // Back to the version 17 shape: no jot_pushed, no screen_seq, the v17 triggers.
+    let down = """
+        DROP TABLE jot_pushed; DROP TRIGGER jots_seq_insert; DROP TRIGGER jots_seq_update; DROP TRIGGER jots_seq_task;
+        DROP INDEX jots_screen_seq; ALTER TABLE jots DROP COLUMN screen_seq;
+        CREATE TRIGGER jots_seq_insert AFTER INSERT ON jots BEGIN UPDATE jots SET change_seq = \(seq) WHERE id = NEW.id; END;
+        CREATE TRIGGER jots_seq_update AFTER UPDATE OF text, kind, deleted, task_id ON jots WHEN NEW.change_seq = OLD.change_seq BEGIN
+            UPDATE jots SET change_seq = \(seq) WHERE id = NEW.id; END;
+        PRAGMA user_version = 17;
+        """
+    let t = Date().addingTimeInterval(-3600).timeIntervalSince1970
+    let ins = { (text: String) in "INSERT INTO jots(text, kind, source, added, updated) VALUES('\(text)', 'jot', 'typed', \(t), \(t));" }
+    let va = DecisionScreening.version("We decided A"), vc = DecisionScreening.version("We decided C")
+    // A and C were screened; the jots' change order then ran ahead of the ids (tag changes); then the mark M was kept.
+    let ok = exec(down) && exec(ins("We decided A") + ins("We decided C"))
+        && exec("INSERT INTO decision_screened(jot_id, version, screened, found) VALUES(1, '\(va)', \(t), 0), (2, '\(vc)', \(t), 0);")
+        && exec("UPDATE jots SET change_seq = change_seq + 50;")
+        && exec("INSERT OR REPLACE INTO meta(key, value) VALUES('decisions.screen_jot_id', (SELECT max(change_seq) FROM jots));")
+        && exec(ins("We decided B, added after the run")) && exec("UPDATE jots SET text='We decided C, then changed it' WHERE id=2;")
+    let why = String(cString: sqlite3_errmsg(h))
+    sqlite3_close(h)
+    guard ok else { check(false, "v17 board setup: \(why)"); return }
+    let store: Store
+    do { store = Store(db: try DB(url: url)) } catch { check(false, "v17->18 upgrade: \(error)"); return }
+    store.setModule(.jots, on: true); store.setModule(.decisions, on: true)
+    let refs = DecisionScreening.pending(store: store, now: Date().addingTimeInterval(30 * 86400)).map(\.ref)
+    check(refs.contains { $0.hasPrefix("J-3@") } && refs.contains { $0.hasPrefix("J-2@") } && !refs.contains { $0.hasPrefix("J-1@") },
+          "upgrade_17_to_18_screens_jots_written_after_the_mark_and_not_those_before")
+}
