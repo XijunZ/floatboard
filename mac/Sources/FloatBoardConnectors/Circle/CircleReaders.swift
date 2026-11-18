@@ -106,7 +106,7 @@ public enum CircleWeChatReader {
             c.record(r.exchanges, now: now)
             let from = prev?.completeFrom ?? AppTime.calendar.date(byAdding: .month, value: -c.backfillMonths, to: now)
             c.setChannel("whatsapp", asOf: now, completeFrom: from, cursor: String(r.cursor), note: "one-to-one chats only")
-            resolveLinkedIDs(store: store, folder: folder, now: now)
+            Task { @MainActor in await resolveLinkedIDs(store: store, folder: folder, now: now) }
         } catch {
             c.setChannel("whatsapp", asOf: prev?.asOf, completeFrom: prev?.completeFrom, cursor: prev?.cursor ?? "", note: "\(error)")
             if prev?.note != "\(error)" { store.activity("circle", .warning, "Circle could not read WhatsApp", detail: "\(error)") }
@@ -115,17 +115,25 @@ public enum CircleWeChatReader {
 
     /// WhatsApp linked ids seen in messages or on people: their numbers from WhatsApp's own contact list (this Mac only), so an
     /// id and its number count as one person. Quiet when WhatsApp's contact list isn't there.
-    public static func resolveLinkedIDs(store: Store, folder: URL = WhatsAppLocal.folder, now: Date = Date()) {
+    /// Only ids whose number isn't known yet are looked up, off the main thread (copying WhatsApp's contact list and reading
+    /// it); the numbers are saved and linked with one write each. Returns how many handles were added to people.
+    @discardableResult
+    public static func resolveLinkedIDs(store: Store, folder: URL = WhatsAppLocal.folder, now: Date = Date(),
+                                        resolve: (@Sendable ([String]) -> [String: ResolvedContact])? = nil) async -> Int {
         let lids: [String]
         do {
             lids = try store.db.query("""
                 SELECT handle FROM circle_exchanges WHERE handle_kind='whatsapp' AND handle LIKE '%@lid'
                 UNION SELECT value FROM person_handles WHERE kind='whatsapp' AND value LIKE '%@lid'
                 """) { DB.text($0, 0) }
-        } catch { store.activity("circle", .error, "Could not read WhatsApp contacts for Circle", detail: "\(error)"); return }
-        guard !lids.isEmpty else { return }
-        LIDBook.save(store: store, WhatsAppContacts.resolve(lids, folder: folder))
-        LIDBook.link(store: store, now: now)
+        } catch { store.activity("circle", .error, "Could not read WhatsApp contacts for Circle", detail: "\(error)"); return 0 }
+        let known = LIDBook.all(store)
+        let missing = Array(Set(lids.map { $0.lowercased() }).filter { known[$0] == nil })
+        guard !missing.isEmpty else { return LIDBook.link(store: store, now: now) }   // people added since still get linked
+        let lookup = resolve ?? { ids in WhatsAppContacts.resolve(ids, folder: folder) }
+        let found = await Task.detached { lookup(missing) }.value
+        LIDBook.save(store: store, found)
+        return LIDBook.link(store: store, now: now)
     }
 
     public static func runWeChat(store: Store, folder: URL = WeChatNotifications.folder, now: Date = Date()) {

@@ -14,10 +14,18 @@ public struct ResolvedContact: Equatable, Sendable {
 /// engine (it isn't part of any copy), never written to Activity.
 @MainActor public enum LIDBook {
     static let key = "circle.lid_phones"
+    /// The map as last read, per board (parsed once, not per row on every redraw); replaced when it is saved.
+    private static var cache: [ObjectIdentifier: [String: String]] = [:]
+    /// How many times the map was read from the board (checks).
+    public private(set) static var parses = 0
 
     public static func all(_ store: Store) -> [String: String] {
+        if let c = cache[ObjectIdentifier(store)] { return c }
+        parses += 1
         let raw = (try? store.db.query("SELECT value FROM meta WHERE key=?", [key]) { DB.text($0, 0) })?.first ?? "{}" // try?-ok: unreadable = no numbers known yet (shown as "no number shared")
-        return (try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String]) ?? [:] // try?-ok: unreadable = none known; rewritten at the next save
+        let map = (try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String]) ?? [:] // try?-ok: unreadable = none known; rewritten at the next save
+        cache[ObjectIdentifier(store)] = map
+        return map
     }
 
     /// Adds the numbers found (ids without one are left as they were).
@@ -29,6 +37,7 @@ public struct ResolvedContact: Equatable, Sendable {
             book[lid.lowercased()] = phone; changed = true
         }
         guard changed, let data = try? JSONSerialization.data(withJSONObject: book, options: [.sortedKeys]) else { return } // try?-ok: a dictionary of strings always encodes
+        cache[ObjectIdentifier(store)] = nil   // read again after the write (whether it worked or not)
         store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [key, String(decoding: data, as: UTF8.self)]) }
     }
 
@@ -59,13 +68,37 @@ public struct ResolvedContact: Equatable, Sendable {
             return 0
         }
         let have = Set(rows.map { "\($0.1):\($0.2)" })
-        let c = CircleStore(store: store)
-        var added = 0
+        let owned: Set<String>
+        do { owned = Set(try store.db.query("SELECT kind || ':' || value FROM person_handles") { DB.text($0, 0) }) } catch {
+            store.activity("circle", .error, "Could not read people's handles", detail: "\(error)")
+            return 0
+        }
+        var free: [(Int64, Handle)] = [], taken: [(Int64, Handle)] = []
+        var planned = Set<String>()
         for (person, kind, value) in rows {
             let want: Handle?
             if kind == "whatsapp" { want = book[value].map { Handle(kind: .phone, value: $0) } }
             else { want = byPhone[value].map { Handle(kind: .whatsapp, value: $0) } }
-            guard let h = want, !have.contains("\(h.kind.rawValue):\(h.value)") else { continue }
+            guard let h = want else { continue }
+            let k = "\(h.kind.rawValue):\(h.value)"
+            guard !have.contains(k), planned.insert(k).inserted else { continue }
+            if owned.contains(k) { taken.append((person, h)) } else { free.append((person, h)) }
+        }
+        var added = 0
+        // Handles nobody has: written together, the board re-read once.
+        if !free.isEmpty {
+            var ok = false
+            store.perform {
+                for (person, h) in free {
+                    try store.db.run("INSERT INTO person_handles(person_id, kind, value, added) VALUES(?,?,?,?)", [person, h.kind.rawValue, h.value, now])
+                }
+                ok = true
+            }
+            if ok { added += free.count }
+        }
+        // A handle someone else has: the usual rule (a number merges the two people), one by one (rare).
+        let c = CircleStore(store: store)
+        for (person, h) in taken {
             switch c.addHandle(person, h, now: now) {
             case .added, .merged: added += 1
             default: break

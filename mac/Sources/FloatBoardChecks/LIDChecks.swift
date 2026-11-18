@@ -79,3 +79,38 @@ import SQLite3
 
 /// Activity rows in the shared check store (the resolver must not add any).
 @MainActor func sharedStoreActivityCount() -> Int { sharedStore?.recentActivity(limit: 500).count ?? 0 }
+
+/// Round 12 (4, 5): the resolver looks up only ids not known yet, off the main thread; linking re-reads the board once; the
+/// map is parsed once and kept until it changes.
+@MainActor func lidPerformanceChecks() async {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent("fb-lid-perf-\(UUID().uuidString)")
+    try? fm.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? fm.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let s: Store
+    do { s = Store(db: try DB(url: root.appendingPathComponent("board.sqlite"))) } catch { check(false, "lid perf board: \(error)"); return }
+    s.setModule(.circle, on: true)
+    let c = CircleStore(store: s), now = Date(timeIntervalSince1970: 1_794_391_200), none = ItemTags(primary: nil, others: [])
+    for i in 0..<40 {
+        _ = c.add(name: "Lid \(i)", tier: .network, tags: none, details: CircleDetails(), handles: [Handle(kind: .whatsapp, value: "7000000000\(String(format: "%02d", i))@lid")], now: now)
+    }
+    LIDBook.save(store: s, ["700000000000@lid": ResolvedContact(phone: "447700800000", name: "", business: "")])
+    final class Seen: @unchecked Sendable { var asked: [String] = []; var onMain = true }
+    let seen = Seen()
+    let reloads0 = s.reloads
+    let linked = await CircleReaders.resolveLinkedIDs(store: s, now: now) { ids in
+        seen.asked = ids.sorted(); seen.onMain = Thread.isMainThread
+        return Dictionary(uniqueKeysWithValues: ids.map { ($0, ResolvedContact(phone: "4477008" + String($0.prefix(12).suffix(5)), name: "", business: "")) })
+    }
+    check(seen.asked.count == 39 && !seen.asked.contains("700000000000@lid") && !seen.onMain, "lid_resolver_asks_only_for_unknown_ids_off_the_main_thread")
+    check(linked == 40 && s.reloads - reloads0 <= 3, "lid_linking_rereads_the_board_once (\(s.reloads - reloads0))")
+    seen.asked = []
+    let again = await CircleReaders.resolveLinkedIDs(store: s, now: now) { ids in seen.asked = ids; return [:] }
+    check(again == 0 && seen.asked.isEmpty, "lid_resolver_skips_when_every_id_is_known")
+    // The map is parsed once for many rows, and again only after it changes.
+    let p0 = LIDBook.parses
+    for _ in 0..<200 { _ = LIDBook.display(store: s, Handle(kind: .whatsapp, value: "700000000001@lid")) }
+    check(LIDBook.parses - p0 <= 1, "lid_map_is_parsed_once_for_many_rows")
+    LIDBook.save(store: s, ["799999999999@lid": ResolvedContact(phone: "447700899999", name: "", business: "")])
+    check(LIDBook.display(store: s, Handle(kind: .whatsapp, value: "799999999999@lid")) == "447700899999", "lid_map_cache_follows_changes")
+}
