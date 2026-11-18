@@ -539,3 +539,22 @@ func integrationRebindingLiveChecks() async {
     let snap = CircleSnapshot.current(store: s, now: now)
     check(CircleSnapshot.builds - b0 == 2 && snap.people.count == 2001 && snap.suggestionCount >= 7, "circle_tab_numbers_follow_changes")
 }
+
+/// Round 13 (C5): a birthday reminder is its own kind: it never takes a due reminder's id for the same person and day, and
+/// it gets no Contacted / Snooze buttons on the phone.
+@MainActor func birthdayReminderChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-bday-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "bday.sqlite") else { return }
+    let c = CircleStore(store: s), now = Date(timeIntervalSince1970: 1_794_391_200)
+    var d = CircleDetails(); d.birthday = Due.dayString(now)
+    guard let p = c.add(name: "Birthday Example", tier: .close, tags: ItemTags(primary: nil, others: []), details: d, handles: [], now: now.addingTimeInterval(-200 * 86400)).person
+    else { check(false, "bday setup"); return }
+    ReminderBudget(store: s).save(ReminderSettings(dailyLimit: 5, quietStart: 0, quietEnd: 0))
+    _ = CircleDue.requestReminders(store: s, now: now)
+    let pend = ReminderBudget(store: s).pending().filter { $0.item == p.shortID.text }
+    check(pend.count == 2 && Set(pend.map(\.kind)) == ["circle_due", "circle_birthday"] && Set(pend.map(\.id)).count == 2,
+          "birthday_and_due_reminders_are_two_reminders")
+    check(pend.first { $0.kind == "circle_birthday" }?.id.hasPrefix("rb-circle_birthday-") == true, "birthday_reminder_has_its_own_id")
+}

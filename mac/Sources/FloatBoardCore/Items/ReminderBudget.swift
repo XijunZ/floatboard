@@ -1,7 +1,8 @@
 import Foundation
 
 /// What a budget reminder is about. Circle's due people and Decisions' reviews share one daily limit (features §9).
-public enum ReminderKind: String, CaseIterable { case circleDue = "circle_due", decisionReview = "decision_review" }
+/// A birthday is its own kind (its own id, so it never stands in for a due reminder, and no Contacted / Snooze buttons).
+public enum ReminderKind: String, CaseIterable { case circleDue = "circle_due", circleBirthday = "circle_birthday", decisionReview = "decision_review" }
 
 /// The budget's settings (Settings › Areas): reminders a day, and quiet hours as minutes after midnight in the app's zone.
 public struct ReminderSettings: Codable, Equatable {
