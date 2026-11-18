@@ -16,6 +16,8 @@ public enum JotsSync {
     /// Engines without the Jots routes (404), and ones without a Claude key for the tags job: skipped quietly until relaunch.
     @MainActor static var unsupported: Set<String> = []
     @MainActor static var noClaude: Set<String> = []
+    /// The engine's limit for one jot's text (characters as JavaScript counts them: UTF-16 units).
+    static let maxText = 100_000
 
     @MainActor @discardableResult
     public static func tick(connector id: String, store: Store, client: ConnectorClient, now: Date = Date()) async -> Result {
@@ -32,13 +34,30 @@ public enum JotsSync {
             JotStore(store: store).attachPendingMeetingNotes(now: now)
             step = "send jots to the phone"
             core.useEngine(client.accountFingerprint, connector: id)   // another engine account: every recent jot goes again
-            let push = core.toPush(connector: id, now: now)
+            let all = core.toPush(connector: id, now: now)
+            // A jot longer than the engine takes is left out of the phone's copy (noted once; never cut on this Mac), and
+            // counted as sent so it doesn't hold up the others; an edit that makes it short enough sends it again.
+            let tooLong = all.filter { $0.text.utf16.count > Self.maxText }
+            if !tooLong.isEmpty {
+                core.markPushed(tooLong, connector: id)
+                for j in tooLong {
+                    store.activity("jots", .warning, "J-\(j.id) is too long for the phone (over 100,000 characters); it stays on this Mac only",
+                                   detail: "\(j.text.count) characters")
+                }
+            }
+            let push = all.filter { $0.text.utf16.count <= Self.maxText }
             let nudge = JotNudge(store: store).state(now: now)
             if !push.isEmpty || lastNudge[id] != nudge {
-                let accepted = Set(try await client.putJots(push, nudge: nudge))
-                core.markPushed(push.filter { accepted.contains($0.id) }, connector: id)
+                // In requests under the engine's size and count limits; the nudge goes with the first.
+                var sent = 0
+                for (i, batch) in ConnectorClient.jotBatches(push).enumerated() {
+                    let accepted = Set(try await client.putJots(batch, nudge: i == 0 ? nudge : nil))
+                    core.markPushed(batch.filter { accepted.contains($0.id) }, connector: id)
+                    sent += accepted.count
+                }
+                if push.isEmpty { _ = try await client.putJots([], nudge: nudge) }
                 lastNudge[id] = nudge
-                r.pushed = accepted.count
+                r.pushed = sent
             }
             if !noClaude.contains(id) {
                 let sg = JotSuggestions(store: store)
