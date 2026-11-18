@@ -151,7 +151,8 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
     // A malformed action refuses the batch and is named, so the phone drops only that one.
     const badAt = parsed.findIndex((p) => typeof p === "string");
     if (badAt >= 0) {
-      const id = typeof raw[badAt]?.id === "string" ? String(raw[badAt].id).slice(0, 64) : null;
+      // Named only when it is a real action id: a cut or made-up one could make the phone drop another action.
+      const id = typeof raw[badAt]?.id === "string" && ACTION_ID.test(raw[badAt].id) ? raw[badAt].id : null;
       return appJSON({ error: parsed[badAt] as string, id }, 400, s.setCookie);
     }
     const list = parsed as Parsed[];

@@ -120,6 +120,8 @@ describe("phone decisions", () => {
     const q = [{ id: "a1" }, { id: "a2" }, { id: "a3" }];
     expect(L.queueAfterRefusal(q, "a2").map((a: any) => a.id)).toEqual(["a1", "a3"]);
     expect(L.queueAfterRefusal(q, undefined).map((a: any) => a.id)).toEqual(["a2", "a3"]);   // an older engine: the first, as before
-    expect(DECISIONS_UI_JS).toMatch(/queueAfterRefusal\(decQueue\.actions, e\.id\)/);
+    // Round 14: only a named action is dropped; none named, the queue stays and the screen says there is a problem.
+    expect(DECISIONS_UI_JS).toMatch(/typeof e\.id === "string"[^\n]*queueWithout\(decQueue\.actions, \[e\.id\]\)/);
+    expect(DECISIONS_UI_JS).not.toMatch(/queueAfterRefusal\(decQueue/);
   });
 });

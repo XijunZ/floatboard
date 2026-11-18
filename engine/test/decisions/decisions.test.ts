@@ -222,6 +222,17 @@ describe("decisions: phone copy and actions", () => {
     expect((await r.json<any>()).id).toBe("act-bad00001");
   });
 
+  it("a_malformed_action_whose_id_is_not_an_action_id_is_not_named", async () => {
+    const u = await user("BadId");
+    const { cookie } = await pairPhone(u.key);
+    const account = (await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>()).account;
+    const long = "a".repeat(70);   // cut to 64 it would name another (valid-looking) id
+    const r = await call("/app/api/decisions/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE },
+      body: JSON.stringify({ account, actions: [{ id: long, decision: "D-1", action: "not_decision" }] }) });
+    expect(r.status).toBe(400);
+    expect((await r.json<any>()).id).toBeNull();
+  });
+
   it("phone_actions_and_copy_are_bound_to_the_signed_in_account", async () => {
     const a = await user("AcctA"), b = await user("AcctB");
     const pa = await pairPhone(a.key), pb = await pairPhone(b.key);
