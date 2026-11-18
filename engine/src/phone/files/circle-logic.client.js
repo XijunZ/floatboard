@@ -79,3 +79,14 @@
     var text = h.action === "talked" ? "Mark talked to " + p.name + "?" : h.action === "snooze" ? "Snooze " + p.name + "?" : "Mark " + p.name + " as contacted?";
     return { action: h.action, person: p.id, text: text };
   }
+
+  // What a "#circle=…" link does now: nothing (none), wait (the copy or the account isn't there yet: keep the address and try
+  // after the next copy), drop (it can never be shown: another account's alert, or nobody on this phone), or ask (show the
+  // confirm sheet; only a tap there marks anyone).
+  function circleLinkStep(hash, copy, account) {
+    var h = circleHash(hash);
+    if (!h) return { step: "none" };
+    if (!copy || !account) return { step: "wait" };
+    var c = circleConfirm(h, circleView(copy, [], Date.now()).people, account);
+    return c ? { step: "ask", confirm: c } : { step: "drop" };
+  }
