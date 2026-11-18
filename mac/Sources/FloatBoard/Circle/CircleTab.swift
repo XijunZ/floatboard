@@ -119,9 +119,14 @@ struct CircleTab: View {
                             Image(systemName: picked.contains(p.id) ? "checkmark.square.fill" : "square").foregroundStyle(.secondary)
                         }.buttonStyle(.plain).help("Select for changing several at once")
                         VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 4) {
-                                Text(p.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                                if dueIDs.contains(p.id) { Circle().fill(.orange).frame(width: 6, height: 6) }
+                            // The name with the person's tags as chips in the same box (board card style); they wrap below a long
+                            // name at narrow widths instead of overlapping it.
+                            FlowLayout(hSpacing: 4, vSpacing: 2) {
+                                HStack(spacing: 4) {
+                                    Text(p.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.tail)
+                                    if dueIDs.contains(p.id) { Circle().fill(.orange).frame(width: 6, height: 6) }
+                                }
+                                ForEach(store.itemTags(p.shortID).all, id: \.self) { t in PersonTagChip(tag: t) }
                             }
                             Text("\(p.tier.title) · " + (k?.lastConversation.map { "talked \(CircleFmt.ago($0))" } ?? "no conversation seen"))
                                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
@@ -142,8 +147,10 @@ struct CircleTab: View {
         return HStack(spacing: 8) {
             Text("\(ids.count) selected").font(.system(size: 11, weight: .semibold))
             Menu("Change tier") { ForEach(PersonTier.allCases, id: \.self) { t in Button(t.title) { bulkProblem = c.setTier(ids, t).first } } }.fixedSize()
-            Menu("Add tag") { ForEach(store.tags.map(\.name), id: \.self) { t in Button(t) { bulkProblem = c.addTags(ids, [t]).first } } }.fixedSize()
-            Menu("Remove tag") { ForEach(store.tags.map(\.name), id: \.self) { t in Button(t) { bulkProblem = c.removeTags(ids, [t]).first } } }.fixedSize()
+            PeopleTagMenu(pick: { t in bulkProblem = c.addTags(ids, [t]).first }) { Text("Add tag") }.fixedSize()
+            // Remove: the tags the selected people actually have (board groups among them too, so none is stuck).
+            let onThem = Array(Set(ids.flatMap { store.itemTags(ShortID(kind: .person, number: $0)).all })).sorted()
+            Menu("Remove tag") { ForEach(onThem, id: \.self) { t in Button(t) { bulkProblem = c.removeTags(ids, [t]).first } } }.fixedSize().disabled(onThem.isEmpty)
             if ids.count == 2 {
                 Button("Merge") {
                     let s = ids.sorted()

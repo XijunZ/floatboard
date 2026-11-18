@@ -98,3 +98,73 @@ import SwiftUI
         CircleDue.register()
     }
 }
+
+/// Round 8 pictures (`FLOATBOARD_ROUND8SHOTS=1 FloatBoard --snapshot <dir>`, scratch database only): the Add form with a
+/// WhatsApp contact that shares no number, the person pane's tag row and its + menu, and the people list with tag chips.
+@MainActor enum Round8Shots {
+    static func run(dir: String, store: Store, ui: UIState, google: Google) {
+        guard LocalData.isScratchDatabase else { print("Round8Shots: scratch database only"); return }
+        store.setModule(.circle, on: true)
+        let c = CircleStore(store: store), now = Date()
+        _ = PeopleTags.add(store: store, "Board member"); _ = PeopleTags.add(store: store, "Advisor")
+        func add(_ name: String, _ tier: PersonTier, _ tags: [String], _ hs: [Handle] = []) -> Person? {
+            c.add(name: name, tier: tier, tags: ItemTags(primary: tags.first, others: Array(tags.dropFirst())), details: CircleDetails(), handles: hs,
+                  now: now.addingTimeInterval(-90 * 86400)).person
+        }
+        _ = add("Ada Example", .close, [])
+        let ben = add("Ben Example", .network, ["Investor"], [Handle(kind: .email, value: "ben@example.com")])
+        _ = add("Carolina Montgomery-Fitzwilliam Example", .network, ["Investor", "Board member", "Advisor"])
+        _ = add("王美玲", .close, ["Advisor"])
+        _ = add("Dan Example", .network, ["Investor", "Board member", "Advisor"])
+        func save<V: View>(_ v: V, _ name: String, _ size: CGSize) {
+            for scheme in [ColorScheme.light, .dark] {
+                let host = NSHostingView(rootView: v.environmentObject(store).environmentObject(ui).environmentObject(google)
+                    .frame(width: size.width, height: size.height)
+                    .background(scheme == .dark ? Color(white: 0.12) : Color(white: 0.97)).environment(\.colorScheme, scheme))
+                host.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+                host.frame = CGRect(origin: .zero, size: size)
+                let w = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+                w.isReleasedWhenClosed = false
+                w.contentView = host
+                w.setFrameOrigin(NSPoint(x: -30000, y: -30000))
+                w.orderFrontRegardless()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    let file = URL(fileURLWithPath: dir).appendingPathComponent("\(name)-\(scheme == .dark ? "dark" : "light").png")
+                    do { try rep.representation(using: .png, properties: [:])?.write(to: file) } catch { print("ERR: \(name): \(error)") }
+                }
+                w.close()
+            }
+        }
+        let form = PersonFormRequest(personID: nil, name: "Lin Example",
+                                     handles: [Handle(kind: .phone, value: "447700900111"), Handle(kind: .whatsapp, value: "98765432101234@lid")])
+        save(PersonForm(request: form) { _ in }, "round8-form-add", CGSize(width: 560, height: 620))
+        CircleNav.shared.selected = ben?.id
+        save(CircleTab(), "round8-person-tags", CGSize(width: 1000, height: 560))
+        // A menu can't be drawn open off screen: its items are drawn as the menu shows them, next to the tag row.
+        save(MenuPicture(items: PeopleTags.offered(store: store).filter { $0 != "Investor" } + ["New tag…"]), "round8-tag-menu", CGSize(width: 220, height: 160))
+        CircleNav.shared.selected = nil
+        save(CircleTab(), "round8-list-narrow", CGSize(width: 860, height: 440))
+    }
+
+    /// The + menu's items, drawn like a macOS menu.
+    struct MenuPicture: View {
+        let items: [String]
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.offset) { i, t in
+                    if t == "New tag…" && i > 0 { Divider().padding(.vertical, 3) }
+                    Text(t).font(.system(size: 13)).padding(.horizontal, 12).padding(.vertical, 3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(i == 0 ? Color.accentColor : Color.clear).foregroundStyle(i == 0 ? Color.white : Color.primary)
+                }
+            }
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 7).fill(.regularMaterial))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.15)))
+            .padding(10)
+        }
+    }
+}

@@ -13,6 +13,7 @@ struct PersonCard: View {
     @EnvironmentObject var ui: UIState
     @State private var showSetAside = false
     @State private var confirmDelete = false
+    @State private var tagProblem: String?
 
     var body: some View {
         let c = CircleStore(store: store)
@@ -57,13 +58,18 @@ struct PersonCard: View {
             HStack(spacing: 6) {
                 Text(p.tier.title).font(.system(size: 11, weight: .medium)).padding(.horizontal, 7).padding(.vertical, 2)
                     .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                // The person's tags right here (owner, round 8): ✕ takes one off, + adds one to this person, no selecting first.
                 ForEach(tags, id: \.self) { t in
-                    HStack(spacing: 3) { Circle().fill(store.color(t)).frame(width: 7, height: 7); Text(t) }.font(.system(size: 11))
-                        .padding(.horizontal, 6).padding(.vertical, 2).background(Capsule().fill(Color.primary.opacity(0.06)))
+                    PersonTagChip(tag: t, size: 11) { tagProblem = PeopleTags.removeFrom(store: store, person: p.id, t) }
                 }
+                PeopleTagMenu(except: tags, pick: { t in tagProblem = PeopleTags.addTo(store: store, person: p.id, t) }) {
+                    Image(systemName: "plus")
+                }
+                .menuStyle(.borderlessButton).fixedSize().help("Add a tag to \(p.name)")
                 let line = [d.role, d.company].filter { !$0.isEmpty }.joined(separator: " at ")
                 if !line.isEmpty { Text(line).font(.system(size: 12)).foregroundStyle(.secondary) }
             }
+            if let tagProblem { Text(tagProblem).font(.system(size: 11)).foregroundStyle(.red) }
             if !d.howKnown.isEmpty { Text("How you know them: \(d.howKnown)").font(.system(size: 12)).foregroundStyle(.secondary) }
             if !d.notes.isEmpty { Text(d.notes).font(.system(size: 12)).textSelection(.enabled) }
             if let b = CircleDue.birthdayContext(d.birthday, now: Date()) { Label(b, systemImage: "gift").font(.system(size: 12)) }
@@ -244,8 +250,8 @@ struct PersonCard: View {
             ForEach(hs, id: \.self) { h in
                 HStack(spacing: 6) {
                     Text(h.kind.title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
-                    if let l = Handles.chatLink(h), let u = URL(string: l) { Link(h.value, destination: u).font(.system(size: 12)) }
-                    else { Text(h.value).font(.system(size: 12)).textSelection(.enabled) }
+                    if let l = Handles.chatLink(h), let u = URL(string: l) { Link(Handles.display(h), destination: u).font(.system(size: 12)) }
+                    else { Text(Handles.display(h)).font(.system(size: 12)).textSelection(.enabled) }
                 }
             }
         }
