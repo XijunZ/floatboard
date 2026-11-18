@@ -157,6 +157,8 @@
     var syncing = false;
     var lastSel = { text: "", key: null };
     var undoTimer = 0;
+    var cancelUndo = null;   // takes the delete-undo bar away (also on an account switch)
+    var DRAFT_KEY = "floatboard.jotdraft";   // { account, text }: the writing box's unsaved text, for its own account only
     // Which account the cache and queue belong to. An answer to a request sent before a sign-out or an account change is
     // thrown away (never cached under the new account): the app's shared session check (h.stamp / h.sameSession).
     var heldBy = null;
@@ -167,10 +169,21 @@
       if (acct !== heldBy) { heldBy = acct; syncing = false; }
       cache = c && c.account === acct && Array.isArray(c.jots) ? c.jots : [];
       queue = q && q.account === acct && Array.isArray(q.actions) ? q.actions : [];
+      // The writing box: this account's own draft, or nothing (a draft of another account, or one from before drafts named
+      // their account, is never shown).
+      var box = h.$("jot-text"), d = h.load(DRAFT_KEY);
+      if (box && !box.value) box.value = d && typeof d === "object" && d.account && d.account === acct && typeof d.text === "string" ? d.text : "";
     }
+    function saveDraft(text) { h.store(DRAFT_KEY, text && heldBy ? { account: heldBy, text: text } : null); }
     function saveQueue() { if (heldBy) h.store(QUEUE_KEY, queue.length ? { account: heldBy, actions: queue } : null); }
 
-    function drop() { heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null); }
+    function drop() {
+      heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null);
+      h.store(DRAFT_KEY, null);
+      var box = h.$("jot-text");
+      if (box) box.value = "";   // the old account's unsaved words leave the screen too
+      if (cancelUndo) cancelUndo();
+    }
 
     // Jots: account binding (Codex round 3). Before any change is queued, the screen is bound to the account signed in now.
     function bound() { if (h.account() && heldBy !== h.account()) restore(); }
@@ -269,7 +282,7 @@
       if (!text) { box.focus(); return; }
       queueAction({ op: "add", text: text.slice(0, 20000) });
       box.value = "";
-      h.store("floatboard.jotdraft", null);
+      saveDraft(null);
       h.toast("Saved");
     }
 
@@ -389,17 +402,19 @@
       h.$("undo-text").textContent = "Jot deleted";
       bar.hidden = false;
       var btn = h.$("undo-btn");
+      if (cancelUndo) cancelUndo();
       var undo = function () {
-        btn.removeEventListener("click", undo, true);
-        bar.hidden = true;
+        cancel();
         var cur = queue.filter(function (x) { return x.id === a.id; })[0] || a;
         var step = undoJotDelete(queue, cur.sent || syncing ? Object.assign({}, cur, { sent: true }) : cur);
         if (step.restore) queueAction({ op: "restore", key: j.key });
         else { queue = step.queue; saveQueue(); render(); }
       };
+      var cancel = function () { btn.removeEventListener("click", undo, true); bar.hidden = true; clearTimeout(undoTimer); cancelUndo = null; };
+      cancelUndo = cancel;
       btn.addEventListener("click", undo, true);
       clearTimeout(undoTimer);
-      undoTimer = setTimeout(function () { btn.removeEventListener("click", undo, true); bar.hidden = true; }, 8000);
+      undoTimer = setTimeout(cancel, 8000);
     }
 
     // A share from another app: save it as a jot, or as a task.
@@ -431,18 +446,16 @@
 
     function wire() {
       var box = h.$("jot-text");
-      var draft = h.load("floatboard.jotdraft");
-      if (typeof draft === "string") box.value = draft;
-      box.addEventListener("input", function () { h.store("floatboard.jotdraft", box.value || null); });
+      box.addEventListener("input", function () { bound(); saveDraft(box.value); });
       h.$("jot-save").addEventListener("click", save);
       h.$("jot-clean").addEventListener("click", function () {
-        cleanup(box.value, function (cleaned) { box.value = cleaned; h.store("floatboard.jotdraft", cleaned); });
+        cleanup(box.value, function (cleaned) { box.value = cleaned; saveDraft(cleaned); });
       });
       h.$("jot-search").addEventListener("input", render);
       h.$("jot-tag").addEventListener("change", render);
     }
 
-    return { restore: restore, drop: drop, sync: pull, render: render, wire: wire, shareSheet: shareSheet, cleanup: cleanup,
+    return { restore: restore, drop: drop, sync: pull, remove: remove, render: render, wire: wire, shareSheet: shareSheet, cleanup: cleanup,
       add: function (text) { return queueAction({ op: "add", text: text }); },
       focus: function () { setTimeout(function () { h.$("jot-text").focus(); }, 80); } };
   }
