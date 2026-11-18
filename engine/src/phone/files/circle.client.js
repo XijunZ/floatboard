@@ -9,7 +9,6 @@
   var circleCopy = null;
   var circleQueue = { account: null, actions: [] };
   var circleQuery = "";
-  var circleEpoch = 0;   // up on every sign-out or account change: answers asked for before are dropped
   var CIRCLE_DONE = { contacted: "Marked as contacted", talked: "Marked as talked", snooze: "Snoozed" };
 
   function circleAccount() { return me ? me.account : shownAccount; }
@@ -23,7 +22,6 @@
 
   // Sign-out or another account: everything Circle kept on this phone goes.
   function circleDrop() {
-    circleEpoch++;
     circleCopy = null;
     circleQueue = { account: null, actions: [] };
     store(CIRCLE_KEY, null);
@@ -38,8 +36,8 @@
     if (circleQueue.account !== circleAccount()) circleLoad();
     if (circleHash(location.hash)) circleFromHash();   // asks first; acts only on a tap
     circleSyncing = true;
-    var asked = { epoch: circleEpoch, account: circleAccount() };
-    var still = function (respAccount) { return circleAccept(asked, { epoch: circleEpoch, account: circleAccount() }, respAccount); };
+    var asked = sessionStamp();   // the shared session check (app.client.js): a sign-out or another account meanwhile drops the answer
+    var still = function (respAccount) { return sameSession(asked, respAccount); };
     try {
       if (circleQueue.actions.length) {
         var sent = circleQueue.actions.slice(0, 50);

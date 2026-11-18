@@ -43,4 +43,4 @@ export const SYNC_JS: string = SYNC_SRC;
 /** Names the tests pull out of SYNC_JS. */
 export const SYNC_EXPORTS = ["viewBoard", "takeBatch", "sendBatch", "afterSend", "rememberSent", "noticeSuperseded", "retryDelay", "statusText",
   "replacedText", "byteLength", "undoFor", "undoLive", "undoText", "undoAction", "cardLinks", "linkLabel", "emailChoice", "linkAction", "hitLines",
-  "dayKey", "planBlocks", "deleteUndoFor", "undoDeleteStep", "markAttempted", "visibleViews", "moreEntries", "tagChoices", "tagsAction"];
+  "dayKey", "planBlocks", "deleteUndoFor", "undoDeleteStep", "markAttempted", "visibleViews", "moreEntries", "tagChoices", "tagsAction", "sessionAccepts"];

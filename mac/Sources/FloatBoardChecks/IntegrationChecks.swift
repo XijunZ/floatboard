@@ -1,5 +1,6 @@
 import Foundation
 import FloatBoardCore
+import FloatBoardConnectors
 import SQLite3
 
 /// The four areas together (integration of Jots, Circle, Decisions and Resolutions): typed ids in a decision link it, a
@@ -239,4 +240,31 @@ import SQLite3
           && ["cards", "cards live", "cards deleted", "history events", "links", "calendar events", "calendars", "connectors", "outbox"].allSatisfy { get(after, $0) == get(before, $0) }
           && Int(get(after, "settings (meta rows)")) ?? 0 >= Int(get(before, "settings (meta rows)")) ?? 0
           && primaryOK == live.count && store.modules == Set(Module.allCases), "real_board_copy_upgrades_to_16_keeping_everything")
+}
+
+// MARK: Settings sync holds back every oversized rulebook (round 4)
+
+/// Every rulebook the merged code syncs (RulebookSync.keys, also Instructions.parts) is held back when it is over the engine's
+/// limit, alone: the other settings, rulebooks within the limit included, still go.
+@MainActor func integrationRulebookLimitChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-int-rulebooks-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let keys = Set(RulebookSync.keys.values)
+    check(keys == Set(Instructions.parts.filter { $0.hasPrefix("rulebook_") }) && keys.count == 3, "every_synced_rulebook_is_a_versioned_part")
+    for big in keys.sorted() {
+        guard let s = integrationStore(root, "rb-\(big).sqlite") else { return }
+        var values: [String: Any] = ["learned": "L", "my_rules": "Mine"]
+        for k in keys { values[k] = k == big ? String(repeating: "y", count: 20_001) : "Short \(k)" }
+        let json = String(decoding: (try? JSONSerialization.data(withJSONObject: values)) ?? Data(), as: UTF8.self) // try?-ok: empty fails the check
+        s.performForTest { try s.db.run("INSERT OR REPLACE INTO connectors(id,name,settings_json,settings_version,engine_settings_version) VALUES('rb','rb',?,3,1)", [json]) }
+        s.reload()
+        let eng = goodEngine()
+        let r = await ConnectorSync.run(connector: "rb", store: s, client: eng.client(), now: decisionsNow)
+        let sent = eng.bodies("/v2/settings").first?["values"] as? [String: Any]
+        check(r.error == nil && sent?[big] == nil && sent?["learned"] as? String == "L" && sent?["my_rules"] as? String == "Mine"
+              && keys.subtracting([big]).allSatisfy { sent?[$0] as? String == "Short \($0)" }
+              && s.recentActivity(limit: 20).contains { $0.level == .warning && $0.message.contains("rulebook is too long") },
+              "oversized_\(big)_held_back_the_rest_synced")
+    }
 }

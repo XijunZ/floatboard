@@ -774,6 +774,7 @@ await circleKeyChecks()
 await circleSyncAtomicChecks()
 await decisionsChecks()
 integrationChecks()
+await integrationRulebookLimitChecks()
 resolutionsChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")

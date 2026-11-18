@@ -390,3 +390,10 @@
     });
   }
 
+  // One rule for every area's phone sync (Jots, Circle, Decisions): an answer is used only if the phone is still in the
+  // session generation and account it was asked in (`gen` goes up on every sign-out or account change), and the answer
+  // names that account when it names one.
+  function sessionAccepts(start, now, respAccount) {
+    if (!start || !now || start.gen !== now.gen || !start.account || start.account !== now.account) return false;
+    return respAccount == null || respAccount === start.account;
+  }

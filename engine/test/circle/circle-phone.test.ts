@@ -63,18 +63,15 @@ describe("phone Circle", () => {
   });
 
   it("a_late_answer_from_another_session_or_account_is_dropped", () => {
-    const start = { epoch: 3, account: "acc-a" };
-    expect(L.circleAccept(start, { epoch: 3, account: "acc-a" }, "acc-a")).toBe(true);
-    expect(L.circleAccept(start, { epoch: 3, account: "acc-a" }, undefined)).toBe(true);
-    expect(L.circleAccept(start, { epoch: 4, account: "acc-a" }, "acc-a")).toBe(false);   // signed out (and in again) meanwhile
-    expect(L.circleAccept(start, { epoch: 3, account: null }, "acc-a")).toBe(false);      // signed out meanwhile
-    expect(L.circleAccept(start, { epoch: 3, account: "acc-b" }, "acc-a")).toBe(false);   // another account now
-    expect(L.circleAccept(start, { epoch: 3, account: "acc-a" }, "acc-b")).toBe(false);   // the answer is another account's
+    // Circle uses the app's shared session check (sessionAccepts, tested in test/phone/foundation.test.ts).
+    expect(CIRCLE_JS).toContain("var asked = sessionStamp();");
+    expect(CIRCLE_JS).toContain("return sameSession(asked, respAccount);");
+    expect(CIRCLE_JS).not.toContain("circleEpoch");
   });
 
   it("sign_out_clears_circles_phone_cache", () => {
-    expect(CIRCLE_JS).toMatch(/function circleDrop\(\)[\s\S]*?circleEpoch\+\+[\s\S]*?store\(CIRCLE_KEY, null\)/);
-    expect(APP_JS).toMatch(/function dropAccountData\(\)[\s\S]*?circleDrop\(\)/);
+    expect(CIRCLE_JS).toMatch(/function circleDrop\(\)[\s\S]*?store\(CIRCLE_KEY, null\)/);
+    expect(APP_JS).toMatch(/function dropAccountData\(\) \{\s*sessionGen \+= 1;[\s\S]*?circleDrop\(\)/);
   });
 
   it("a_link_never_marks_anyone_by_itself_it_asks_first", () => {

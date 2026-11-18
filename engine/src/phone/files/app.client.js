@@ -525,7 +525,15 @@
   function saveQueue() { store(QUEUE_KEY, queue.actions.length ? queue : null); }
 
   // Forget everything this phone holds for an account: its board, its queue and the ids it sent.
+  // The session generation shared by Jots, Circle and Decisions (`sessionAccepts` in files/sync.client.js): it goes up
+  // whenever this phone's account data is dropped (sign-out, another account), so an answer asked for before is ignored.
+  var sessionGen = 0;
+  function sessionAccount() { return me ? me.account : shownAccount; }
+  function sessionStamp() { return { gen: sessionGen, account: sessionAccount() }; }
+  function sameSession(stamp, respAccount) { return sessionAccepts(stamp, sessionStamp(), respAccount); }
+
   function dropAccountData() {
+    sessionGen += 1;   // first: every answer still on its way belongs to the old session
     board = null;
     shownAccount = null;
     queue = { account: null, actions: [] };
@@ -1185,7 +1193,8 @@
   var jots = JotsScreen({
     $: $, el: el, api: api, openSheet: openSheet, closeSheet: closeSheet, toast: toast, store: store, load: load, newId: newId,
     offline: offline, SignedOut: SignedOut,
-    account: function () { return me ? me.account : shownAccount; },
+    account: sessionAccount,
+    stamp: sessionStamp, sameSession: sameSession,   // the shared session check (late answers are dropped)
     modules: function () { return board && board.modules; },
     zone: function () { return board && board.time_zone; },
     makeDecision: function (text, source, context) { decisionForm(text, source, context); },   // Decisions (files/decisions.client.js)

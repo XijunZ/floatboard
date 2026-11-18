@@ -70,13 +70,6 @@
     return h;
   }
 
-  // An answer is used only if the phone is still in the session and account it was asked for (no sign-out or account
-  // switch meanwhile: `epoch` goes up on each), and the answer names that account when it names one.
-  function circleAccept(start, now, respAccount) {
-    if (!start || !now || start.epoch !== now.epoch || !start.account || start.account !== now.account) return false;
-    return respAccount == null || respAccount === start.account;
-  }
-
   // What the confirm sheet for a link's action says (a link never acts by itself); null for someone not on this phone.
   // A link that names another account (an old alert after switching) shows nothing.
   function circleConfirm(h, people, account) {
