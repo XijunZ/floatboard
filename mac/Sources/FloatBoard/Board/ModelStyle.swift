@@ -20,6 +20,12 @@ extension Color {
 
 extension Store {
     func color(_ area: String) -> Color { tags.first { $0.name == area }?.color ?? .gray }
+
+    /// A chip's text colour: the tag's colour, darkened in light mode when it is too light to read (ChipInk).
+    func ink(_ area: String, _ scheme: ColorScheme) -> Color {
+        guard let hex = tags.first(where: { $0.name == area })?.colorHex else { return .gray }
+        return Color(hex: scheme == .light ? ChipInk.lightModeHex(hex) : hex)
+    }
 }
 
 extension Search {

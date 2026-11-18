@@ -117,3 +117,12 @@ import FloatBoardCore
     check(PeopleTags.addTo(store: s, person: bo.id, TagRules.investor) == nil && s.itemTags(bo.shortID).all == ["Investor"]
           && PeopleTags.removeFrom(store: s, person: bo.id, TagRules.investor) == nil && s.itemTags(bo.shortID).all.isEmpty, "one_person_tagged_and_untagged_directly")
 }
+
+/// Round 9 (3): a chip's text colour in light mode. Light colours (contrast under 3:1 on white: yellow, cyan, green, orange)
+/// are darkened until they reach 4.5:1; every other colour is left exactly as it was.
+func chipInkChecks() {
+    let yellow = ChipInk.lightModeHex("#FFD60A"), cyan = ChipInk.lightModeHex("#40C8E0")
+    check(ChipInk.contrastOnWhite(yellow) >= 4.5 && ChipInk.contrastOnWhite(cyan) >= 4.5 && yellow != "#FFD60A", "light_chip_colours_are_darkened_to_4_5")
+    check(["#0A84FF", "#BF5AF2", "#FF453A", "#5E5CE6", "#8E8E93"].allSatisfy { ChipInk.lightModeHex($0) == $0 }, "other_chip_colours_are_unchanged")
+    check(ChipInk.hue(yellow) == ChipInk.hue("#FFD60A"), "darkened_chip_keeps_its_hue")
+}
