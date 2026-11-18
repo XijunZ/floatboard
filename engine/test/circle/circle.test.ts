@@ -318,6 +318,7 @@ describe("circle: on-request AI (Haiku)", () => {
 describe("circle: notification buttons", () => {
   it("a_due_person_reminder_names_the_person_for_the_buttons", () => {
     expect(circleOf("rb-circle_due-P-12-2026-11-18")).toBe("P-12");
+    expect(circleOf("rb-circle_birthday-P-12-2026-11-18")).toBeUndefined();   // round 13 (C5): a birthday gets no Contacted / Snooze buttons
     expect(circleOf("rb-decision_review-D-1-2026-11-18")).toBeUndefined();
     expect(JSON.parse(payloadJSON({ title: "Kim", body: "Time to get in touch", url: "/app/", circle: "P-12" }))).toMatchObject({ circle: "P-12" });
   });

@@ -86,7 +86,7 @@ public struct DueEntry: Identifiable, Equatable {
         let details = c.allDetails()
         for p in PeopleStore(store: store).people() {
             guard let raw = details[p.id]?.birthday, let next = nextBirthday(raw, after: now), AppTime.calendar.isDate(next, inSameDayAs: now) else { continue }
-            grants.append(budget.request(kind: .circleDue, itemID: p.shortID, text: "It's \(p.name)'s birthday today", now: now))
+            grants.append(budget.request(kind: .circleBirthday, itemID: p.shortID, text: "It's \(p.name)'s birthday today", now: now))
         }
         return grants
     }
