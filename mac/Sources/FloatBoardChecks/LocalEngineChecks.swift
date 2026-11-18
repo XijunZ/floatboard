@@ -57,7 +57,7 @@ import FloatBoardCore
         let keys = try await client.setKeys(claudeKey: "sk-test-local")
         check(keys.claude, "local_engine_takes_keys")
         let books = try await client.rulebooks()
-        check(books.map(\.key) == ["email", "chat"], "local_engine_serves_the_rulebooks")
+        check(books.map(\.key) == ["email", "chat", "decisions"], "local_engine_serves_the_rulebooks")   // Decisions added its own (integration)
 
         // A WhatsApp ask becomes a task, judged by (fake) Claude through the Mac's network.
         let chat = #"{"app":"whatsapp","chats":[{"key":"wa:447700900123@s.whatsapp.net:ABC1","name":"Anna","group":false,"senders":["Anna"],"transcript":"[2026-11-13 09:12] Anna: Can you send me the flat contract by tonight?","link":"whatsapp://send?phone=447700900123","received":"2026-11-13T09:12:00Z"}]}"#
