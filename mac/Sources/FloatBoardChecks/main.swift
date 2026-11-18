@@ -10,6 +10,8 @@ guard env[LocalData.databaseEnv] != nil, env[LocalData.credentialsEnv] != nil, l
     exit(2)
 }
 
+rebuildEngineBundle()   // the Mac engine checks always run against engine/ as it is now (EngineBundle.swift)
+
 var failures: [String] = []
 func check(_ ok: Bool, _ name: String) { print((ok ? "PASS " : "FAIL ") + name); if !ok { failures.append(name) } }
 
