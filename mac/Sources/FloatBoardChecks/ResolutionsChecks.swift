@@ -21,6 +21,7 @@ import SQLite3
     resolutionSearchPhoneChecks(root)
     resolutionTypedIDKeepsLinksChecks(root)
     resolutionOverdueChecks(root)
+    resolutionCodexRound2Checks(root)
 }
 
 /// 12:00 on a day in the app's zone.
@@ -374,4 +375,45 @@ private func makeV12Schema(_ url: URL) -> Bool {
           && r.rolloverPeriod(of: GoalPeriod.parse(level: .quarter, key: "2026-Q4")!, now: day(2026, 12, 20)).key == "2027-Q1",
           "overdue_review_rolls_over_into_the_current_period")
     check(!ResolutionNudges.openReviews(store: store, now: nov17).map(\.key).contains("2026-Q2"), "reviewed_overdue_period_closes")
+}
+
+// MARK: Codex round 2
+
+@MainActor private func resolutionCodexRound2Checks(_ root: URL) {
+    // (1) Delete a yearly goal, put its quarter under another, Undo the delete: the later choice wins, one parent only.
+    guard let s1 = goalsStore(root, "c2-undo.sqlite") else { return }
+    let r1 = ResolutionStore(store: s1)
+    guard let ya = make(r1, .year, "2026", "Year A"), let yb = make(r1, .year, "2026", "Year B"),
+          let q = make(r1, .quarter, "2026-Q4", "Quarter", parent: ya.id) else { return }
+    let t = task(s1, "Quarter task")
+    _ = r1.linkWork(t, to: q.id, now: nov17)
+    r1.delete(ya.id, now: nov17)
+    check(r1.parent(of: q.id) == nil && r1.setParent(q.id, yb.id, now: nov17) == nil, "c2 setup")
+    r1.undoDelete(ya.id, now: nov17)
+    let parents = s1.itemLinks(of: q.shortID).filter { $0.other.kind == .resolution && $0.kind == .serves && $0.isSubject }
+    check(parents.map(\.other) == [yb.shortID] && r1.parent(of: q.id)?.id == yb.id && r1.children(of: ya.id).isEmpty
+          && r1.taskIDs(for: ya.id).isEmpty && r1.taskIDs(for: yb.id) == [t.number], "undo_delete_never_gives_a_goal_two_parents")
+
+    // (2) Quarters kept twice before their year is reviewed late: both continuations land under the year's continuation.
+    guard let s2 = goalsStore(root, "c2-chain.sqlite") else { return }
+    let r2 = ResolutionStore(store: s2)
+    guard let y = make(r2, .year, "2026", "Year"), let q4 = make(r2, .quarter, "2026-Q4", "Q4 goal", parent: y.id) else { return }
+    guard case .success(let q1?) = r2.review(q4.id, outcome: .kept, note: "", newTitle: nil, now: day(2026, 12, 29)),
+          case .success(let q2?) = r2.review(q1.id, outcome: .kept, note: "", newTitle: nil, now: day(2027, 3, 29)),
+          case .success(let y27?) = r2.review(y.id, outcome: .kept, note: "", newTitle: nil, now: day(2027, 4, 10)) else {
+        check(false, "late_year_review_adopts_every_quarter_of_the_chain"); return
+    }
+    check(y27.period.key == "2027" && r2.parent(of: q1.id)?.id == y27.id && r2.parent(of: q2.id)?.id == y27.id
+          && r2.parent(of: q4.id)?.id == y.id && Set(r2.children(of: y27.id).map(\.id)) == [q1.id, q2.id],
+          "late_year_review_adopts_every_quarter_of_the_chain")
+
+    // (3) A review note that names its own goal keeps its review-of link.
+    guard let s3 = goalsStore(root, "c2-note.sqlite") else { return }
+    let r3 = ResolutionStore(store: s3)
+    guard let g = make(r3, .quarter, "2026-Q4", "Named in its note") else { return }
+    _ = r3.review(g.id, outcome: .dropped, note: "Dropping \(g.shortID.text): not the right time.", newTitle: nil, now: nov17)
+    let notes = r3.reviewNotes(g.id)
+    let link = notes.first.flatMap { j in s3.itemLinks(of: g.shortID).first { $0.other == j.shortID } }
+    check(notes.count == 1 && link?.kind == .reviewOf && link?.madeBy == .auto && r3.progress(g.id).jots.isEmpty,
+          "review_note_naming_its_goal_keeps_review_of")
 }
