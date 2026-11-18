@@ -99,6 +99,20 @@ describe("phone Circle", () => {
     expect(SW_JS).toMatch(/#circle=" \+ action \+ ":" \+ person \+ ":" \+ account/);
   });
 
+  it("a_circle_sheet_never_acts_for_another_account_and_closes_on_sign_out", () => {
+    const fn = (name: string) => new RegExp("function " + name + "\\([^)]*\\) \\{([\\s\\S]*?)\\n  \\}\\n").exec(CIRCLE_JS)![1];
+    // Every tap is checked against the session and account the screen or sheet was opened under.
+    expect(fn("circleAct")).toMatch(/circleAccept\(asked, circleSnap\(\)\)/);
+    for (const name of ["circleFromHash", "personSheet", "draftSheet", "circlePlan"]) {
+      const body = fn(name);
+      expect(body, name).toMatch(/var asked = circleSnap\(\)/);
+      for (const call of body.match(/circleAct\([^)]*\)/g) ?? []) expect(call, name).toMatch(/asked\)$/);
+    }
+    expect(fn("draftSheet")).toMatch(/if \(!circleAccept\(asked, circleSnap\(\)\)\)/);   // a late draft for the old account is dropped
+    expect(fn("circleDrop")).toMatch(/\.sheet\[data-circle\][\s\S]*closeSheet\(\)/);
+    expect((CIRCLE_JS.match(/sheet\.dataset\.circle = "1"/g) ?? []).length).toBe(3);
+  });
+
   it("service_worker_adds_contacted_and_snooze_to_circle_alerts", () => {
     expect(SW_JS).toContain('action: "contacted", title: "Contacted"');
     expect(SW_JS).toContain('action: "snooze", title: "Snooze"');
