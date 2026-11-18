@@ -262,6 +262,9 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
   const limit = a.op === "make_task" || a.op === "make_decision" ? MAX_SELECTION : MAX_PHONE_TEXT;
   if (needsText && (!text.trim() || text.length > limit)) return drop(text.trim() ? "text too long" : "text is required");
   const seen = env.DB.prepare("INSERT OR IGNORE INTO jot_actions_seen(user_id,id,at) VALUES(?,?,?)").bind(userId, id, iso(receivedMs));
+  // The same mark, as the last statement of the batch that applies the change: written only when the statement before it
+  // changed a row (SQLite's changes()), so the change and its mark commit together or not at all.
+  const seenIfChanged = env.DB.prepare("INSERT OR IGNORE INTO jot_actions_seen(user_id,id,at) SELECT ?,?,? WHERE changes() > 0").bind(userId, id, iso(receivedMs));
   if (a.op === "add") {
     await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,text_enc,kind,source,tags,added,updated,waiting,rev)
         VALUES(?,?,?,'jot','phone','[]',?,?,1,1)`).bind(userId, `phone:${id}`, await encrypt(env, text), made, made), seen]);
@@ -284,10 +287,10 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
   if (!row) {
     // A jot the copy no longer holds (removed 30 days after the Mac saved it, or never here): the change waits for the Mac,
     // which applies it to its jot by number or key (newest wins), or keeps it as a new jot. Never dropped.
-    const ins = await env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,mac_id,text_enc,kind,source,tags,added,updated,deleted,waiting,rev)
+    const [ins] = await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,mac_id,text_enc,kind,source,tags,added,updated,deleted,waiting,rev)
         VALUES(?,?,?,?,'jot','phone','[]',?,?,?,1,1)`).bind(userId, a.key, macID ? Number(macID) : null, await encrypt(env, a.op === "edit" ? text : ""),
-        made, made, a.op === "delete" ? 1 : 0).run();
-    if (ins.meta.changes) { await seen.run(); return "ok"; }
+        made, made, a.op === "delete" ? 1 : 0), seenIfChanged]);
+    if (ins.meta.changes) return "ok";
     // A copy appeared meanwhile (a Mac upload, by key or by number): read it and go through the version-checked path below.
     row = await env.DB.prepare("SELECT key, updated, deleted, rev, text_enc FROM jot_copies WHERE user_id=? AND (key=? OR mac_id=?)")
       .bind(userId, a.key, macID ? Number(macID) : -1).first<{ key: string; updated: string; deleted: number; rev: number; text_enc: string }>();
@@ -319,9 +322,9 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
       stmts.push(env.DB.prepare("UPDATE jot_copies SET deleted=?, updated=?, waiting=1, rev=rev+1 WHERE user_id=? AND key=? AND rev=?")
         .bind(a.op === "delete" ? 1 : 0, made, userId, row.key, row.rev));
     }
+    stmts.push(seenIfChanged);
     const res = await env.DB.batch(stmts);
-    if (res[res.length - 1].meta.changes) {
-      await seen.run();
+    if (res[res.length - 2].meta.changes) {
       return a.op === "edit" && older ? { id, reason: "superseded", kept: true } : "ok";
     }
   }

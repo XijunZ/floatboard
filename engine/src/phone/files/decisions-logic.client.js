@@ -95,9 +95,27 @@
 
   // The next request body: at most 50 actions, with the account the queue was made under (the engine refuses it for any
   // other account, so a stale confirmation can never send them to the wrong one).
+  // What goes in one send: the oldest actions, at most 50 and under the engine's 300 KB cap (a long queue goes in several
+  // sends). An oldest action too big to send at all is named in `tooBig` (the app drops it with a message), so it can never
+  // hold up the queue.
+  var DECISION_SEND_BYTES = 250000;
+  function decisionBytes(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); n += c < 0x80 ? 1 : c < 0x800 ? 2 : (c >= 0xd800 && c <= 0xdfff) ? 2 : 3; }
+    return n;
+  }
   function decisionSendBody(queue, confirmed) {
     if (!decisionQueueSendable(queue, confirmed)) return null;
-    return { account: queue.account, actions: queue.actions.slice(0, 50) };
+    var out = [], size = decisionBytes(JSON.stringify({ account: queue.account, actions: [] }));
+    for (var i = 0; i < queue.actions.length && out.length < 50; i++) {
+      var n = decisionBytes(JSON.stringify(queue.actions[i])) + 1;
+      if (size + n > DECISION_SEND_BYTES) {
+        if (!out.length) return { account: queue.account, actions: [], tooBig: queue.actions[i].id };
+        break;
+      }
+      out.push(queue.actions[i]); size += n;
+    }
+    return { account: queue.account, actions: out };
   }
 
   // The queue with one more action, made under `account` (the account the form or sheet was opened in). Null when there is

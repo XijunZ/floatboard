@@ -115,3 +115,32 @@ describe("phone Make decision form (Codex review 3)", () => {
     expect(drop.slice(0, drop.indexOf("\n  }\n"))).toContain("closeSheet();");
   });
 });
+
+describe("phone queues stay under the engine's size caps (round 7, E)", () => {
+  it("decisions_are_sent_in_chunks_under_300kb_and_an_oversized_one_is_dropped_visibly", async () => {
+    const { DECISIONS_EXPORTS } = await import("../../src/phone/decisions-client");
+    // eslint-disable-next-line no-new-func
+    const L: any = new Function(DECISIONS_LOGIC_JS + "\nreturn {" + DECISIONS_EXPORTS.join(",") + "};")();
+    const big = (n: number) => ({ id: "rv-" + n, decision: "D-1", action: "review", happened: "长".repeat(4000), sound: "好".repeat(4000) });
+    const q = { account: "acc-a", actions: Array.from({ length: 50 }, (_, i) => big(i)) };
+    const body = L.decisionSendBody(q, "acc-a");
+    expect(new TextEncoder().encode(JSON.stringify(body)).length).toBeLessThan(300_000);
+    expect(body.actions.length).toBeGreaterThan(0);
+    expect(body.actions.length).toBeLessThan(50);
+    expect(body.actions[0].id).toBe("rv-0");   // oldest first
+    const huge = { id: "huge", decision: "D-1", action: "review", happened: "x".repeat(400_000), sound: "" };
+    expect(L.decisionSendBody({ account: "acc-a", actions: [huge, big(1)] }, "acc-a")).toEqual({ account: "acc-a", actions: [], tooBig: "huge" });
+    expect(DECISIONS_UI_JS).toMatch(/body\.tooBig/);
+  });
+
+  it("jots_are_sent_in_chunks_under_the_engines_cap", async () => {
+    const { JOTS_EXPORTS, JOTS_JS } = await import("../../src/phone/jots-logic");
+    // eslint-disable-next-line no-new-func
+    const J: any = new Function(JOTS_JS + "\nreturn {" + JOTS_EXPORTS.join(",") + "};")();
+    const queue = Array.from({ length: 100 }, (_, i) => ({ id: "j-" + i, op: "add", key: "phone:" + i, text: "长".repeat(20_000), made_at: "2026-11-18T09:00:00Z" }));
+    const b = J.takeJotBatch(queue, "2026-11-18T09:00:00Z");
+    expect(new TextEncoder().encode(JSON.stringify(b)).length).toBeLessThan(512_000);
+    expect(b.actions.length).toBeGreaterThan(0);
+    expect(b.actions.length).toBeLessThan(100);
+  });
+});

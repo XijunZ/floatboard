@@ -73,7 +73,24 @@
   }
 
   // The next request for POST /app/api/jots: the whole queue (it is small: at most 100 actions).
-  function takeJotBatch(queue, sentAt) { return { sent_at: sentAt, actions: (queue || []).slice(0, 100) }; }
+  // One send: the oldest changes, at most 100 and under the engine's 512 KB cap (a long queue goes in several sends). One
+  // change is at most 20,000 characters, so a single one always fits.
+  var JOT_SEND_BYTES = 400000;
+  function jotBytes(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); n += c < 0x80 ? 1 : c < 0x800 ? 2 : (c >= 0xd800 && c <= 0xdfff) ? 2 : 3; }
+    return n;
+  }
+  function takeJotBatch(queue, sentAt) {
+    var out = [], size = 200;
+    (queue || []).some(function (a) {
+      var n = jotBytes(JSON.stringify(a)) + 1;
+      if (out.length >= 100 || (out.length && size + n > JOT_SEND_BYTES)) return true;
+      out.push(a); size += n;
+      return false;
+    });
+    return { sent_at: sentAt, actions: out };
+  }
 
   // Only malformed actions leave the queue without being taken; anything else stays queued and is sent again.
   var JOT_PERMANENT = { "bad id": true, "bad key": true, "unknown op": true, "text is required": true, "text too long": true };
