@@ -103,6 +103,8 @@ describe("jots on the phone: account changes (Codex round 3)", () => {
     const h = { $: () => null, el: () => ({ appendChild() {}, addEventListener() {} }), toast: () => {}, newId: () => "id-00000002", offline: () => true,
       SignedOut: class extends Error {}, store: (k: string, v: any) => { stored[k] = v; }, load: (k: string) => stored[k] ?? null, account,
       modules: () => ({ jots: true }), zone: () => "Europe/London", openSheet: () => { sheets.push(1); }, closeSheet: () => {},
+      // The app's shared session check (app.client.js): a drop raises the generation; here the account switch alone tells.
+      stamp: () => ({ gen: 0, account: account() }), sameSession: (s: any) => !!s.account && s.account === account(),
       api: () => new Promise((r, rej) => { answer = r; }) };
     return { h, stored, sheets, answer: (v: any) => answer(v) };
   }
