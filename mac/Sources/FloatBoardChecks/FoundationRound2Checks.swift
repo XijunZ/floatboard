@@ -105,3 +105,33 @@ private struct Refused: Error {}
     _ = await delivery.tick(now: late.addingTimeInterval(120))
     check(released.isEmpty && !budget.pending().contains { $0.id == c }, "unclaimed_reminder_left_to_the_phone_without_release")
 }
+
+// MARK: Integration round 5: a claim whose answer was lost (Codex review 3, finding 5)
+
+@MainActor func lostClaimChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-lost-claim-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = foundationStore(root, "lost.sqlite") else { return }
+    let budget = ReminderBudget(store: store)
+    budget.save(ReminderSettings(dailyLimit: 5, quietStart: 0, quietEnd: 0))
+    let now = Date()
+    guard let a = grant(budget, 1, now) else { check(false, "lost claim setup"); return }
+    // The engine took the claim but its answer never arrived (the Mac sees "unreachable") until the grace ran out.
+    var engineHolds = Set<String>(), released: [String] = []
+    let delivery = ReminderDelivery(store: store, claim: { id in engineHolds.insert(id); return .unreachable }, schedule: { _ in },
+                                    release: { id in released.append(id); engineHolds.remove(id); return true })
+    _ = await delivery.tick(now: now.addingTimeInterval(5))
+    _ = await delivery.tick(now: now.addingTimeInterval(65))
+    check(budget.pending().contains { $0.id == a } && released.isEmpty, "unanswered_claim_waits_within_the_grace")
+    _ = await delivery.tick(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 5))
+    check(released == [a] && engineHolds.isEmpty && !budget.pending().contains { $0.id == a } && budget.forPhone(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 5)).contains { $0.id == a },
+          "claim_with_a_lost_answer_is_released_at_handoff_so_the_phone_gets_it")
+    // The intent survives a restart of the app (a new delivery object): it is kept in the database before the claim is sent.
+    guard let b = grant(budget, 2, now) else { return }
+    _ = await ReminderDelivery(store: store, claim: { _ in .unreachable }, schedule: { _ in }).tick(now: now.addingTimeInterval(5))
+    released = []
+    _ = await ReminderDelivery(store: store, claim: { _ in .unreachable }, schedule: { _ in },
+                               release: { id in released.append(id); return true }).tick(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 5))
+    check(released == [b], "claim_intent_survives_a_restart")
+}

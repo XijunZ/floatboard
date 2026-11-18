@@ -159,6 +159,28 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
     }
 
     static func claimedKey(_ id: String) -> String { "reminder_claimed:\(id)" }
+    /// Written before a claim is sent and cleared once its answer is known: a claim whose answer was lost (the engine may
+    /// hold it) is then handed back at handoff like a known one, so the phone is never blocked by it.
+    static func intentKey(_ id: String) -> String { "reminder_claim_sent:\(id)" }
+    private func intent(_ id: String) -> Bool {
+        do { return try store.db.query("SELECT 1 FROM meta WHERE key=?", [Self.intentKey(id)]) { DB.int($0, 0) }.first != nil } catch {
+            return true   // unreadable: assume a claim may be out there (a release of nothing is harmless)
+        }
+    }
+    /// Records the intent; false when it could not be kept (then no claim is sent this minute).
+    private func setIntent(_ id: String) -> Bool {
+        do { try store.performThrowing { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?, '1')", [Self.intentKey(id)]) }; return true } catch {
+            if reported.insert(id).inserted { store.activity("reminders", .error, "Could not note a reminder claim; will try again", detail: "\(error)", trace: id) }
+            return false
+        }
+    }
+    /// The claim's answer is known: the intent is replaced by the claim (mine) or simply cleared, in one write.
+    private func settle(_ id: String, mine: Bool) {
+        store.perform {
+            if mine { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?, '1')", [Self.claimedKey(id)]) }
+            try store.db.run("DELETE FROM meta WHERE key=?", [Self.intentKey(id)])
+        }
+    }
     private func claimed(_ id: String) -> Bool {
         ((try? store.db.query("SELECT 1 FROM meta WHERE key=?", [Self.claimedKey(id)]) { DB.int($0, 0) }) ?? []).first != nil // try?-ok: unreadable = not claimed (the engine's answer still decides)
     }
@@ -176,22 +198,26 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
         var changed = false
         for r in budget.pending() where !inFlight.contains(r.id) {
             if ReminderBudget.phoneTakesOver(r, now: now) {
-                if claimed(r.id) {
-                    // Claimed here but never shown: hand it back so the engine sends it to the phone (retried until it can).
+                let known = claimed(r.id)
+                if known || intent(r.id) {
+                    // Claimed here (or a claim whose answer was lost) but never shown: hand it back so the engine sends it to the
+                    // phone (retried until it can; releasing a claim the engine never took changes nothing).
                     inFlight.insert(r.id)
                     let back = await release(r.id)
                     inFlight.remove(r.id)
                     guard back else { continue }
                     setClaimed(r.id, false)
-                    store.activity("reminders", .warning, "A reminder could not be shown on this Mac; it goes to your phone instead", trace: r.id)
+                    settle(r.id, mine: false)
+                    if known { store.activity("reminders", .warning, "A reminder could not be shown on this Mac; it goes to your phone instead", trace: r.id) }
                 }
                 budget.markDelivered(r.id, by: "phone", at: now); changed = true; continue
             }
             guard ReminderBudget.macShows(r, now: now) else { continue }
             inFlight.insert(r.id)
             defer { inFlight.remove(r.id) }
+            guard setIntent(r.id) else { continue }
             let answer = await claim(r.id)
-            if answer == .mine && !claimed(r.id) { setClaimed(r.id, true) }
+            if answer != .unreachable { settle(r.id, mine: answer == .mine) }   // unreachable: the engine may hold it; the intent stays
             switch answer {
             case .phones:
                 budget.markDelivered(r.id, by: "phone", at: now); changed = true
