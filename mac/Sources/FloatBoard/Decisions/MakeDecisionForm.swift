@@ -104,7 +104,8 @@ struct MakeDecisionForm: View {
         let source = request.source
         let draft = DecisionDraft(text: text, quote: request.selection.trimmingCharacters(in: .whitespacesAndNewlines), why: why, expected: expected,
                                   confidence: confidence, alternatives: alternatives, type: type, source: .typed, sourceItem: source)
-        guard let d = DecisionStore(store: store).record(draft) else { close(); return }
+        // Not saved (the write failed; it is in Activity): the form stays open with every field.
+        guard let d = DecisionStore(store: store).record(draft) else { note = "Couldn't save the decision (see Activity). Your fields are still here; try again."; return }
         DecisionsUI.shared.selected = d.id
         close()
         if let (_, client) = DecisionsEngine.client(store: store) {

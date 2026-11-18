@@ -7,6 +7,7 @@ import SwiftUI
 struct MakeTaskForm: View {
     let request: MakeTaskRequest
     var close: () -> Void
+    @State private var saveProblem: String?
     @EnvironmentObject var store: Store
     @State private var draft = TaskDraft(title: "", notes: "", primaryTag: nil, others: [])
     @State private var hasDue = false
@@ -28,13 +29,15 @@ struct MakeTaskForm: View {
             if let s = request.source, let item = store.item(s) {
                 Text("Links back to \(s.text) · \(item.title)").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
+            if let saveProblem { Text(saveProblem).font(.system(size: 11)).foregroundStyle(.red) }
             HStack {
                 Spacer()
                 Button("Cancel") { close() }.keyboardShortcut(.cancelAction)
                 Button("Make task") {
-                    store.makeTask(draft, due: hasDue ? Due.combine(day: day, time: hasTime ? time : nil) : nil, dueHasTime: hasDue && hasTime,
-                                   from: request.source)
-                    close()
+                    // Closes only once the task is saved; a failed write (in Activity) keeps the form and its fields.
+                    if store.makeTask(draft, due: hasDue ? Due.combine(day: day, time: hasTime ? time : nil) : nil, dueHasTime: hasDue && hasTime,
+                                      from: request.source) != nil { close() }
+                    else { saveProblem = "Couldn't make the task (see Activity). Your fields are still here; try again." }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)

@@ -192,6 +192,7 @@ struct PersonForm: View {
         let tagSet = ItemTags(primary: tags.first, others: Array(tags.dropFirst()))
         if let id = request.personID, var p = PeopleStore(store: store).person(id) {
             if let why = TagRules.problems(tags: tags, tier: tier).first { problem = why; return }
+            let failedBefore = store.failedWrites
             p.name = name; p.aliases = aliasList; p.tier = tier
             PeopleStore(store: store).update(p)
             if let why = store.setTags(p.shortID, primary: tagSet.primary, others: tagSet.others, tier: tier) { problem = why; return }
@@ -206,6 +207,8 @@ struct PersonForm: View {
                 default: break
                 }
             }
+            // A write that failed on the way (in Activity): the form stays open with its fields, so Save can be tried again.
+            if store.failedWrites != failedBefore { problem = "Couldn't save everything (see Activity). Your fields are still here; try again."; return }
             CircleLinker.run(store: store, person: result)
             close(result)
         } else {

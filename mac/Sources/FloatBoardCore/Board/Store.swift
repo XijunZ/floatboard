@@ -458,6 +458,7 @@ public final class Store: ObservableObject {
         } catch {
             // Rolled back: keep warnings and errors, drop "done" info rows that describe writes that no longer exist.
             txActivity.removeAll { $0.2 == .info }
+            failedWrites += 1
             txOpen = false; flushTxActivity(); reload()
             throw error
         }
@@ -668,9 +669,14 @@ public final class Store: ObservableObject {
         try insertEvent(id, kind, from: from, to: to, actor: .user, at: at)
     }
 
+    /// How many writes have failed since launch (each is in Activity). A form compares it before and after its save, and
+    /// stays open with its fields when it went up, instead of closing on a save that didn't happen.
+    public private(set) var failedWrites = 0
+
     func perform(_ work: () throws -> Void) {
         txOpen = true
         do { try db.transaction(work); txOpen = false; flushTxActivity(); lastError = nil } catch {
+            failedWrites += 1
             txOpen = false; flushTxActivity()
             lastError = "\(error)"
             activity("store", .error, "Database write failed", detail: "\(error)")
