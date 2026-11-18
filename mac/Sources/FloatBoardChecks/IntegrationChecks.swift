@@ -268,3 +268,30 @@ import SQLite3
               "oversized_\(big)_held_back_the_rest_synced")
     }
 }
+
+// MARK: Every size-limited setting (round 4b)
+
+/// The settings the engine refuses when too long (the whole push would fail) are held back alone; settings the engine trims
+/// itself (my_rules, chat_rules, learned) are sent whole. The engine's limits are pinned by engine/test/api/settings-size.test.ts.
+@MainActor func integrationSettingsSizeChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-int-settings-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let limited = ConnectorSync.sizeLimitedSettings
+    check(Set(limited.keys) == Set(RulebookSync.keys.values) && limited.values.allSatisfy { $0 == 20_000 }, "size_limited_settings_are_the_rulebooks_at_20000")
+    guard let s = integrationStore(root, "settings-size.sqlite") else { return }
+    // At the limit by the engine's count (UTF-16 units: one emoji is two), it is sent; one unit over, it is held back.
+    let atLimit = String(repeating: "😀", count: 10_000), over = atLimit + "x"
+    let long = String(repeating: "r", count: 50_000)
+    let values: [String: Any] = ["rulebook_email": atLimit, "rulebook_chat": over, "my_rules": long, "chat_rules": long, "learned": long]
+    let json = String(decoding: (try? JSONSerialization.data(withJSONObject: values)) ?? Data(), as: UTF8.self) // try?-ok: empty fails the check
+    s.performForTest { try s.db.run("INSERT OR REPLACE INTO connectors(id,name,settings_json,settings_version,engine_settings_version) VALUES('sz','sz',?,3,1)", [json]) }
+    s.reload()
+    let eng = goodEngine()
+    let r = await ConnectorSync.run(connector: "sz", store: s, client: eng.client(), now: decisionsNow)
+    let sent = eng.bodies("/v2/settings").first?["values"] as? [String: Any]
+    let warnings = s.recentActivity(limit: 20).filter { $0.level == .warning && $0.message.contains("too long to send") }
+    check(r.error == nil && (sent?["rulebook_email"] as? String)?.utf16.count == 20_000 && sent?["rulebook_chat"] == nil
+          && ["my_rules", "chat_rules", "learned"].allSatisfy { (sent?[$0] as? String)?.count == 50_000 } && warnings.count == 1,
+          "only_settings_the_engine_refuses_are_held_back_trimmed_ones_sent_whole")
+}

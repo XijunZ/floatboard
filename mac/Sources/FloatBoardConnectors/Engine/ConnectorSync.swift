@@ -32,8 +32,11 @@ public struct PhoneTickResult: Equatable {
 /// and every failure leaves one Activity row (component `connector:<id>`).
 public enum ConnectorSync {
     static let batchSize = 50
-    /// The engine's limit for a rulebook copy (characters as JavaScript counts them).
-    static let rulebookLimit = 20_000
+    /// Settings the engine REFUSES when longer than this (its settings route, `toColumns` in engine/src/routes/v2.ts), counted
+    /// as JavaScript counts (UTF-16 units). One of them over its limit would fail the whole push, so it is held back alone.
+    /// Settings the engine trims itself (my_rules, chat_rules, learned, group notes, groups) are not here: they are sent whole.
+    /// engine/test/api/settings-size.test.ts reads this list and checks it against the engine.
+    public static let sizeLimitedSettings: [String: Int] = ["rulebook_email": 20_000, "rulebook_chat": 20_000, "rulebook_decisions": 20_000]
     /// Settings only the app uses: never pushed (the engine rejects keys outside its schema).
     static let appOnlySettings: Set<String> = ["default_group", "auto_add"]
     static let authMessage = "The engine didn't accept this connection's key."
@@ -443,8 +446,9 @@ public enum ConnectorSync {
         for (k, v) in try parse(json, id) where !appOnlySettings.contains(k) {
             // A rulebook longer than the engine accepts would make it refuse the whole push: it is held back (the engine keeps
             // its last copy) and every other setting still goes.
-            if k.hasPrefix("rulebook_"), let t = v as? String, t.utf16.count > rulebookLimit {
-                store.activity("connector:\(id)", .warning, "Your \(k.dropFirst("rulebook_".count)) rulebook is too long to send (over 20,000 characters)",
+            if let limit = sizeLimitedSettings[k], let t = v as? String, t.utf16.count > limit {
+                let name = k.hasPrefix("rulebook_") ? "\(k.dropFirst("rulebook_".count)) rulebook" : k.replacingOccurrences(of: "_", with: " ")
+                store.activity("connector:\(id)", .warning, "Your \(name) is too long to send (over \(limit.formatted()) characters)",
                                detail: "Shorten it in Settings › Rules & learning; the engine keeps its previous copy until then.")
                 continue
             }
