@@ -70,9 +70,11 @@
       }
     } catch (e) {
       if (e instanceof SignedOut) throw e;
-      if (e && e.status === 400 && decQueue.actions.length) {   // a malformed action would block the queue: drop that one
-        decQueue.actions = queueAfterRefusal(decQueue.actions, e.id);
-        saveDecQueue();
+      if (e && e.status === 400 && decQueue.actions.length) {
+        // A malformed action would block the queue: the one the engine names is dropped. None named: nothing is guessed;
+        // the queue stays and the screen says so.
+        if (typeof e.id === "string") { decQueue.actions = queueWithout(decQueue.actions, [e.id]); saveDecQueue(); }
+        else toast("A change on this phone couldn't be sent to your Mac. It stays here and is tried again.");
       }
       // 409 (another account now) and offline: held for later.
     } finally { decSending = false; }
