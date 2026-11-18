@@ -23,7 +23,8 @@ struct CircleTab: View {
         let c = CircleStore(store: store)
         // Worked out once per change (and once a minute for the clocks), not on every keystroke in the search box.
         let snap = CircleSnapshot.current(store: store)
-        let clocks = snap.clocks, details = snap.details, handles = snap.handles, due = snap.due, all = snap.people
+        let clocks = snap.clocks, details = snap.details, handles = snap.handles, all = snap.people
+        let due = tiers.visible(snap.due)   // the chips: hidden tiers are neither listed nor counted here (reminders still go out)
         let shown = filtered(all, clocks: clocks, details: details, handles: handles, due: Set(due.map(\.person.id)))
         VStack(alignment: .leading, spacing: 8) {
             toolbar(due: due, count: all.count)
