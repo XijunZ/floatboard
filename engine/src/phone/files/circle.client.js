@@ -22,8 +22,13 @@
   }
 
   // Sign-out or another account: everything Circle kept on this phone goes.
+  // The session and account a screen or sheet was opened under (taps made under another one are refused).
+  function circleSnap() { return { epoch: circleEpoch, account: circleAccount() }; }
+
   function circleDrop() {
     circleEpoch++;
+    // A Circle sheet left open (a person, a draft, a link's confirm) belongs to the account that is going: closed.
+    if (document.querySelector(".sheet[data-circle]")) closeSheet();
     circleCopy = null;
     circleQueue = { account: null, actions: [] };
     store(CIRCLE_KEY, null);
@@ -61,7 +66,9 @@
     circleRender();
   }
 
-  function circleAct(person, action) {
+  // `asked`: when the tap's screen or sheet was opened. A tap from before a sign-out or account switch marks nobody.
+  function circleAct(person, action, asked) {
+    if (!circleAccept(asked, circleSnap())) { closeSheet(); return; }
     var a = circleAction(person, action, newId(), new Date().toISOString());
     circleQueue.account = circleAccount();
     circleQueue.actions.push(a);
@@ -121,12 +128,13 @@
     box.hidden = !v || !v.due.length;
     if (box.hidden) return;
     box.appendChild(el("h2", null, "Due to contact"));
+    var asked = circleSnap();
     v.due.forEach(function (p) {
       var row = el("div", "card person pp");
       row.appendChild(el("div", "t", p.name));
       var btn = el("button", "btn small", "I contacted them");
       btn.type = "button";
-      btn.addEventListener("click", function () { circleAct(p.id, "contacted"); });
+      btn.addEventListener("click", function () { circleAct(p.id, "contacted", asked); });
       row.appendChild(btn);
       box.appendChild(row);
     });
@@ -134,7 +142,9 @@
   }
 
   function personSheet(p) {
+    var asked = circleSnap();
     openSheet(function (sheet) {
+      sheet.dataset.circle = "1";
       sheet.appendChild(el("h3", null, p.name));
       sheet.appendChild(el("p", "sub", [({ family: "Family", close: "Close friend", network: "Network" })[p.tier], p.company].concat(p.tags || []).filter(Boolean).join(" · ")));
       var now = Date.now();
@@ -143,7 +153,7 @@
       if (p.snoozed_until) sheet.appendChild(el("p", "sub", "Snoozed until " + circleAgo(p.snoozed_until, now).replace(" ago", "")));
       [["contacted", "I contacted them"], ["talked", "We talked"], ["snooze", "Snooze"]].forEach(function (x) {
         var b = el("button", "btn act", x[1]);
-        b.addEventListener("click", function () { closeSheet(); circleAct(p.id, x[0]); });
+        b.addEventListener("click", function () { closeSheet(); circleAct(p.id, x[0], asked); });
         sheet.appendChild(b);
       });
       if (p.wa || p.email) {
@@ -172,7 +182,9 @@
   }
 
   function draftSheet(p) {
+    var asked = circleSnap();
     openSheet(function (sheet) {
+      sheet.dataset.circle = "1";
       sheet.appendChild(el("h3", null, "Draft to " + p.name));
       var status = el("p", "sub", "Writing a draft from your notes…");
       var text = el("textarea", "draft");
@@ -181,6 +193,7 @@
       var open = el("button", "btn", p.wa ? "Open in WhatsApp" : "Open in Gmail");
       open.hidden = true;
       open.addEventListener("click", function () {
+        if (!circleAccept(asked, circleSnap())) { closeSheet(); return; }
         var link = draftLink(p, text.value);
         if (link) window.open(link, "_blank", "noopener");
         closeSheet();
@@ -190,6 +203,7 @@
       sheet.appendChild(open);
       sheet.appendChild(el("p", "hint", "Written by Claude; never sent by itself. Check it before you send."));
       api("/app/api/circle/draft", { method: "POST", body: { person: p.id } }).then(function (r) {
+        if (!circleAccept(asked, circleSnap())) return;   // signed out or another account meanwhile: the draft is dropped
         text.value = r.draft || "";
         text.hidden = false; open.hidden = false;
         status.textContent = "Edit it, then open it in the app to send.";
@@ -205,10 +219,12 @@
     history.replaceState(null, "", location.pathname + location.search);
     var c = circleConfirm(h, circleView(circleCopy, [], Date.now()).people, circleAccount());
     if (!c) return;
+    var asked = circleSnap();
     openSheet(function (sheet) {
+      sheet.dataset.circle = "1";
       sheet.appendChild(el("h3", null, c.text));
       var yes = el("button", "btn", c.text.replace(/\?$/, ""));
-      yes.addEventListener("click", function () { closeSheet(); circleAct(c.person, c.action); });
+      yes.addEventListener("click", function () { closeSheet(); circleAct(c.person, c.action, asked); });
       sheet.appendChild(yes);
     });
   }
