@@ -146,7 +146,16 @@ public struct BulkResult {
                     let id = try store.db.run("INSERT INTO people(name, aliases, tier, source, added, updated) VALUES(?,?,?,?,?,?)",
                                               [name, "[]", tier.rawValue, ItemSource.typed.rawValue, now, now])
                     for h in handles {
-                        try store.db.run("INSERT INTO person_handles(person_id, kind, value, added) VALUES(?,?,?,?)", [id, h.kind.rawValue, h.value, now])
+                        // A handle a deleted person still holds moves to the new person (as addHandle does); a live owner was
+                        // skipped above (In Circle).
+                        try store.db.run("""
+                            INSERT INTO person_handles(person_id, kind, value, added) VALUES(?,?,?,?)
+                            ON CONFLICT(kind, value) DO UPDATE SET person_id=excluded.person_id, added=excluded.added
+                            WHERE person_id IN (SELECT id FROM people WHERE deleted=1)
+                            """, [id, h.kind.rawValue, h.value, now])
+                        guard try store.db.query("SELECT person_id FROM person_handles WHERE kind=? AND value=?", [h.kind.rawValue, h.value]) { DB.int($0, 0) }.first == id else {
+                            throw DBError.sql("a handle belongs to someone in Circle")
+                        }
                     }
                     try c.writeDetailsRow(id, CircleDetails())
                     if let tag { try store.setTagsRow(ShortID(kind: .person, number: id), primary: tag, others: [], now: now) }

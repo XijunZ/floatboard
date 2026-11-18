@@ -118,4 +118,14 @@ import SQLite3
     check(r300.added == 300 && took300 < 2.0, "bulk_adds_300_people_quickly")
     check(reloads == 1, "bulk_add_rereads_the_board_once (\(reloads))")
     if took300 >= 2.0 { print("bulk 300 adds took \(String(format: "%.2f", took300)) s") }
+    // Round 13 (C4): a number that belonged to a deleted person goes to the new one (no refusal).
+    guard let gone = c.add(name: "Gone Example", tier: .network, tags: ItemTags(primary: nil, others: []), details: CircleDetails(),
+                           handles: [Handle(kind: .phone, value: "447700900777")], now: now).person else { check(false, "c4 setup"); return }
+    PeopleStore(store: s).delete(gone.id)
+    let back = BulkRow(key: "phone:447700900777", name: "Back Example", phone: "447700900777", handles: [Handle(kind: .phone, value: "447700900777")], messages: 3, last: now)
+    check(BulkAdd.mark([back], store: s).first?.inCircle == false, "bulk_deleted_persons_number_is_addable")
+    let rb = BulkAdd.add([back], tier: .network, tag: nil, store: s, now: now)
+    let backP = PeopleStore(store: s).people().first { $0.name == "Back Example" }
+    check(rb.added == 1 && rb.failed.isEmpty && backP.map { c.handles($0.id) == [Handle(kind: .phone, value: "447700900777")] } == true,
+          "bulk_takes_over_a_deleted_persons_number")
 }
