@@ -140,21 +140,20 @@
     var syncing = false;
     var lastSel = { text: "", key: null };
     var undoTimer = 0;
-    // Which account and session the cache and queue belong to: a sign-out (drop) or another account starts a new generation,
-    // and an answer to a request sent in an older generation is thrown away (never cached under the new account).
-    var generation = 0;
+    // Which account the cache and queue belong to. An answer to a request sent before a sign-out or an account change is
+    // thrown away (never cached under the new account): the app's shared session check (h.stamp / h.sameSession).
     var heldBy = null;
 
     function restore() {
       var acct = h.account();
       var c = h.load(CACHE_KEY), q = h.load(QUEUE_KEY);
-      if (acct !== heldBy) { generation += 1; heldBy = acct; syncing = false; }
+      if (acct !== heldBy) { heldBy = acct; syncing = false; }
       cache = c && c.account === acct && Array.isArray(c.jots) ? c.jots : [];
       queue = q && q.account === acct && Array.isArray(q.actions) ? q.actions : [];
     }
     function saveQueue() { if (heldBy) h.store(QUEUE_KEY, queue.length ? { account: heldBy, actions: queue } : null); }
 
-    function drop() { generation += 1; heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null); }
+    function drop() { heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null); }
 
     function queueAction(a) {
       a.id = a.id || h.newId();
@@ -169,8 +168,8 @@
     async function pull() {
       if (syncing || !h.account() || !(h.modules() || {}).jots) return;
       syncing = true;
-      var gen = generation, acct = h.account();
-      var current = function () { return gen === generation && h.account() === acct; };
+      var stamp = h.stamp(), acct = stamp.account;
+      var current = function () { return h.sameSession(stamp); };
       try {
         var r;
         if (queue.length) {
@@ -192,7 +191,7 @@
         if (e instanceof h.SignedOut) throw e;
         // Offline or refused: the queue stays and goes with the next sync; the list shows the last copy.
       } finally {
-        if (gen === generation) { syncing = false; render(); }
+        if (current()) { syncing = false; render(); }
       }
     }
 

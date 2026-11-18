@@ -289,3 +289,25 @@ describe("foundation round 3: a reminder the Mac could not show is handed back t
     expect((await post(u.key, "/v2/reminders/release", "bad id")).status).toBe(400);
   });
 });
+
+describe("integration: one session check for every area's phone sync", () => {
+  it("an_answer_counts_only_in_the_session_and_account_it_was_asked_in", () => {
+    const start = { gen: 3, account: "acc-a" };
+    expect(L.sessionAccepts(start, { gen: 3, account: "acc-a" }, "acc-a")).toBe(true);
+    expect(L.sessionAccepts(start, { gen: 3, account: "acc-a" }, undefined)).toBe(true);
+    expect(L.sessionAccepts(start, { gen: 4, account: "acc-a" }, "acc-a")).toBe(false);   // signed out (and in again) meanwhile
+    expect(L.sessionAccepts(start, { gen: 3, account: null }, "acc-a")).toBe(false);      // signed out meanwhile
+    expect(L.sessionAccepts(start, { gen: 3, account: "acc-b" }, "acc-a")).toBe(false);   // another account now
+    expect(L.sessionAccepts(start, { gen: 3, account: "acc-a" }, "acc-b")).toBe(false);   // the answer is another account's
+    expect(L.sessionAccepts({ gen: 3, account: null }, { gen: 3, account: null }, null)).toBe(false);
+  });
+
+  it("jots_circle_and_decisions_all_use_it", async () => {
+    const { APP_JS } = await import("../../src/phone/client");
+    expect(APP_JS).toMatch(/function dropAccountData\(\) \{\s*sessionGen \+= 1;/);
+    expect(APP_JS).toContain("stamp: sessionStamp, sameSession: sameSession");          // Jots (through its helpers)
+    expect(APP_JS).toContain("return sameSession(asked, respAccount);");                // Circle
+    expect(APP_JS.match(/var stamp = sessionStamp\(\)/g)?.length).toBeGreaterThanOrEqual(2);   // Decisions: send and fetch
+    expect(APP_JS).not.toMatch(/circleEpoch|var generation/);
+  });
+});

@@ -55,9 +55,10 @@
     var body = decisionSendBody(decQueue, confirmedAccount());
     if (!body || decSending) return;
     decSending = true;
+    var stamp = sessionStamp();   // the shared session check (app.client.js)
     try {
       var r = await api("/app/api/decisions/action", { method: "POST", body: body });
-      if (r.account === body.account) {
+      if (sameSession(stamp, r.account) && r.account === body.account) {
         decQueue.actions = decisionQueueAfter(decQueue.actions, r.accepted || []);
         saveDecQueue();
       }
@@ -84,7 +85,9 @@
   async function syncDecisions() {
     try {
       await sendDecisionQueue();
+      var stamp = sessionStamp();
       var b = await api("/app/api/decisions");
+      if (!sameSession(stamp, typeof b.account === "string" ? b.account : null)) { renderDecisions(); return; }   // signed out or switched meanwhile
       var acc = typeof b.account === "string" ? b.account : confirmedAccount();
       if (!acc || (confirmedAccount() && acc !== confirmedAccount())) { renderDecisions(); return; }   // not this session's account
       decisions = { account: acc, decisions: Array.isArray(b.decisions) ? b.decisions : [], updated: b.updated || null };

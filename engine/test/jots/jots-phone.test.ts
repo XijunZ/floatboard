@@ -76,14 +76,16 @@ describe("jots on the phone: account changes", () => {
   it("a_late_answer_is_never_kept_for_another_account", async () => {
     // Codex round 2, finding 4: a request still out when the account changes (or the phone is signed out) is discarded.
     const stored: Record<string, any> = {};
-    let account = "A";
+    let account = "A", gen = 0;
     let answer: (v: any) => void = () => {};
     const h = { $: () => null, el: () => null, toast: () => {}, newId: () => "id-00000001", offline: () => false, SignedOut: class extends Error {},
       store: (k: string, v: any) => { stored[k] = v; }, load: (k: string) => stored[k] ?? null, account: () => account, modules: () => ({ jots: true }),
+      stamp: () => ({ gen, account }), sameSession: (s: any) => !!s.account && s.gen === gen && s.account === account,
       zone: () => "Europe/London", api: () => new Promise((r) => { answer = r; }) };
     const screen = L.JotsScreen(h);
     screen.restore();
     const pending = screen.sync();
+    gen += 1;   // the app's dropAccountData: the session generation goes up, then each area drops its data
     screen.drop();
     account = "B";
     screen.restore();
