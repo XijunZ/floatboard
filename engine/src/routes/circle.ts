@@ -7,6 +7,7 @@ import { type Env, json, nowISO } from "../env";
 import { readCappedJSON, readJSON } from "../lib/http";
 import { route } from "../lib/router";
 import { circleFetch } from "../circle/net";
+import { publicHttpUrl } from "../circle/safe-url";
 import { circleOn, haikuFor, seal, unseal } from "../circle/common";
 import { draftInput, draftMessage, fillContact, headerBits } from "../circle/ai";
 import type { Who } from "../circle/gmail";
@@ -47,7 +48,7 @@ function watchPerson(x: any): WatchPerson | null {
     born = s(x.born ?? "", 7), feed = s(x.feed_url ?? "", 2000);
   if (!name || firm === null || company === null || officer === null || born === null || feed === null) return null;
   if (born && !/^\d{4}-\d{2}$/.test(born)) return null;
-  if (feed && !/^https?:\/\//.test(feed)) return null;
+  if (feed && !publicHttpUrl(feed)) return null;   // public web addresses only (no loopback, private or link-local hosts)
   return { person: x.person, name, firm, company, officer_id: officer, born, feed_url: feed, news: x.news !== false, ch: x.ch !== false };
 }
 

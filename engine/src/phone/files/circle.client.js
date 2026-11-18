@@ -36,7 +36,7 @@
   async function circleSync() {
     if (!board || !board.modules || !board.modules.circle || circleSyncing) return;
     if (circleQueue.account !== circleAccount()) circleLoad();
-    if (circleHash(location.hash)) { circleFromHash(); return; }   // queues the tap, then syncs
+    if (circleHash(location.hash)) circleFromHash();   // asks first; acts only on a tap
     circleSyncing = true;
     var asked = { epoch: circleEpoch, account: circleAccount() };
     var still = function (respAccount) { return circleAccept(asked, { epoch: circleEpoch, account: circleAccount() }, respAccount); };
@@ -197,13 +197,20 @@
     });
   }
 
-  // A notification button the service worker could not send itself arrives in the address (#circle=contacted:P-12).
+  // A notification button the service worker could not send itself arrives in the address (#circle=contacted:P-12). A link
+  // never acts by itself (anyone can make one): it opens a confirm sheet, and only the tap marks the person.
   function circleFromHash() {
     var h = circleHash(location.hash);
     if (!h) return;
     history.replaceState(null, "", location.pathname + location.search);
-    circleLoad();
-    circleAct(h.person, h.action);
+    var c = circleConfirm(h, circleView(circleCopy, [], Date.now()).people, circleAccount());
+    if (!c) return;
+    openSheet(function (sheet) {
+      sheet.appendChild(el("h3", null, c.text));
+      var yes = el("button", "btn", c.text.replace(/\?$/, ""));
+      yes.addEventListener("click", function () { closeSheet(); circleAct(c.person, c.action); });
+      sheet.appendChild(yes);
+    });
   }
 
   (function circleWire() {

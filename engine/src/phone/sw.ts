@@ -71,7 +71,7 @@ self.addEventListener("push", (event) => {
     badge: "/app/badge-96.png",
     tag: tagFor(title + "\n" + url),
     renotify: true,
-    data: { url, circle },
+    data: { url, circle, account: typeof data.account === "string" && /^[0-9a-f]{32}$/.test(data.account) ? data.account : "" },
     ...(circle ? { actions: [{ action: "contacted", title: "Contacted" }, { action: "snooze", title: "Snooze" }] } : {}),
   }));
 });
@@ -113,11 +113,15 @@ self.addEventListener("pushsubscriptionchange", (event) => {
 function circleButton(event) {
   const person = event.notification.data && event.notification.data.circle;
   const action = event.action;
+  const account = (event.notification.data && event.notification.data.account) || "";
   const id = "nb-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
-  const body = JSON.stringify({ actions: [{ id, person, action, made_at: new Date().toISOString() }] });
+  const body = JSON.stringify({ account, actions: [{ id, person, action, made_at: new Date().toISOString() }] });
   return fetch("/app/api/circle/action", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body })
-    .then((r) => { if (!r.ok) throw new Error("not sent"); })
-    .catch(() => self.clients.openWindow("/app/#circle=" + action + ":" + person));
+    .then((r) => {
+      if (r.status === 409) return self.clients.openWindow("/app/");   // another account's alert: nothing is marked
+      if (!r.ok) throw new Error("not sent");
+    })
+    .catch(() => self.clients.openWindow("/app/#circle=" + action + ":" + person + ":" + account));
 }
 
 self.addEventListener("notificationclick", (event) => {

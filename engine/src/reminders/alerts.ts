@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import type { AlertItem } from "../triage/run";
 import { pushToUser } from "../phone/webpush";
+import { accountMarker } from "../phone/auth";
 
 let ntfyFetch: typeof fetch = (...a) => fetch(...a);
 /** Tests replace the ntfy server. */
@@ -44,12 +45,18 @@ export function circleOf(id: string): string | undefined {
   return /^rb-circle_due-(P-\d{1,12})-\d{4}-\d{2}-\d{2}$/.exec(id)?.[1];
 }
 
+/** For a Circle due reminder: its person and the account it belongs to (the buttons send both; another account is refused). */
+export async function circlePushExtras(userId: string, id: string): Promise<{ circle?: string; account?: string }> {
+  const circle = circleOf(id);
+  return circle ? { circle, account: await accountMarker(userId) } : {};
+}
+
 /** Add new channels (Web Push, ...) here; each is tried for every alert. */
 export const CHANNELS: AlertChannel[] = [
   {
     name: "webpush",
-    send: (env, userId, item) => pushToUser(env, userId, { title: item.title, body: alertBody(item), url: item.link || "/app/",
-      ...(circleOf(item.id) ? { circle: circleOf(item.id) } : {}) }),
+    send: async (env, userId, item) => pushToUser(env, userId, { title: item.title, body: alertBody(item), url: item.link || "/app/",
+      ...(await circlePushExtras(userId, item.id)) }),
   },
   {
     name: "ntfy",

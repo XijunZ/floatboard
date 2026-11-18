@@ -190,7 +190,21 @@ import Foundation
     /// Records what the readers saw (who, when, channel, direction). Each row keeps the day's latest time and a name.
     public func record(_ inputs: [ExchangeInput], now: Date = Date()) {
         guard !inputs.isEmpty else { return }
-        store.perform {
+        store.perform { try recordRows(inputs, now: now) }
+    }
+
+    /// One page of the engine's metadata and its cursor, written together: when the write fails nothing is kept (the old
+    /// cursor stays, so the page comes again) and the error is thrown.
+    public func importExchangePage(_ inputs: [ExchangeInput], cursorKey: String, cursor: String, now: Date = Date()) throws {
+        try store.performThrowing {
+            try recordRows(inputs, now: now)
+            try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [cursorKey, cursor])
+        }
+    }
+
+    /// The body of `record`, for callers inside a transaction.
+    func recordRows(_ inputs: [ExchangeInput], now: Date) throws {
+        do {
             for e in inputs {
                 guard let v = Handles.normalize(e.handle.kind, e.handle.value) else { continue }
                 var n = e; n.handle = Handle(kind: e.handle.kind, value: v)
