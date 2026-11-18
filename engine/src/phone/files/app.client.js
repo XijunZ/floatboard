@@ -1197,6 +1197,7 @@
 
   var jots = JotsScreen({
     $: $, el: el, api: api, openSheet: openSheet, closeSheet: closeSheet, toast: toast, store: store, load: load, newId: newId,
+    storeDurable: storeDurable,   // the queue is kept only when the phone really kept it
     offline: offline, SignedOut: SignedOut,
     account: sessionAccount,
     stamp: sessionStamp, sameSession: sameSession,   // the shared session check (late answers are dropped)
