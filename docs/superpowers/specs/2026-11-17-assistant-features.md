@@ -111,9 +111,9 @@ from ordinary jots (the owner makes tasks by right-click; Fathom's own suggestio
 **Job:** know who matters, when you last really talked, who is due, and what changed for them.
 
 **Tiers** (one per person) and **default intervals**, changeable per person:
-**Family 1 month · Close friend 2 weeks · Network 3 months.**
-**Tags** (any number): **Investor** (on Family, Close friend or Network; sets the interval to at most
-3 months) and **Prospect** (on Close friend or Network, never Family; someone being tested as a
+**Family 1 month · Close friend 2 weeks · Friend 6 weeks · Network 3 months.**
+**Tags** (any number): **Investor** (on any tier; sets the interval to at most
+3 months) and **Prospect** (on Close friend, Friend or Network, never Family; someone being tested as a
 closer relationship). Plus the shared tags.
 
 **Every channel is checked** for "last talked":

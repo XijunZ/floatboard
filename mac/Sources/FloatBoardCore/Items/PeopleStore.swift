@@ -1,9 +1,12 @@
 import Foundation
 
-/// A person's tier in Circle (features §3): one each.
+/// A person's tier in Circle (features §3): one each, closest first. Stored as the raw value in `people.tier` (plain text,
+/// no CHECK); a value this version doesn't know reads as Network, so an older Mac shows a Friend as Network and keeps it.
 public enum PersonTier: String, CaseIterable {
-    case family, close, network
-    public var title: String { switch self { case .family: "Family"; case .close: "Close friend"; case .network: "Network" } }
+    case family, close, friend, network
+    public var title: String {
+        switch self { case .family: "Family"; case .close: "Close friend"; case .friend: "Friend"; case .network: "Network" }
+    }
 }
 
 /// One person (`P-n`). `aliases` are other names the person goes by, used to match names in text by code.

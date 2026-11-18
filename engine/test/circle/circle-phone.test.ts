@@ -135,3 +135,13 @@ describe("phone Circle", () => {
     expect(SW_JS).toContain("/app/api/circle/action");
   });
 });
+
+// Round 16: a fourth tier, Friend. The phone names it; a tier it doesn't know (an older script, or a newer Mac) shows no
+// label and never breaks the screen.
+describe("circle on the phone: tiers", () => {
+  it("friend_is_named_and_an_unknown_tier_is_blank", () => {
+    expect(CIRCLE_JS).toContain('friend: "Friend"');
+    expect((CIRCLE_JS.match(/CIRCLE_TIERS\[p\.tier\] \|\| ""/g) || []).length).toBe(2);
+  });
+});
+
