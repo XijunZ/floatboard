@@ -188,6 +188,8 @@ public struct PhoneDecisionAction: Codable, Equatable {
         store.perform {
             try store.db.run("DELETE FROM meta WHERE key=?", [DecisionPhone.hashKey(id)])
             try JotsSyncCore(store: store).forget(connector: id)
+            // Circle's people-to-follow list and phone copy (CircleSync's keys).
+            try store.db.run("DELETE FROM meta WHERE key IN (?,?)", ["circle_watch_hash:\(id)", "circle_copy_hash:\(id)"])
         }
     }
 }
