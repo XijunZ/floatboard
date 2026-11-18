@@ -10,6 +10,10 @@ public struct CircleTierFilter: Equatable {
     public init(shown: Set<PersonTier> = Set(PersonTier.allCases)) { self.shown = shown.isEmpty ? Set(PersonTier.allCases) : shown }
 
     public func shows(_ t: PersonTier) -> Bool { shown.contains(t) }
+
+    /// The "Due this week" entries the list shows (and counts). A view filter only: reminders and notifications still go
+    /// out for every tier.
+    public func visible(_ due: [DueEntry]) -> [DueEntry] { due.filter { shows($0.person.tier) } }
     public var showsAll: Bool { shown.count == PersonTier.allCases.count }
 
     public mutating func toggle(_ t: PersonTier) {

@@ -334,4 +334,10 @@ let circleV14Drops = ["circle_people", "person_handles", "circle_exchanges", "ci
     check(only == [.friend] && f.shown == Set(PersonTier.allCases), "option_click_shows_only_that_tier_and_again_shows_all")
     f = CircleTierFilter.load(store: s); f.toggle(.family); f.toggle(.close); f.toggle(.friend)
     check(f.shown.isEmpty == false, "the_last_shown_tier_cannot_be_hidden")
+    // Round 17: the "Due this week" panel and count follow the chips; reminders don't (a view filter only).
+    var view = CircleTierFilter(); view.toggle(.friend)
+    let due = CircleDue.entries(store: s, now: Date().addingTimeInterval(400 * 86400))
+    let shownDue = view.visible(due)
+    check(due.contains { $0.person.tier == .friend } && !shownDue.contains { $0.person.tier == .friend }
+          && shownDue.count == due.filter { $0.person.tier != .friend }.count, "due_this_week_follows_the_tier_chips")
 }

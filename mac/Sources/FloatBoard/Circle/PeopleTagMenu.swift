@@ -76,6 +76,12 @@ struct TierChip: View {
 struct TierToggles: View {
     @Binding var filter: CircleTierFilter
 
+    static func help(_ t: PersonTier, on: Bool) -> String {
+        let verb: String = on ? "Hide" : "Show"
+        return "\(verb) \(t.title) in this list and Due this week (Option-click: only \(t.title)). "
+            + "Only changes what you see here: reminders and notifications still come for every tier."
+    }
+
     var body: some View {
         HStack(spacing: 4) {
             ForEach(PersonTier.allCases, id: \.self) { t in
@@ -90,7 +96,7 @@ struct TierToggles: View {
                     .onTapGesture {
                         if NSEvent.modifierFlags.contains(.option) { filter.only(t) } else { filter.toggle(t) }
                     }
-                    .help(on ? "Hide \(t.title) (Option-click: only \(t.title))" : "Show \(t.title) (Option-click: only \(t.title))")
+                    .help(Self.help(t, on: on))
                     .accessibilityAddTraits(.isButton)
                     .accessibilityValue(on ? "shown" : "hidden")
             }
