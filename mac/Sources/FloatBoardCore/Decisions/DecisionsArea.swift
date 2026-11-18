@@ -17,11 +17,11 @@ import Foundation
         DecisionReviews.registerSections()
         // A Make decision queued by an older phone script (a jot action, before the phone had its own form) never opens a
         // form on the Mac and never waits: it is kept as a Maybe draft linked to the jot, to finish on the Decisions tab.
-        JotActions.makeDecision = { store, text, source in
+        JotActions.makeDecision = { store, text, source, marker in
             let line = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
             guard !line.isEmpty else { return true }
             let d = DecisionStore(store: store).record(DecisionDraft(text: String(line.prefix(300)), quote: String(text.prefix(4000)), status: .maybe,
-                                                                     source: .phone, sourceItem: source))
+                                                                     source: .phone, sourceItem: source), now: Date(), alsoInTransaction: marker)
             guard let d else { return false }   // not written (the error is in Activity): not acknowledged, it comes again
             store.activity("decisions", .info, "Kept a Make decision from the phone as a Maybe draft", detail: d.shortID.text)
             return true

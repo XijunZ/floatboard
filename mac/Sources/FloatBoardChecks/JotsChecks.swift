@@ -453,7 +453,7 @@ private func dueMentionChecks() {
     check(engine.pushed.isEmpty && engine.nudges.count == 1, "nothing_pushed_when_nothing_changed")
     // Decisions registers its hook: the waiting decision is taken.
     var decided: [(String, ShortID)] = []
-    JotActions.makeDecision = { _, text, src in decided.append((text, src)); return true }
+    JotActions.makeDecision = { _, text, src, _ in decided.append((text, src)); return true }
     defer { JotActions.makeDecision = nil }
     await JotsSync.tick(connector: "jt", store: store, client: client)
     check(decided.first?.0 == "We go with plan B" && decided.first?.1 == mine.shortID && engine.waiting.isEmpty, "make_decision_handed_to_decisions")
@@ -626,4 +626,22 @@ extension ISO8601DateFormatter {
     do { _ = try budget.request(kind: .circleDue, itemID: ShortID(kind: .person, number: 1), text: "Message P-1", now: Date()) } catch { threw = true }
     store.performForTest("DROP TRIGGER fail_rem")
     check(threw, "reminder_budget_write_failure_is_an_error_not_deferred")
+}
+
+/// Round 13 (B3): a phone action applied once stays applied once: when the acknowledgement is lost and the engine sends it
+/// again, no second task or decision is made (the marker is written with the task or decision).
+@MainActor func applyOnceChecks() {
+    let root = checkFolder("fb-b3")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = checkStore(root, "b3.sqlite", modules: [.jots, .decisions]) else { return }
+    DecisionsArea.registerCore()
+    let core = JotsSyncCore(store: store), t0 = Date().addingTimeInterval(-600)
+    let task = EngineJot(key: "action:once-1", macID: nil, text: "Book the venue", kind: "action:make_task", source: "phone", added: t0, updated: t0, rev: 1)
+    let first = core.apply([task]), again = core.apply([task])
+    check(first.count == 1 && again.count == 1 && store.cards.filter { $0.title == "Book the venue" }.count == 1, "phone_make_task_applied_once_when_sent_again")
+    guard let j = JotStore(store: store).create(text: "We go with the blue plan", now: t0) else { check(false, "b3 jot"); return }
+    let dec = EngineJot(key: "action:once-2", macID: nil, text: "We go with the blue plan", kind: "action:make_decision", source: "phone",
+                        added: t0, updated: t0, rev: 1, ref: j.shortID.text)
+    _ = core.apply([dec]); let acks = core.apply([dec])
+    check(acks.count == 1 && DecisionStore(store: store).all().filter { $0.text == "We go with the blue plan" }.count == 1, "legacy_make_decision_applied_once_when_sent_again")
 }

@@ -15,5 +15,6 @@ import Foundation
 /// A hand-off the Decisions area fills in: the phone's "Make decision" on a jot's text (§10) reaches the Mac as an action,
 /// and the Mac passes it here. Nil until Decisions registers it; the action then waits on the engine.
 @MainActor public enum JotActions {
-    public static var makeDecision: ((Store, _ text: String, _ source: ShortID) -> Bool)?
+    /// The legacy phone Make decision. `marker` must run inside the transaction that records the decision (apply-once).
+    public static var makeDecision: ((Store, _ text: String, _ source: ShortID, _ marker: @escaping (ShortID) throws -> Void) -> Bool)?
 }
