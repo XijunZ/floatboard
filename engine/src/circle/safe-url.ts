@@ -34,8 +34,13 @@ function ipv6Private(h: string): boolean {
   }
   // Anything else under ::/80 (the old IPv4-compatible form, e.g. ::127.0.0.1 written as ::7f00:1) is not a public address.
   if (s.startsWith("::")) return true;
-  const first = parseInt(s.split(":")[0] || "0", 16);
-  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00;
+  const groups = s.split(":");
+  const first = parseInt(groups[0] || "0", 16);
+  // NAT64 local-use 64:ff9b:1::/48 (any address inside it may reach a local network), 6to4 2002::/16 (carries an IPv4
+  // address, possibly private) and the old site-local fec0::/10: none is a plain public address.
+  if (first === 0x64 && parseInt(groups[1] || "0", 16) === 0xff9b && parseInt(groups[2] || "0", 16) === 1) return true;
+  if (first === 0x2002) return true;
+  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xffc0) === 0xfec0 || (first & 0xff00) === 0xff00;
 }
 
 /** The URL when it may be fetched, else null. */

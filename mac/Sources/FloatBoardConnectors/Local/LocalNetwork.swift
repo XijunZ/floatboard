@@ -16,6 +16,9 @@ public enum PublicAddress {
         if b[0..<10].allSatisfy({ $0 == 0 }) && b[10] == 0xff && b[11] == 0xff { return publicV4(Array(b[12..<16])) }   // ::ffff:a.b.c.d
         if b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b { return publicV4(Array(b[12..<16])) }        // 64:ff9b::/96
         if b[0..<10].allSatisfy({ $0 == 0 }) { return false }   // the rest of ::/80 (old IPv4-compatible form): not public
+        if b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b && b[4] == 0 && b[5] == 1 { return false }    // 64:ff9b:1::/48 (NAT64 local use)
+        if b[0] == 0x20 && b[1] == 0x02 { return false }                                                                // 2002::/16 (6to4)
+        if b[0] == 0xfe && (b[1] & 0xc0) == 0xc0 { return false }                                                       // fec0::/10 (site-local)
         if (b[0] & 0xfe) == 0xfc || (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) || b[0] == 0xff { return false }           // fc00::/7, fe80::/10, ff00::/8
         return true
     }
@@ -52,6 +55,26 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
+/// Keeps the remote address of every network connection a fetch used (cache loads have none and count as unknown).
+final class MetricsCollector: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let session: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.urlCache = nil
+        return URLSession(configuration: c)
+    }()
+    let manual: Bool
+    private let lock = NSLock()
+    private var seen: [String?] = []
+    init(manual: Bool) { self.manual = manual }
+    var addresses: [String?] { lock.lock(); defer { lock.unlock() }; return seen }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        let found = metrics.transactionMetrics.map { $0.resourceFetchType == .networkLoad ? $0.remoteAddress : nil }
+        lock.lock(); seen = found; lock.unlock()
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(manual ? nil : request) }
+}
+
 public enum LocalNetworkError: Error, CustomStringConvertible {
     case notPublic(String)
     public var description: String {
@@ -61,6 +84,10 @@ public enum LocalNetworkError: Error, CustomStringConvertible {
 
 extension LocalEngine {
     nonisolated static let manualKey = "fb.manualRedirect"
+    nonisolated static let publicOnlyKey = "fb.publicOnly"
+
+    /// A network that also says the remote address of every connection a fetch used (nil when unknown).
+    public typealias ConnectedTransport = @Sendable (URLRequest) async throws -> (Data, URLResponse, [String?])
 
     /// The request the bridge sends for the engine's fetch payload. "public only": the host (a literal IP, or every address
     /// its name resolves to through `resolve`) must be public, else it throws. "manual" redirect: marked so the network
@@ -78,11 +105,17 @@ extension LocalEngine {
         req.httpMethod = p["method"] as? String ?? "GET"
         for pair in p["headers"] as? [[String]] ?? [] where pair.count == 2 { req.addValue(pair[1], forHTTPHeaderField: pair[0]) }
         if let b = p["body"] as? String { req.httpBody = Data(base64Encoded: b) }
-        if p["redirect"] as? String == "manual", let m = (req as NSURLRequest).mutableCopy() as? NSMutableURLRequest {
-            URLProtocol.setProperty(true, forKey: manualKey, in: m)
+        if p["redirect"] as? String == "manual" || p["publicOnly"] as? Bool == true, let m = (req as NSURLRequest).mutableCopy() as? NSMutableURLRequest {
+            if p["redirect"] as? String == "manual" { URLProtocol.setProperty(true, forKey: manualKey, in: m) }
+            if p["publicOnly"] as? Bool == true { URLProtocol.setProperty(true, forKey: publicOnlyKey, in: m) }
             req = m as URLRequest
         }
         return req
+    }
+
+    /// True for a fetch the engine marked "public only".
+    nonisolated public static func isPublicOnly(_ req: URLRequest) -> Bool {
+        URLProtocol.property(forKey: publicOnlyKey, in: req) as? Bool == true
     }
 
     /// True when the engine asked to see redirects itself.
@@ -90,8 +123,32 @@ extension LocalEngine {
         URLProtocol.property(forKey: manualKey, in: req) as? Bool == true
     }
 
-    /// The app's own network for the engine: redirects followed unless the engine asked for them back.
+    /// The app's own network for the engine: redirects followed unless the engine asked for them back. A "public only" fetch
+    /// is checked again after it ran: the name was resolved for the check, but the connection resolves it again, so a name
+    /// that switched to a private address in between (DNS rebinding) would reach it. Every connection's remote address
+    /// (URLSessionTaskMetrics) must be public, or the answer is thrown away unread.
     nonisolated public static func liveNetwork(_ req: URLRequest) async throws -> (Data, URLResponse) {
-        try await (wantsManualRedirect(req) ? NoRedirect.session : URLSession.shared).data(for: req)
+        if isPublicOnly(req) { return try await network(req, transport: metricsTransport) }
+        return try await (wantsManualRedirect(req) ? NoRedirect.session : URLSession.shared).data(for: req)
+    }
+
+    /// The check itself, with the network passed in (checks use a stand-in).
+    nonisolated public static func network(_ req: URLRequest, transport: ConnectedTransport) async throws -> (Data, URLResponse) {
+        let (data, response, connected) = try await transport(req)
+        if isPublicOnly(req) {
+            guard !connected.isEmpty, connected.allSatisfy({ $0.map(PublicAddress.isPublic) ?? false }) else {
+                throw LocalNetworkError.notPublic(req.url?.host ?? "this address")
+            }
+        }
+        return (data, response)
+    }
+
+    /// URLSession with the connection metrics collected (no cache: every answer comes from a connection it can name).
+    nonisolated static let metricsTransport: ConnectedTransport = { req in
+        let collector = MetricsCollector(manual: wantsManualRedirect(req))
+        var r = req
+        r.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        let (data, response) = try await MetricsCollector.session.data(for: r, delegate: collector)
+        return (data, response, collector.addresses)
     }
 }

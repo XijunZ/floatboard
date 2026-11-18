@@ -431,3 +431,61 @@ import SQLite3
     check(rs.setParent(c.id, nil, now: decisionsNow.addingTimeInterval(120)) == nil && parents().isEmpty && rs.parent(of: c.id) == nil,
           "no_parent_removes_every_parent_link")
 }
+
+// MARK: Round 7 (G): the address a Circle feed fetch actually connected to is the one that counts (DNS rebinding)
+
+func integrationRebindingChecks() async {
+    // More ranges that are not the public internet: NAT64 local-use 64:ff9b:1::/48, 6to4 2002::/16, site-local fec0::/10.
+    check(["64:ff9b:1::a00:1", "64:ff9b:1:ffff::1", "2002:c0a8:101::1", "2002::1", "fec0::1", "feff::1"].allSatisfy { !PublicAddress.isPublic($0) }
+          && ["2606:4700::1111", "2001:4860:4860::8888"].allSatisfy { PublicAddress.isPublic($0) }, "bridge_blocks_nat64_local_6to4_and_site_local")
+    // The name resolves to a public address for the check, then to a private one when the fetch connects (TTL 0).
+    var lookups = 0
+    let resolver: (String) -> [String] = { _ in lookups += 1; return lookups == 1 ? ["93.184.216.34"] : ["192.168.1.10"] }
+    guard let req = try? LocalEngine.request(from: ["url": "https://feed.example.com/rss", "method": "GET", "publicOnly": true, "redirect": "manual"], // try?-ok: nil fails below
+                                             resolve: resolver) else { check(false, "rebinding setup: the first answer is public"); return }
+    let secret = Data("router admin page".utf8)
+    let transport: LocalEngine.ConnectedTransport = { r in
+        (secret, HTTPURLResponse(url: r.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, resolver(r.url!.host!))
+    }
+    var got: Data?, refused = false
+    do { got = try await LocalEngine.network(req, transport: transport).0 } catch { refused = "\(error)".contains("not a public") }
+    check(refused && got == nil && lookups == 2, "bridge_discards_a_response_from_a_private_address_it_connected_to")
+    // Connected to a public address: the answer comes through. Unknown address (no metrics): refused.
+    let pub: LocalEngine.ConnectedTransport = { r in (Data("ok".utf8), HTTPURLResponse(url: r.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, ["93.184.216.34"]) }
+    let unknown: LocalEngine.ConnectedTransport = { r in (Data("ok".utf8), HTTPURLResponse(url: r.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, [nil]) }
+    let okData = try? await LocalEngine.network(req, transport: pub).0 // try?-ok: nil fails the check
+    let unknownData = try? await LocalEngine.network(req, transport: unknown).0 // try?-ok: nil is the expected answer
+    check(okData == Data("ok".utf8) && unknownData == nil, "bridge_passes_public_connections_and_refuses_unknown_ones")
+    // Fetches not marked public only are not checked (the engine's own API calls, Gmail, Claude).
+    let plain = URLRequest(url: URL(string: "http://10.0.0.1/x")!)
+    let plainData = try? await LocalEngine.network(plain, transport: unknown).0 // try?-ok: nil fails the check
+    check(plainData == Data("ok".utf8), "bridge_leaves_other_fetches_unchecked")
+}
+
+/// The same against the real network code: a local web server, a name the check was told is public, and URLSession then
+/// connecting to this Mac (127.0.0.1 / ::1). The answer must be thrown away, unread.
+func integrationRebindingLiveChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-rebind-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    try? "home router admin".write(to: root.appendingPathComponent("secret.txt"), atomically: true, encoding: .utf8) // try?-ok: the check below fails without it
+    let port = Int.random(in: 20000...40000)
+    let server = Process()
+    server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+    server.arguments = ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", root.path]
+    server.standardOutput = FileHandle.nullDevice; server.standardError = FileHandle.nullDevice
+    do { try server.run() } catch { print("SKIP live rebinding check: no python3 (\(error))"); return }
+    defer { server.terminate() }
+    // Wait for it to answer (plain fetch, not checked).
+    var up = false
+    for _ in 0..<50 where !up {
+        try? await Task.sleep(nanoseconds: 100_000_000) // try?-ok: a cancelled sleep just checks again
+        up = (try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/secret.txt")!)) != nil // try?-ok: not up yet
+    }
+    guard up else { check(false, "live rebinding setup: local server"); return }
+    guard let req = try? LocalEngine.request(from: ["url": "http://localhost:\(port)/secret.txt", "method": "GET", "publicOnly": true, "redirect": "manual"], // try?-ok: nil fails below
+                                             resolve: { _ in ["93.184.216.34"] }) else { check(false, "live rebinding setup: request"); return }
+    var leaked: Data?, refused = false
+    do { leaked = try await LocalEngine.liveNetwork(req).0 } catch { refused = "\(error)".contains("not a public") }
+    check(refused && leaked == nil, "live_bridge_throws_away_an_answer_from_a_private_connection")
+}
