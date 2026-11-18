@@ -599,3 +599,32 @@ extension ISO8601DateFormatter {
     ConnectorMemory.forget(connector: "c1", store: store)
     check(DecisionPhone.sentHash(store: store, connector: "c1") == nil && core.toPush(now: now).count == 2, "repointing_a_connector_forgets_what_it_was_sent")
 }
+
+/// Round 13 (B6): a phone "Make task" whose write fails part-way leaves nothing behind (no task marked typed) and stays on
+/// the engine to be tried again; a reminder the database couldn't write is an error, never "deferred".
+@MainActor func swallowedDecisionErrorChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-b6-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = jotsStore(root, "b6.sqlite") else { return }
+    store.setModule(.jots, on: true)
+    let engine = FakeJotsEngine()
+    let client = ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k") { req in await MainActor.run { engine.handle(req) } }
+    let t0 = Date().addingTimeInterval(-3600), f = ISO8601DateFormatter()
+    engine.waiting = [["key": "action:mk-9", "mac_id": NSNull(), "text": "Call the bank", "kind": "action:make_task", "source": "phone", "tags": [],
+                       "added": f.string(from: t0), "updated": f.string(from: t0), "deleted": false, "rev": 1]]
+    store.performForTest("CREATE TRIGGER fail_src BEFORE UPDATE OF item_source ON cards BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    store.performForTest("CREATE TRIGGER fail_src_i BEFORE INSERT ON cards WHEN NEW.item_source='phone' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    await JotsSync.tick(connector: "b6", store: store, client: client)
+    check(!store.cards.contains { $0.title == "Call the bank" } && engine.waiting.count == 1, "phone_make_task_failing_part_way_leaves_no_task_and_stays_waiting")
+    store.performForTest("DROP TRIGGER fail_src"); store.performForTest("DROP TRIGGER fail_src_i")
+    await JotsSync.tick(connector: "b6", store: store, client: client)
+    check(store.cards.filter { $0.title == "Call the bank" }.map(\.itemSource) == [.phone] && engine.waiting.isEmpty, "phone_make_task_made_once_when_it_works")
+
+    let budget = ReminderBudget(store: store)
+    store.performForTest("CREATE TRIGGER fail_rem BEFORE INSERT ON reminders BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    var threw = false
+    do { _ = try budget.request(kind: .circleDue, itemID: ShortID(kind: .person, number: 1), text: "Message P-1", now: Date()) } catch { threw = true }
+    store.performForTest("DROP TRIGGER fail_rem")
+    check(threw, "reminder_budget_write_failure_is_an_error_not_deferred")
+}

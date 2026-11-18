@@ -170,9 +170,13 @@ public struct JotAck: Equatable {
         guard r.kind == "action:make_task" else { return true }   // an action this version does not know: dropped
         let draft = MakeTask.draft(selection: r.text, sourceTags: source.map(store.itemTags), groups: store.areas.map(\.name))
         let due = MakeTask.dueMentioned(in: r.text, now: r.added)
-        guard let id = store.makeTask(draft, due: due?.date, dueHasTime: due?.hasTime ?? false, from: source, now: r.updated) else { return false }
-        store.perform { try store.db.run("UPDATE cards SET item_source='phone' WHERE id=?", [id]) }
-        return true
+        do {
+            // One transaction: a task half made (say, not marked as from the phone) never stays; the action is tried again.
+            return try store.makeTaskOrThrow(draft, due: due?.date, dueHasTime: due?.hasTime ?? false, from: source, itemSource: .phone, now: r.updated) != nil
+        } catch {
+            store.activity("jots", .error, "Could not make the phone's task; it stays on the engine and is tried again", detail: "\(r.key): \(error)")
+            return false
+        }
     }
 
     /// The phone's newer version of a jot, inside the caller's transaction (throws, never swallows): its text first (the old

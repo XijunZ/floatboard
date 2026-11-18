@@ -132,7 +132,9 @@ import FloatBoardConnectors
     let day = cal.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 10))!
     check(budget.settings == ReminderSettings(), "budget_defaults_3_a_day_quiet_22_to_8")
     func ask(_ n: Int64, at: Date, kind: ReminderKind = .circleDue) -> ReminderGrant {
-        budget.request(kind: kind, itemID: ShortID(kind: .person, number: n), text: "Message P-\(n)", now: at)
+        do { return try budget.request(kind: kind, itemID: ShortID(kind: .person, number: n), text: "Message P-\(n)", now: at) } catch {
+            check(false, "budget request: \(error)"); return .deferred(until: .distantFuture)
+        }
     }
     let g1 = ask(1, at: day)
     guard case .granted(let id1, let fire1) = g1 else { check(false, "budget_first_granted"); return }

@@ -41,24 +41,34 @@ extension Store {
     /// Returns its id, or nil when the title is empty or the write failed.
     @discardableResult
     public func makeTask(_ d: TaskDraft, due: Date?, dueHasTime: Bool, from source: ShortID?, now: Date = Date()) -> Int64? {
+        do { return try makeTaskOrThrow(d, due: due, dueHasTime: dueHasTime, from: source, now: now) } catch {
+            activity("store", .error, "Could not make the task", detail: "\(error)")
+            return nil
+        }
+    }
+
+    /// `makeTask` in one transaction (the task, its link, its tags and where it came from: all or nothing) that throws, for
+    /// callers that must not acknowledge a failure (a phone action stays on the engine). `extra` runs inside the same
+    /// transaction with the new task's id (an apply-once marker). nil only for an empty title.
+    @discardableResult
+    public func makeTaskOrThrow(_ d: TaskDraft, due: Date?, dueHasTime: Bool, from source: ShortID?, itemSource: ItemSource = .typed,
+                                now: Date = Date(), extra: ((Int64) throws -> Void)? = nil) throws -> Int64? {
         let title = d.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
         let group = resolve(d.primaryTag ?? "")
         let due = Due.stored(due, hasTime: dueHasTime)
-        var id: Int64?
-        perform {
+        let others = d.others.filter { o in tags.contains { $0.name.caseInsensitiveCompare(o) == .orderedSame } }
+        return try performThrowing {
             let n = try db.run("""
-                INSERT INTO cards(title,notes,area,importance,due,due_day,due_has_time,status,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)
-                """, [title, d.notes, group, Importance.medium.rawValue, due.due, due.day, due.hasTime, Status.todo.rawValue, now, now])
+                INSERT INTO cards(title,notes,area,importance,due,due_day,due_has_time,status,created,updated,item_source) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """, [title, d.notes, group, Importance.medium.rawValue, due.due, due.day, due.hasTime, Status.todo.rawValue, now, now, itemSource == .typed ? "" : itemSource.rawValue])
             try insertEvent(n, "created", to: .todo, actor: .user, at: now)
             let me = ShortID(kind: .task, number: n)
             if let source { try linkRow(me, source, kind: .source, madeBy: .manual, actor: .user, now: now) }
             try linkMentionsRow(in: d.notes, previous: "", from: me, now: now)
-            id = n
+            if !others.isEmpty { try setTagsRow(me, primary: group, others: others, now: now) }
+            try extra?(n)
+            return n
         }
-        guard let id else { return nil }
-        let others = d.others.filter { o in tags.contains { $0.name.caseInsensitiveCompare(o) == .orderedSame } }
-        if !others.isEmpty { setTags(ShortID(kind: .task, number: id), primary: group, others: others, now: now) }
-        return id
     }
 }
