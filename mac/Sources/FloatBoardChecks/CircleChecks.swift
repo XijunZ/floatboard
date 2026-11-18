@@ -20,9 +20,7 @@ import SQLite3
 
 /// A scratch board with Circle on.
 @MainActor func circleStore(_ root: URL, _ name: String) -> Store? {
-    guard let s = foundationStore(root, name) else { return nil }
-    s.setModule(.circle, on: true)
-    return s
+    checkStore(root, name, modules: [.circle])
 }
 
 /// 2026-11-18 (a Wednesday) at `h`:00, London.

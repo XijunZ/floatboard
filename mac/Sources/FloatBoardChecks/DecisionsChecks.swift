@@ -23,11 +23,7 @@ import FloatBoardConnectors
 }
 
 @MainActor func decisionsStore(_ root: URL, _ name: String) -> Store? {
-    do {
-        let s = Store(db: try DB(url: root.appendingPathComponent(name)))
-        s.setModule(.jots, on: true); s.setModule(.decisions, on: true)
-        return s
-    } catch { check(false, "decisions setup \(name): \(error)"); return nil }
+    checkStore(root, name, modules: [.jots, .decisions])
 }
 
 @MainActor private func rows(_ store: Store, _ sql: String, _ args: [Any?] = []) -> Int64 {

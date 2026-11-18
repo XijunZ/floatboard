@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { BASE, call, newUser } from "../helpers";
 import { pairPhone } from "../phone-helpers";
-import { encrypt } from "../../src/lib/crypto";
 import { HAIKU } from "../../src/lib/llm";
 import { setDecisionsFetch } from "../../src/routes/decisions";
 import DECISIONS_SKILL from "../../src/skills/decisions.md";
@@ -29,11 +28,7 @@ function stubClaude() {
 
 beforeEach(() => { answers = []; stubClaude(); });
 
-async function user(name: string, opts: { key?: boolean } = {}) {
-  const u = await newUser(name);
-  if (opts.key !== false) await env.DB.prepare("UPDATE users SET anthropic_key_enc=? WHERE id=?").bind(await encrypt(env as any, "sk-test"), u.id).run();
-  return u;
-}
+const user = (name: string, opts: { key?: boolean } = {}) => newUser(name, opts.key === false ? {} : { claudeKey: "sk-test" });
 const post = (key: string, path: string, body: unknown) => call(path, { method: "POST", key, body: JSON.stringify(body) });
 const jot = (n: number, text: string, refs: { id: string; text: string }[] = []) =>
   ({ ref: `J-${n}@abc${n}`, kind: "jot", added: "2026-11-10T09:00:00Z", text, references: refs });

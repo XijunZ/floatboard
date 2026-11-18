@@ -15,7 +15,7 @@ import SQLite3
 
 /// Opens a scratch board in `root`.
 @MainActor func foundationStore(_ root: URL, _ name: String) -> Store? {
-    do { return Store(db: try DB(url: root.appendingPathComponent(name))) } catch { check(false, "foundation setup \(name): \(error)"); return nil }
+    checkStore(root, name)
 }
 
 @MainActor private func count(_ store: Store, _ sql: String, _ args: [Any?] = []) -> Int64 {

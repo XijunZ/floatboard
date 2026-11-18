@@ -24,7 +24,7 @@ import SQLite3
 }
 
 @MainActor func jotsStore(_ root: URL, _ name: String) -> Store? {
-    do { return Store(db: try DB(url: root.appendingPathComponent(name))) } catch { check(false, "jots setup \(name): \(error)"); return nil }
+    checkStore(root, name)
 }
 
 @MainActor func jotsCount(_ store: Store, _ sql: String, _ args: [Any?] = []) -> Int64 {
@@ -603,8 +603,7 @@ extension ISO8601DateFormatter {
 /// Round 13 (B6): a phone "Make task" whose write fails part-way leaves nothing behind (no task marked typed) and stays on
 /// the engine to be tried again; a reminder the database couldn't write is an error, never "deferred".
 @MainActor func swallowedDecisionErrorChecks() async {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-b6-\(UUID().uuidString)")
-    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    let root = checkFolder("fb-b6")
     defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
     guard let store = jotsStore(root, "b6.sqlite") else { return }
     store.setModule(.jots, on: true)

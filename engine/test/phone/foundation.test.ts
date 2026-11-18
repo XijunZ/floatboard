@@ -87,11 +87,7 @@ describe("foundation: tags and modules in the board copy", () => {
 });
 
 describe("foundation: budget reminders", () => {
-  async function user(name: string) {
-    const u = await newUser(name);
-    await env.DB.prepare("UPDATE users SET ntfy_topic='budget-topic' WHERE id=?").bind(u.id).run();
-    return u;
-  }
+  const user = (name: string) => newUser(name, { ntfyTopic: "budget-topic" });
 
   it("sent_once_only_after_the_macs_grace_and_only_while_still_in_the_copy", async () => {
     const u = await user("Budget");
@@ -212,11 +208,7 @@ describe("foundation round 1 (F1): one tag rule; a bad tag never blocks the boar
 });
 
 describe("foundation round 2 (R2): one notification id, shown once across Mac and phone", () => {
-  async function user(name: string) {
-    const u = await newUser(name);
-    await env.DB.prepare("UPDATE users SET ntfy_topic='budget-topic' WHERE id=?").bind(u.id).run();
-    return u;
-  }
+  const user = (name: string) => newUser(name, { ntfyTopic: "budget-topic" });
   const claim = (key: string, id: unknown) => call("/v2/reminders/claim", { method: "POST", key, body: JSON.stringify({ id }) });
 
   it("a_reminder_the_mac_claimed_is_never_sent_even_when_its_board_update_was_lost", async () => {
@@ -254,11 +246,7 @@ describe("foundation round 2 (R2): one notification id, shown once across Mac an
 });
 
 describe("foundation round 3: a reminder the Mac could not show is handed back to the phone", () => {
-  async function user(name: string) {
-    const u = await newUser(name);
-    await env.DB.prepare("UPDATE users SET ntfy_topic='budget-topic' WHERE id=?").bind(u.id).run();
-    return u;
-  }
+  const user = (name: string) => newUser(name, { ntfyTopic: "budget-topic" });
   const post = (key: string, path: string, id: unknown) => call(path, { method: "POST", key, body: JSON.stringify({ id }) });
 
   it("a_released_claim_lets_the_engine_send_it_once", async () => {
@@ -313,11 +301,7 @@ describe("integration: one session check for every area's phone sync", () => {
 });
 
 describe("integration: reminder claim and release are all-or-nothing (Codex review 3, finding 4)", () => {
-  async function user(name: string) {
-    const u = await newUser(name);
-    await env.DB.prepare("UPDATE users SET ntfy_topic='budget-topic' WHERE id=?").bind(u.id).run();
-    return u;
-  }
+  const user = (name: string) => newUser(name, { ntfyTopic: "budget-topic" });
   const post = (key: string, path: string, id: unknown) => call(path, { method: "POST", key, body: JSON.stringify({ id }) });
   // The request did not succeed (an error answer, or the worker threw).
   const failed = (p: Promise<Response>) => p.then((r) => r.status >= 500, () => true);
