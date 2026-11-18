@@ -32,6 +32,8 @@ public struct PhoneTickResult: Equatable {
 /// and every failure leaves one Activity row (component `connector:<id>`).
 public enum ConnectorSync {
     static let batchSize = 50
+    /// The engine's limit for a rulebook copy (characters as JavaScript counts them).
+    static let rulebookLimit = 20_000
     /// Settings only the app uses: never pushed (the engine rejects keys outside its schema).
     static let appOnlySettings: Set<String> = ["default_group", "auto_add"]
     static let authMessage = "The engine didn't accept this connection's key."
@@ -438,7 +440,16 @@ public enum ConnectorSync {
     @MainActor
     private static func settingsValues(_ json: String, _ id: String, _ store: Store) throws -> [String: JSONValue] {
         var out: [String: JSONValue] = [:]
-        for (k, v) in try parse(json, id) where !appOnlySettings.contains(k) { if let j = JSONValue.from(any: v) { out[k] = j } }
+        for (k, v) in try parse(json, id) where !appOnlySettings.contains(k) {
+            // A rulebook longer than the engine accepts would make it refuse the whole push: it is held back (the engine keeps
+            // its last copy) and every other setting still goes.
+            if k.hasPrefix("rulebook_"), let t = v as? String, t.utf16.count > rulebookLimit {
+                store.activity("connector:\(id)", .warning, "Your \(k.dropFirst("rulebook_".count)) rulebook is too long to send (over 20,000 characters)",
+                               detail: "Shorten it in Settings › Rules & learning; the engine keeps its previous copy until then.")
+                continue
+            }
+            if let j = JSONValue.from(any: v) { out[k] = j }
+        }
         out["groups"] = .strings(store.areas.map(\.name))
         out["time_zone"] = .string(AppTime.zone.identifier)
         return out
