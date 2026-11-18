@@ -128,7 +128,12 @@ extension LocalEngine {
     /// that switched to a private address in between (DNS rebinding) would reach it. Every connection's remote address
     /// (URLSessionTaskMetrics) must be public, or the answer is thrown away unread.
     nonisolated public static func liveNetwork(_ req: URLRequest) async throws -> (Data, URLResponse) {
-        if isPublicOnly(req) { return try await network(req, transport: metricsTransport) }
+        // A public-only GET (a feed) goes to the address checked before connecting (PinnedHTTP), so nothing is ever sent to
+        // a home-network address; anything else public-only keeps the after-the-fact check.
+        if isPublicOnly(req) {
+            let pinnable = (req.httpMethod ?? "GET") == "GET" && req.httpBody == nil
+            return try await network(req, transport: pinnable ? pinnedTransport : metricsTransport)
+        }
         return try await (wantsManualRedirect(req) ? NoRedirect.session : URLSession.shared).data(for: req)
     }
 
@@ -141,6 +146,25 @@ extension LocalEngine {
             }
         }
         return (data, response)
+    }
+
+    /// Resolves the name once (off the main thread), refuses unless every answer is public, then connects to a checked
+    /// address itself; tries the next one when a connection can't be made.
+    nonisolated static let pinnedTransport: ConnectedTransport = { req in
+        guard let host = req.url?.host else { throw URLError(.badURL) }
+        let bare = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        var probe4 = in_addr(), probe6 = in6_addr()
+        let literal = inet_pton(AF_INET, bare, &probe4) == 1 || inet_pton(AF_INET6, bare, &probe6) == 1
+        let answers = literal ? [bare] : await Task.detached { PublicAddress.resolve(bare) }.value
+        guard !answers.isEmpty, answers.allSatisfy(PublicAddress.isPublic) else { throw LocalNetworkError.notPublic(host) }
+        var last: Error = LocalNetworkError.notPublic(host)
+        for ip in answers {
+            do {
+                let (data, response) = try await PinnedHTTP.get(req, ip: ip)
+                return (data, response, [ip])
+            } catch { last = error }
+        }
+        throw last
     }
 
     /// URLSession with the connection metrics collected (no cache: every answer comes from a connection it can name).
