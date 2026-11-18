@@ -8,10 +8,10 @@ struct GlobalSearchView: View {
     @EnvironmentObject var ui: UIState
     var initialQuery = ""
     @State private var query = ""
+    @State private var results: [(ItemKind, [SearchHit])] = []
     @FocusState private var focused: Bool
 
     var body: some View {
-        let results = GlobalSearch.run(query, store: store)
         VStack(alignment: .leading, spacing: 8) {
             TextField("Search everything: words, or an id such as T-12", text: $query)
                 .textFieldStyle(.roundedBorder).focused($focused)
@@ -45,6 +45,27 @@ struct GlobalSearchView: View {
         .padding(12)
         .frame(width: 440)
         .onAppear { if query.isEmpty { query = initialQuery }; focused = true }
+        // Searched 150 ms after typing stops (not on every keystroke); people are matched off the main thread.
+        .task(id: query) {
+            try? await Task.sleep(nanoseconds: 150_000_000) // try?-ok: a cancelled wait means a newer query replaced this one
+            guard !Task.isCancelled else { return }
+            await search(query)
+        }
+    }
+
+    private func search(_ q: String) async {
+        let typedID = ShortID.parse(q.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
+        var out = GlobalSearch.run(q, store: store, skipping: typedID || !store.isOn(.circle) ? [] : [.person])
+        if !typedID && store.isOn(.circle) {
+            let people = SearchIndex.people(store: store)
+            let hits = await Task.detached { SearchIndex.match(people, q) }.value
+            guard !Task.isCancelled else { return }
+            if !hits.isEmpty {
+                out.append((.person, Array(hits.prefix(20)).map(\.hit)))
+                out.sort { ItemKind.allCases.firstIndex(of: $0.0)! < ItemKind.allCases.firstIndex(of: $1.0)! }
+            }
+        }
+        results = out
     }
 
     /// Opens a result where it lives.

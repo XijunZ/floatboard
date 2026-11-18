@@ -136,14 +136,8 @@ public struct DueEntry: Identifiable, Equatable {
             }
         })
         GlobalSearch.register(.person, module: .circle) { store, q in
-            let c = CircleStore(store: store)
-            let details = c.allDetails(), handles = c.allHandles()
-            return PeopleStore(store: store).people().compactMap { p in
-                let d = details[p.id] ?? CircleDetails()
-                let text = ([p.name] + p.aliases + [d.company, d.role, d.firm, d.howKnown] + (handles[p.id] ?? []).map(\.value)).joined(separator: " ")
-                guard GlobalSearch.matches(text, q) else { return nil }
-                return SearchHit(id: p.shortID, title: p.name, detail: [p.tier.title, d.company].filter { !$0.isEmpty }.joined(separator: " · "), date: p.added)
-            }
+            // The search text is kept until the board changes (SearchIndex), not rebuilt per keystroke.
+            SearchIndex.match(SearchIndex.people(store: store), q).map(\.hit)
         }
     }
 }
