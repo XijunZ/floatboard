@@ -1,6 +1,6 @@
 import Foundation
 
-/// The text colour of a tag chip in light mode (round 9). A tag colour that is too light to read on the near-white chip
+/// The text colour of a tag chip in light mode. A tag colour that is too light to read on the near-white chip
 /// (contrast under 3:1 on white: yellow, cyan, green, orange) is darkened, keeping its hue, until it reaches 4.5:1; every
 /// other colour is used as it is, so the board's chips look the same for them. Dark mode uses the colour unchanged.
 public enum ChipInk {

@@ -125,12 +125,10 @@ extension CircleStore {
         return nil
     }
 
-    /// Stores the engine's results once each (by key). Returns how many were new.
+    /// Stores the engine's results once each (by key). Returns how many were new; a failed write throws (nothing kept).
     @discardableResult
-    public func applyEngineUpdates(_ items: [EngineUpdate], now: Date = Date()) -> Int {
-        var added = 0
-        store.perform { added = try applyEngineUpdateRows(items, now: now) }
-        return added
+    public func applyEngineUpdates(_ items: [EngineUpdate], now: Date = Date()) throws -> Int {
+        try store.performThrowing { try applyEngineUpdateRows(items, now: now) }
     }
 
     /// One page of What's new and its cursor, written together: when the write fails nothing is kept (the old cursor stays,

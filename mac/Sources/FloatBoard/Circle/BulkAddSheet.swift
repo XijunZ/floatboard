@@ -2,7 +2,7 @@ import FloatBoardConnectors
 import FloatBoardCore
 import SwiftUI
 
-/// "Bulk add…" (round 11): many people at once from WhatsApp or WeChat, from header data only (names, numbers, how many
+/// "Bulk add…": many people at once from WhatsApp or WeChat, from header data only (names, numbers, how many
 /// messages, when; never what was said). Read off the main thread; no AI; nothing new goes to the engine.
 struct BulkAddSheet: View {
     enum Source: String, CaseIterable { case whatsapp = "WhatsApp", wechat = "WeChat" }

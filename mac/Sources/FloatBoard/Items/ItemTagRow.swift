@@ -1,7 +1,7 @@
 import FloatBoardCore
 import SwiftUI
 
-/// An item's tags (the first is its primary) as chips, with ✕ and a + menu when `editable` (round 13, B4). One view for
+/// An item's tags (the first is its primary) as chips, with ✕ and a + menu when `editable`. One view for
 /// jots, goals and decisions; names match case-insensitively, as in the people tag menu. `set` saves a new list and returns
 /// a problem to show, or nil (default: Store.setTags).
 struct ItemTagRow: View {

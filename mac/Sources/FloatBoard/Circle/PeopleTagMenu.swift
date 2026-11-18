@@ -1,7 +1,7 @@
 import FloatBoardCore
 import SwiftUI
 
-/// The "+" menu for a person's tags (round 8): Investor, Prospect and tags already on people (PeopleTags.offered), never the
+/// The "+" menu for a person's tags: Investor, Prospect and tags already on people (PeopleTags.offered), never the
 /// board's groups, plus "New tag…". Used by the detail pane, the bulk bar's Add tag and the Add / Edit form.
 struct PeopleTagMenu<Label: View>: View {
     @EnvironmentObject var store: Store
@@ -59,7 +59,7 @@ struct PersonTagChip: View {
     }
 }
 
-/// A person's tier in the list, outlined and neutral so it reads as the tier, not as a tag (round 9).
+/// A person's tier in the list, outlined and neutral so it reads as the tier, not as a tag.
 struct TierChip: View {
     let tier: PersonTier
     var body: some View {

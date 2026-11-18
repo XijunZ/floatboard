@@ -576,7 +576,7 @@
       me.account = b.account;
       shownAccount = b.account;
       queue.account = b.account;
-      jots.restore(); // Jots: bind to the new account at once (Codex round 3)
+      jots.restore(); // Jots: bind to the new account at once
     }
     board = { updated: b.updated || null, cards: Array.isArray(b.cards) ? b.cards : [], pending: b.pending || 0 };
     if (Array.isArray(b.events)) board.events = b.events;   // absent from Macs before the calendar

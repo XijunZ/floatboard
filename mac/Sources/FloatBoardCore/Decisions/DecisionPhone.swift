@@ -178,7 +178,7 @@ public struct PhoneDecisionAction: Codable, Equatable {
     }
 }
 
-/// What this Mac remembers having sent through a connector (round 13, J4): forgotten when the connector is added again or
+/// What this Mac remembers having sent through a connector: forgotten when the connector is added again or
 /// moved to another engine, so the new engine gets everything.
 @MainActor public enum ConnectorMemory {
     public static func forget(connector id: String, store: Store) {

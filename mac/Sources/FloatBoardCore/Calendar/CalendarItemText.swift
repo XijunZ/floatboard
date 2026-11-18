@@ -1,13 +1,5 @@
 import Foundation
 
-/// What a click on a calendar item opens.
-public enum CalendarClick: Equatable {
-    /// The board's task editor (the same one a task on the board opens), for the task with this id.
-    case taskEditor(Int64)
-    /// The event panel, for the event with this E-number.
-    case eventPanel(Int64)
-}
-
 extension CalendarLayout {
     /// How a timed block uses its height (points): as many title lines as fit, then its time, then its id. When space is
     /// short the time goes first, so the title keeps at least one line.
@@ -33,14 +25,6 @@ extension CalendarLayout {
     /// The all-day row of one day: up to `limit` items stacked; with more, `limit - 1` and a "+N more" line in the last place.
     public static func stripSplit(count: Int, limit: Int = 3) -> (shown: Int, more: Int) {
         count <= limit ? (count, 0) : (limit - 1, count - (limit - 1))
-    }
-
-    /// A click on a task opens the board's task editor; on an event, its event panel.
-    public static func clickTarget(_ content: PlacedItem.Content) -> CalendarClick {
-        switch content {
-        case .task(let t): .taskEditor(t.id)
-        case .event(let e): .eventPanel(e.shortID)
-        }
     }
 }
 

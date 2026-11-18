@@ -223,7 +223,7 @@ public final class DB {
             sql += v16Tables
         }
         if version < 17 {
-            // 16 -> 17: a write order for jots kept on this Mac (change_seq), for change detection (round 13, J1).
+            // 16 -> 17: a write order for jots kept on this Mac (change_seq), for change detection.
             sql += v17JotSeq
         }
         return sql

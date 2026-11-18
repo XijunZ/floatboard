@@ -13,7 +13,7 @@ public struct SearchHitData: Sendable {
 }
 
 /// Search everything's text per person, kept until the board changes (`Store.reloads` moves on every write), so typing
-/// doesn't rebuild it per keystroke; matching over it is plain values and can run off the main thread (round 13, A4).
+/// doesn't rebuild it per keystroke; matching over it is plain values and can run off the main thread.
 @MainActor public enum SearchIndex {
     private static var peopleCache: [ObjectIdentifier: (Int, [SearchEntry])] = [:]
     /// How many times an index was built (checks).

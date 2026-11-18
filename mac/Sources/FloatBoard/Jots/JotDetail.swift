@@ -57,7 +57,7 @@ struct JotDetail: View {
             }
             .onAppear { if !loaded { text = jot.text; saved = jot.text; loaded = true } }
             .onDisappear { save() }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in save() }   // quitting keeps the last words (J3)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in save() }   // quitting keeps the last words
             .onChange(of: jot.text) { _, new in if new != saved && text == saved { text = new; saved = new } }   // changed elsewhere (phone, task editor)
             .task(id: text) {
                 try? await Task.sleep(for: .seconds(1)) // try?-ok: cancelled when typing continues; the next pause saves
