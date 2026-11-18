@@ -311,3 +311,43 @@ describe("integration: one session check for every area's phone sync", () => {
     expect(APP_JS).not.toMatch(/circleEpoch|var generation/);
   });
 });
+
+describe("integration: reminder claim and release are all-or-nothing (Codex review 3, finding 4)", () => {
+  async function user(name: string) {
+    const u = await newUser(name);
+    await env.DB.prepare("UPDATE users SET ntfy_topic='budget-topic' WHERE id=?").bind(u.id).run();
+    return u;
+  }
+  const post = (key: string, path: string, id: unknown) => call(path, { method: "POST", key, body: JSON.stringify({ id }) });
+  // The request did not succeed (an error answer, or the worker threw).
+  const failed = (p: Promise<Response>) => p.then((r) => r.status >= 500, () => true);
+  const rows = (uid: string, id: string) => env.DB.prepare("SELECT card_id FROM due_alerts_sent WHERE user_id=? AND due=? ORDER BY card_id")
+    .bind(uid, `budget:${id}`).all<{ card_id: number }>().then((r) => r.results.map((x) => x.card_id));
+
+  it("a_claim_interrupted_between_its_writes_leaves_nothing_and_a_retry_is_the_macs", async () => {
+    const { setReminderFault } = await import("../../src/routes/reminders");
+    const u = await user("Claim fault");
+    const id = "rb-circle_due-P-7-2026-11-21";
+    setReminderFault("claim");
+    try { expect(await failed(post(u.key, "/v2/reminders/claim", id))).toBe(true); } finally { setReminderFault(null); }
+    expect(await rows(u.id, id)).toEqual([]);
+    expect(await (await post(u.key, "/v2/reminders/claim", id)).json()).toEqual({ owner: "mac" });
+    expect(await rows(u.id, id)).toEqual([-1, 0]);
+  });
+
+  it("a_release_interrupted_between_its_writes_changes_nothing_and_can_be_retried", async () => {
+    const { setReminderFault } = await import("../../src/routes/reminders");
+    const u = await user("Release fault");
+    const fire = Date.parse("2026-11-21T09:00:00Z");
+    const reminders = [{ id: "rb-decision_review-D-8-2026-11-21", title: "Review", text: "Review D-8", fire_at: iso(fire) }];
+    await put(u.key, { cards: [card(1)], reminders });
+    expect(await (await post(u.key, "/v2/reminders/claim", reminders[0].id)).json()).toEqual({ owner: "mac" });
+    setReminderFault("release");
+    try { expect(await failed(post(u.key, "/v2/reminders/release", reminders[0].id))).toBe(true); } finally { setReminderFault(null); }
+    expect(await rows(u.id, reminders[0].id)).toEqual([-1, 0]);   // still the Mac's: nothing half done
+    expect(await (await post(u.key, "/v2/reminders/release", reminders[0].id)).json()).toEqual({ released: true });
+    expect(await rows(u.id, reminders[0].id)).toEqual([]);
+    ntfy = [];
+    expect(await runDueAlerts(env as any, fire + 11 * 60_000)).toBe(1);   // the phone gets it, once
+  });
+});
