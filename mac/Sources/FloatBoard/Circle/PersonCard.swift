@@ -45,6 +45,18 @@ struct PersonCard: View {
 
     // MARK: Parts
 
+    /// The tier menu under the pointer: every tier, a tick on the current one; picking one switches it directly.
+    private func tierMenu(_ p: Person) {
+        let menu = NSMenu()
+        for t in PersonTier.allCases {
+            let item = ClosureMenuItem(title: t.title) { if t != p.tier { tagProblem = CircleStore(store: store).setTier([p.id], t).first } }
+            item.state = t == p.tier ? .on : .off
+            menu.addItem(item)
+        }
+        let at = NSEvent.mouseLocation
+        menu.popUp(positioning: nil, at: NSPoint(x: at.x - 10, y: at.y - 14), in: nil)
+    }
+
     private func header(_ p: Person, _ d: CircleDetails, _ tags: [String]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
@@ -57,18 +69,18 @@ struct PersonCard: View {
             }
             HStack(spacing: 6) {
                 // The tier: click to switch it here (a tick on the current one), no selecting first.
-                Menu {
-                    ForEach(PersonTier.allCases, id: \.self) { t in
-                        Button { if t != p.tier { tagProblem = CircleStore(store: store).setTier([p.id], t).first } } label: {
-                            if t == p.tier { Label(t.title, systemImage: "checkmark") } else { Text(t.title) }
-                        }
-                    }
-                } label: {
-                    Text(p.tier.title).font(.system(size: 11, weight: .medium)).padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                // (A native menu opened from the chip itself, so the chip keeps its capsule look.)
+                HStack(spacing: 3) {
+                    Text(p.tier.title)
+                    Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold)).foregroundStyle(.secondary)
                 }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .font(.system(size: 11, weight: .medium)).padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                .fixedSize()
+                .contentShape(Capsule())
+                .onTapGesture { tierMenu(p) }
                 .help("Change tier")
+                .accessibilityAddTraits(.isButton)
                 // The person's tags right here (owner, round 8): ✕ takes one off, + adds one to this person, no selecting first.
                 ForEach(tags, id: \.self) { t in
                     PersonTagChip(tag: t, size: 11) { tagProblem = PeopleTags.removeFrom(store: store, person: p.id, t) }

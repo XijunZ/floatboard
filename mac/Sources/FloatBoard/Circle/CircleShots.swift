@@ -102,7 +102,7 @@ import SwiftUI
 /// Round 8 pictures (`FLOATBOARD_ROUND8SHOTS=1 FloatBoard --snapshot <dir>`, scratch database only): the Add form with a
 /// WhatsApp contact that shares no number, the person pane's tag row and its + menu, and the people list with tag chips.
 @MainActor enum Round8Shots {
-    static func run(dir: String, store: Store, ui: UIState, google: Google, round9: Bool = false, round11: Bool = false) {
+    static func run(dir: String, store: Store, ui: UIState, google: Google, round9: Bool = false, round11: Bool = false, round16: Bool = false) {
         guard LocalData.isScratchDatabase else { print("Round8Shots: scratch database only"); return }
         store.setModule(.circle, on: true)
         let c = CircleStore(store: store), now = Date()
@@ -155,6 +155,20 @@ import SwiftUI
             let wc = [BulkRow(key: "wechat:李雷", name: "李雷", phone: nil, handles: [Handle(kind: .wechat, value: "李雷")], messages: 6, last: now)]
             save(BulkAddSheet(close: {}, preloaded: [.whatsapp: wa, .wechat: wc]), "round11-bulk-add", CGSize(width: 640, height: 600))
             save(BulkAddSheet(close: {}, preloaded: [.whatsapp: wa, .wechat: wc], startOn: .wechat), "round11-bulk-add-wechat", CGSize(width: 640, height: 600))
+            return
+        }
+        if round16 {
+            // Round 16: the tier toggle chips (Network hidden), a Friend in the list, and the person pane's tier chip.
+            _ = add("Eve Example", .friend, [])
+            _ = add("Finn Example", .family, [])
+            var f = CircleTierFilter(); f.toggle(.network); f.save(store: store)
+            for w in [800, 1100] {
+                CircleNav.shared.selected = nil
+                save(CircleTab(), "round16-list-\(w)", CGSize(width: w, height: 460))
+            }
+            CircleTierFilter().save(store: store)
+            CircleNav.shared.selected = ben?.id
+            save(CircleTab(), "round16-person-1100", CGSize(width: 1100, height: 460))
             return
         }
         if round9 {
