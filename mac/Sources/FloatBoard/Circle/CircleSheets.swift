@@ -99,7 +99,7 @@ struct SuggestionsSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     section("From your conversations (replies both ways)", empty: conv.isEmpty) {
                         ForEach(conv) { s in
-                            row(s.name.isEmpty ? s.handle.value : s.name,
+                            row(s.name.isEmpty ? Handles.display(s.handle) : s.name,
                                 "\(s.channels.map(\.title).joined(separator: ", ")) · \(s.exchanges) days of messages · last \(CircleFmt.ago(s.last))") {
                                 Button("Add") { add(PersonFormRequest(personID: nil, name: s.name, handles: [s.handle])) }
                                 Button("Not now") { c.dismiss(s.key) }

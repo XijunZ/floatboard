@@ -26,6 +26,8 @@ struct PersonForm: View {
     @State private var tags: [String] = []
     @State private var d = CircleDetails()
     @State private var handlesText: [HandleKind: String] = [:]
+    /// WhatsApp ids that are not a number (a linked id "<digits>@lid"): kept and saved, shown in words, removable.
+    @State private var chatIDs: [Handle] = []
     @State private var interval = ""
     @State private var problem: String?
     @State private var filling = false
@@ -37,9 +39,14 @@ struct PersonForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(request.personID == nil ? "Add to Circle" : "Edit \(name)").font(.system(size: 15, weight: .semibold))
+            // The name stays in view above the scrolling fields (owner's report: it scrolled away).
+            HStack(spacing: 10) {
+                Text("Name").foregroundStyle(.secondary).font(.system(size: 12)).frame(width: labelWidth, alignment: .trailing)
+                TextField("Full name", text: $name).font(.system(size: 12))
+            }
+            .padding(.trailing, 6)
             ScrollView {
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 8) {
-                    row("Name") { TextField("Full name", text: $name) }
                     row("Also known as") { TextField("Other names, separated by commas", text: $aliases) }
                     row("Tier") {
                         Picker("", selection: $tier) { ForEach(PersonTier.allCases, id: \.self) { Text($0.title).tag($0) } }
@@ -74,14 +81,32 @@ struct PersonForm: View {
                     }
                     ForEach([HandleKind.phone, .email, .whatsapp, .wechat, .linkedin], id: \.self) { k in
                         row(k == .linkedin ? "LinkedIn URL" : k.title) {
-                            TextField(k == .phone || k == .email ? "Several: separate with commas" : "", text: Binding(
-                                get: { handlesText[k] ?? "" }, set: { handlesText[k] = $0 }))
+                            VStack(alignment: .leading, spacing: 4) {
+                                TextField(k == .phone || k == .email ? "Several: separate with commas" : (k == .whatsapp ? "Number" : ""), text: Binding(
+                                    get: { handlesText[k] ?? "" }, set: { handlesText[k] = $0 }))
+                                if k == .whatsapp {
+                                    ForEach(chatIDs, id: \.self) { h in
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "message").foregroundStyle(.secondary)
+                                            Text(Handles.display(h)).foregroundStyle(.secondary)
+                                            Button { chatIDs.removeAll { $0 == h } } label: { Image(systemName: "xmark.circle.fill") }
+                                                .buttonStyle(.borderless).help("Remove this WhatsApp contact from the person")
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     row("Birthday") { TextField("YYYY-MM-DD or MM-DD", text: $d.birthday).frame(width: 160) }
                     row("Language") { TextField("e.g. English, Chinese", text: $d.language).frame(width: 200) }
                     row("Blog or news feed") { TextField("https://… (RSS or Atom)", text: $d.feedURL) }
-                    row("Notes") { TextEditor(text: $d.notes).frame(height: 70).overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.15))) }
+                    // A TextEditor has no first text baseline the grid can line up with: its label is top-aligned instead, so it
+                    // never runs into the row above (owner's report: "Blog or news feed" and "Notes" overlapped).
+                    GridRow(alignment: .top) {
+                        Text("Notes").foregroundStyle(.secondary).font(.system(size: 12)).gridColumnAlignment(.trailing).padding(.top, 4)
+                        TextEditor(text: $d.notes).font(.system(size: 12)).frame(height: 70)
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.15)))
+                    }
                 }
                 .padding(.trailing, 6)
             }
@@ -100,9 +125,11 @@ struct PersonForm: View {
         .onAppear(perform: load)
     }
 
+    private let labelWidth: CGFloat = 118
+
     private func row<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
         GridRow {
-            Text(label).foregroundStyle(.secondary).font(.system(size: 12)).gridColumnAlignment(.trailing)
+            Text(label).foregroundStyle(.secondary).font(.system(size: 12)).frame(minWidth: labelWidth, alignment: .trailing).gridColumnAlignment(.trailing)
             content().font(.system(size: 12))
         }
     }
@@ -117,9 +144,7 @@ struct PersonForm: View {
                 }
                 .padding(.horizontal, 6).padding(.vertical, 2).background(Capsule().fill(Color.primary.opacity(0.07)))
             }
-            Menu {
-                ForEach(store.tags.map(\.name).filter { n in !tags.contains(n) }, id: \.self) { n in Button(n) { tags.append(n) } }
-            } label: { Image(systemName: "plus") }.menuStyle(.borderlessButton).fixedSize()
+            PeopleTagMenu(except: tags, pick: { n in tags.append(n) }) { Image(systemName: "plus") }.menuStyle(.borderlessButton).fixedSize()
             if let p = TagRules.problems(tags: tags, tier: tier).first { Text(p).foregroundStyle(.red).font(.system(size: 11)) }
         }
     }
@@ -130,22 +155,36 @@ struct PersonForm: View {
             name = p.name; aliases = p.aliases.joined(separator: ", "); tier = p.tier; tags = store.itemTags(p.shortID).all
             d = c.details(id)
             interval = d.intervalDays.map(String.init) ?? ""
-            for (k, hs) in Dictionary(grouping: c.handles(id), by: \.kind) {
+            let (ids, rest) = Self.splitChatIDs(c.handles(id))
+            chatIDs = ids
+            for (k, hs) in Dictionary(grouping: rest, by: \.kind) {
                 handlesText[k] = hs.map { $0.kind == .linkedin ? "https://www." + $0.value : $0.value }.joined(separator: ", ")
             }
         } else {
             name = request.name; d.company = request.company; d.role = request.role
-            for (k, hs) in Dictionary(grouping: request.handles, by: \.kind) { handlesText[k] = hs.map(\.value).joined(separator: ", ") }
+            // A suggestion's handles: a WhatsApp chat id becomes a phone when it is one, else a "WhatsApp contact" line;
+            // never a raw id in a text field.
+            let normalized = request.handles.map { h in h.kind == .whatsapp ? (Handles.fromWhatsApp(h.value) ?? h) : h }
+            let (ids, rest) = Self.splitChatIDs(normalized)
+            chatIDs = ids
+            for (k, hs) in Dictionary(grouping: rest, by: \.kind) { handlesText[k] = hs.map(\.value).joined(separator: ", ") }
         }
     }
 
-    private var formHandles: [Handle] {
-        handlesText.flatMap { k, text in
-            text.split(separator: ",").compactMap { raw in Handles.normalize(k, String(raw)).map { Handle(kind: k, value: $0) } }
-        }
+    private var formHandles: [Handle] { ContactFormFields.handles(handlesText).handles + chatIDs }
+
+    /// WhatsApp handles that are ids rather than numbers, apart from the rest.
+    static func splitChatIDs(_ hs: [Handle]) -> (ids: [Handle], rest: [Handle]) {
+        (hs.filter { $0.kind == .whatsapp && $0.value.contains("@") }, hs.filter { !($0.kind == .whatsapp && $0.value.contains("@")) })
     }
 
     private func save() {
+        // A phone number, address or profile that can't be read is reported, never dropped silently.
+        let typed = ContactFormFields.handles(handlesText)
+        if !typed.unreadable.isEmpty {
+            problem = "Not a phone number, email address or profile FloatBoard can read: " + typed.unreadable.joined(separator: ", ") + ". Fix or remove it, then save."
+            return
+        }
         let c = CircleStore(store: store)
         var details = d
         details.intervalDays = Int(interval.trimmingCharacters(in: .whitespaces)).flatMap { $0 > 0 ? $0 : nil }
@@ -171,38 +210,38 @@ struct PersonForm: View {
             close(result)
         } else {
             let r = c.add(name: name, aliases: aliasList, tier: tier, tags: tagSet, details: details, handles: formHandles)
-            guard let p = r.person else { problem = r.problem; return }
+            guard let p = r.person else { problem = r.problem ?? "Couldn't add this person; see Activity for why."; return }
             if let cand = request.candidateID { c.markCandidateAdded(cand) }
             CircleLinker.run(store: store, person: p.id)
             close(p.id)
         }
     }
 
-    /// contact_form: header names, addresses and phone numbers only (from what the readers saw for these handles).
+    /// contact_form: what FloatBoard already has on this Mac for the typed phone numbers, emails and WhatsApp numbers (and the
+    /// person's own handles when editing): header names, addresses and numbers only, never message text (CircleFillHeaders).
+    /// Nothing found: said so, and Claude isn't asked. The note lists the fields Claude actually changed.
     private func fill() {
-        let hs = formHandles
-        var bits: [[String: String]] = hs.map { h in
-            ["name": name, "address": h.kind == .email ? h.value : "", "phone": h.kind == .phone ? h.value : ""]
-        }
-        if let id = request.personID {
-            for e in CircleStore(store: store).exchanges(of: id) where !e.name.isEmpty {
-                bits.append(["name": e.name, "address": e.handle?.kind == .email ? e.handle!.value : "", "phone": e.handle?.kind == .phone ? e.handle!.value : ""])
-            }
-        }
-        guard !bits.isEmpty, let client = CircleRunner.client(store) else {
-            problem = "Add a phone number or email first (and connect FloatBoard's engine in Settings › Mode)."
+        filledNote = nil; problem = nil
+        let typed = ContactFormFields.handles(handlesText)
+        let lookFor = typed.handles + chatIDs
+        guard !lookFor.isEmpty || request.personID != nil else { problem = "Add a phone number, email or WhatsApp number first."; return }
+        let headers: [FillHeader]
+        do { headers = try CircleFillHeaders.find(store: store, handles: lookFor, personID: request.personID) } catch {
+            problem = "Couldn't read your messages' details: \(error)"
+            store.activity("circle", .error, "Could not read message headers for the contact form", detail: "\(error)")
             return
         }
-        filling = true; problem = nil
+        guard !headers.isEmpty else { problem = "No messages found for these numbers or addresses yet."; return }
+        guard let client = CircleRunner.client(store) else { problem = "Connect FloatBoard's engine in Settings › Mode to fill the form."; return }
+        filling = true
         Task { @MainActor in
             defer { filling = false }
             do {
-                let f = try await client.circleFill(headers: Array(bits.prefix(20)))
-                if name.trimmingCharacters(in: .whitespaces).isEmpty { name = f.name }
-                if d.company.isEmpty { d.company = f.company }
-                if (handlesText[.email] ?? "").isEmpty { handlesText[.email] = f.emails.joined(separator: ", ") }
-                if (handlesText[.phone] ?? "").isEmpty { handlesText[.phone] = f.phones.joined(separator: ", ") }
-                filledNote = "Filled by Claude from message headers: check before saving."
+                let f = try await client.circleFill(headers: headers.prefix(CircleFillHeaders.cap).map(\.dictionary))
+                var fields = ContactFormFields(name: name, company: d.company, emails: handlesText[.email] ?? "", phones: handlesText[.phone] ?? "")
+                let changed = f.fill(&fields)
+                name = fields.name; d.company = fields.company; handlesText[.email] = fields.emails; handlesText[.phone] = fields.phones
+                filledNote = ContactFormFields.note(changed) ?? "Claude found nothing to add from \(headers.count) message header\(headers.count == 1 ? "" : "s")."
             } catch {
                 problem = "Couldn't fill the form: \((error as? ConnectorError)?.description ?? "\(error)")"
                 store.activity("circle", .warning, "Could not fill the contact form", detail: "\(error)")
