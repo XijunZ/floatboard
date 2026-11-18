@@ -159,38 +159,8 @@ struct StatusBadge: View {
     }
 }
 
-/// A goal's tags: chips with ✕ and a + menu of every tag (the first one is its primary).
+/// A goal's tags: the shared tag row, editable while the goal is active (the first one is its primary).
 struct GoalTags: View {
     let goal: Goal
-    @EnvironmentObject var store: Store
-
-    var body: some View {
-        let tags = store.itemTags(goal.shortID)
-        HStack(spacing: 6) {
-            Text("Tags").foregroundStyle(.secondary)
-            ForEach(tags.all, id: \.self) { t in
-                HStack(spacing: 3) {
-                    Circle().fill(store.color(t)).frame(width: 7, height: 7)
-                    Text(t).lineLimit(1)
-                    if goal.status == .active {
-                        Button { set(tags.all.filter { $0 != t }) } label: { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
-                            .buttonStyle(.borderless).help("Remove this tag")
-                    }
-                }
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Capsule().fill(Color.primary.opacity(0.07)))
-            }
-            if goal.status == .active {
-                Menu {
-                    ForEach(store.tags.map(\.name).filter { !tags.all.contains($0) }, id: \.self) { n in Button(n) { set(tags.all + [n]) } }
-                } label: { Image(systemName: "plus") }
-                    .menuStyle(.borderlessButton).fixedSize().help("Add a tag")
-            }
-        }
-    }
-
-    private func set(_ all: [String]) {
-        store.setTags(goal.shortID, primary: all.first, others: Array(all.dropFirst()))
-        store.objectWillChange.send()
-    }
+    var body: some View { ItemTagRow(id: goal.shortID, editable: goal.status == .active, emptyText: nil) }
 }
