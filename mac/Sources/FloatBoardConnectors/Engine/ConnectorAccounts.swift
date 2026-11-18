@@ -68,6 +68,7 @@ public enum ConnectorAccounts {
         }
         try Credentials.set(key, credentialName(id))
         ConnectorMemory.forget(connector: id, store: store)   // a new or re-pointed engine gets the phone's copies again
+        PhoneReach.forget(id)
         reported[id] = nil
     }
 
@@ -77,6 +78,7 @@ public enum ConnectorAccounts {
         try store.removeConnector(id: id)
         try Credentials.delete(credentialName(id))
         reported[id] = nil
+        PhoneReach.forget(id)
     }
 
     /// Checks only: every online connector's traffic goes here instead of the network.

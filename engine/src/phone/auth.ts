@@ -239,7 +239,19 @@ route("POST", "/v2/app/pair", async (req, env, user) => {
 });
 
 /** The Mac's list of paired phones (user key), and its "Disconnect" for one of them (same as Remove on the setup page). */
-route("GET", "/v2/app/phones", async (_req, env, user) => json({ phones: await listDevices(env, user.id) }));
+// `reachable`: whether a reminder sent by the engine reaches a phone (alerts on, and a paired phone with a push subscription
+// or an ntfy topic). The Mac shows a late reminder itself when it doesn't.
+route("GET", "/v2/app/phones", async (_req, env, user) => json({ phones: await listDevices(env, user.id), reachable: await phoneReachable(env, user.id) }));
+
+export async function phoneReachable(env: Env, userId: string): Promise<boolean> {
+  const r = await env.DB.prepare(`SELECT
+      (SELECT alerts_on FROM settings WHERE user_id=?) AS alerts_on,
+      (SELECT ntfy_topic FROM users WHERE id=?) AS ntfy,
+      (SELECT COUNT(*) FROM app_push p JOIN app_devices d ON d.id=p.device_id WHERE p.user_id=? AND d.user_id=? AND d.revoked=0) AS push`)
+    .bind(userId, userId, userId, userId).first<{ alerts_on: number | null; ntfy: string | null; push: number }>();
+  if (!r || r.alerts_on === 0) return false;
+  return !!r.ntfy || r.push > 0;
+}
 
 route("POST", "/v2/app/phones/remove", async (req, env, user) => {
   const rb = await readCappedJSON(req, 2_000);

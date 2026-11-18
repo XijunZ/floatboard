@@ -18,9 +18,9 @@ import Foundation
     init(store: Store, ui: UIState, show: @escaping (DueReminder) -> Void, showNow: @escaping (DueReminder) async throws -> Void,
          claim: @escaping (String) async -> ReminderClaim, release: @escaping (String) async -> Bool, pushBoard: @escaping () -> Void) {
         self.store = store; self.ui = ui; self.show = show; self.pushBoard = pushBoard
-        // No online engine (Board only, Mac only): no phone can get a late reminder, so this Mac shows it late.
-        delivery = ReminderDelivery(store: store, claim: claim, schedule: showNow, release: release,
-                                    phoneAvailable: { store.connectors.contains { !$0.baseURL.isEmpty && $0.id != LocalMode.connectorID } })
+        // A late reminder goes to the phone only when an engine says it can reach one (a paired phone with notifications,
+        // or ntfy); otherwise (no engine, no subscribed phone, never heard from) this Mac shows it late.
+        delivery = ReminderDelivery(store: store, claim: claim, schedule: showNow, release: release, phoneAvailable: { PhoneReach.any() })
     }
 
     func start() {
@@ -30,7 +30,13 @@ import Foundation
 
     func tick(now: Date = Date()) {
         // Budget reminders: delivered only once macOS took them (ReminderDelivery); the phone's copy then drops them.
-        Task { @MainActor [delivery, pushBoard] in if await delivery.tick(now: now) { pushBoard() } }
+        Task { @MainActor [store, delivery, pushBoard] in
+            // Whether a phone can be reached is asked first (at most every 10 minutes per engine), so the late branch decides on it.
+            for info in store.connectors where !info.baseURL.isEmpty && info.id != LocalMode.connectorID {
+                if let client = ConnectorAccounts.client(for: info, store: store) { await PhoneReach.refresh(connector: info.id, client: client, now: now) }
+            }
+            if await delivery.tick(now: now) { pushBoard() }
+        }
         ResolutionsNudger.tick(store: store, now: now, show: show)   // quarter and year reviews: outside the budget
         let last = UserDefaults.standard.object(forKey: Self.nudgedKey) as? Date
         if WeeklyReview.nudgeDue(now: now, lastNudged: last) {
