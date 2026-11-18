@@ -43,7 +43,11 @@ public final class Store: ObservableObject {
         reload()
     }
 
+    /// How many times the board was re-read (checks: a batch must re-read once, not once per item).
+    public private(set) var reloads = 0
+
     public func reload() {
+        reloads += 1
         do {
             let all = try db.query("SELECT id,name,color,position,fixed FROM areas ORDER BY position, id") { s in
                 (Category(id: DB.int(s, 0), name: DB.text(s, 1), colorHex: DB.text(s, 2),

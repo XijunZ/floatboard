@@ -124,7 +124,8 @@ public struct BulkResult {
         }.sorted { ($0.messages, $1.name) > ($1.messages, $0.name) }
     }
 
-    /// Adds each row as a new person (name, tier, the optional people tag, its handles), one transaction each. A row whose
+    /// Adds each row as a new person (name, tier, the optional people tag, its handles), one transaction each, the board
+    /// re-read once at the end. A row whose
     /// handle is already someone's in Circle is skipped; a rule or a write that fails is listed and leaves nothing behind.
     public static func add(_ rows: [BulkRow], tier: PersonTier, tag: String?, store: Store, now: Date = Date()) -> BulkResult {
         var out = BulkResult()
@@ -140,7 +141,8 @@ public struct BulkResult {
             let name = r.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { out.failed.append((r.name, "no name")); continue }
             do {
-                try store.performThrowing {
+                // One transaction per person; the board is re-read once, after the batch (not per person).
+                try store.db.transaction {
                     let id = try store.db.run("INSERT INTO people(name, aliases, tier, source, added, updated) VALUES(?,?,?,?,?,?)",
                                               [name, "[]", tier.rawValue, ItemSource.typed.rawValue, now, now])
                     for h in handles {
@@ -155,6 +157,7 @@ public struct BulkResult {
                 store.activity("circle", .error, "Bulk add couldn't save a person; nothing of them was kept", detail: "\(error)")
             }
         }
+        store.reload()
         return out
     }
 
