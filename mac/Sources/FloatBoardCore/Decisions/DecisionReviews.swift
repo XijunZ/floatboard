@@ -24,7 +24,11 @@ import Foundation
         let budget = ReminderBudget(store: store)
         var out: [ReminderGrant] = []
         for d in due(store: store, by: now) where (d.reviewAskAfter ?? .distantPast) <= now {
-            let g = budget.request(kind: .decisionReview, itemID: d.shortID, text: reminderText(d), now: now)
+            let g: ReminderGrant
+            do { g = try budget.request(kind: .decisionReview, itemID: d.shortID, text: reminderText(d), now: now) } catch {
+                store.activity("decisions", .error, "Could not ask for a review reminder; asked again at the next check", detail: "\(error)")
+                continue
+            }
             out.append(g)
             let next: Date
             switch g {

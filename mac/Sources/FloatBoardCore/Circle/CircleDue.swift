@@ -79,14 +79,20 @@ public struct DueEntry: Identifiable, Equatable {
             var d = c.details(e.person.id)
             if let r = d.remindedAt, now.timeIntervalSince(r) < remindEvery, !AppTime.calendar.isDate(r, inSameDayAs: now) { continue }
             let since = e.clocks.lastConversation.map { "last talked \(CircleFmt.f("d MMM", $0))" } ?? "no conversation seen yet"
-            let g = budget.request(kind: .circleDue, itemID: e.person.shortID, text: "Time to get in touch with \(e.person.name) (\(since))", now: now)
+            let g: ReminderGrant
+            do { g = try budget.request(kind: .circleDue, itemID: e.person.shortID, text: "Time to get in touch with \(e.person.name) (\(since))", now: now) } catch {
+                store.activity("circle", .error, "Could not ask for a reminder; asked again at the next check", detail: "\(error)")
+                continue
+            }
             grants.append(g)
             if case .granted = g { d.remindedAt = now; store.perform { try c.writeDetailsRow(e.person.id, d) } }
         }
         let details = c.allDetails()
         for p in PeopleStore(store: store).people() {
             guard let raw = details[p.id]?.birthday, let next = nextBirthday(raw, after: now), AppTime.calendar.isDate(next, inSameDayAs: now) else { continue }
-            grants.append(budget.request(kind: .circleBirthday, itemID: p.shortID, text: "It's \(p.name)'s birthday today", now: now))
+            do { grants.append(try budget.request(kind: .circleBirthday, itemID: p.shortID, text: "It's \(p.name)'s birthday today", now: now)) } catch {
+                store.activity("circle", .error, "Could not ask for a birthday reminder; asked again at the next check", detail: "\(error)")
+            }
         }
         return grants
     }

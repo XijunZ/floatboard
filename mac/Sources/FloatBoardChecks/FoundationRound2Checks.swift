@@ -17,7 +17,8 @@ import FloatBoardConnectors
 private struct Refused: Error {}
 
 @MainActor private func grant(_ budget: ReminderBudget, _ n: Int64, _ now: Date) -> String? {
-    if case .granted(let id, _) = budget.request(kind: .circleDue, itemID: ShortID(kind: .person, number: n), text: "Message P-\(n)", now: now) { return id }
+    let g = try? budget.request(kind: .circleDue, itemID: ShortID(kind: .person, number: n), text: "Message P-\(n)", now: now) // try?-ok: nil fails the caller's check
+    if case .granted(let id, _) = g { return id }
     return nil
 }
 

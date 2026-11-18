@@ -57,24 +57,23 @@ public struct BudgetReminder: Equatable {
 
     /// Asks for a reminder now. Quiet hours move the time to their end (and it counts on that day). Over the day's limit:
     /// deferred to the next day's first allowed minute. The same kind and item on the same day: the reminder already granted.
-    public func request(kind: ReminderKind, itemID: ShortID, text: String, now: Date = Date()) -> ReminderGrant {
+    /// Throws when the database can't be read or written: a failure is never read as "deferred".
+    public func request(kind: ReminderKind, itemID: ShortID, text: String, now: Date = Date()) throws -> ReminderGrant {
         let s = settings
         let fire = Self.allowedTime(from: now, settings: s)
         let day = Due.dayString(fire)
         let id = "rb-\(kind.rawValue)-\(itemID.text)-\(day)"
-        var out: ReminderGrant = .deferred(until: fire)
-        store.perform {
-            if try store.db.query("SELECT 1 FROM reminders WHERE id=?", [id], { DB.int($0, 0) }).first != nil { out = .duplicate(id: id); return }
+        return try store.performThrowing { () throws -> ReminderGrant in
+            if try store.db.query("SELECT 1 FROM reminders WHERE id=?", [id], { DB.int($0, 0) }).first != nil { return .duplicate(id: id) }
             let used = try store.db.query("SELECT count(*) FROM reminders WHERE day=?", [day]) { DB.int($0, 0) }.first ?? 0
             guard used < s.dailyLimit else {
                 let nextDay = AppTime.calendar.date(byAdding: .day, value: 1, to: AppTime.calendar.startOfDay(for: fire)) ?? fire
-                out = .deferred(until: Self.allowedTime(from: nextDay, settings: s)); return
+                return .deferred(until: Self.allowedTime(from: nextDay, settings: s))
             }
             try store.db.run("INSERT INTO reminders(id, kind, item, text, day, fire_at, granted) VALUES(?,?,?,?,?,?,?)",
                              [id, kind.rawValue, itemID.text, text, day, fire, now])
-            out = .granted(id: id, fireAt: fire)
+            return .granted(id: id, fireAt: fire)
         }
-        return out
     }
 
     /// Granted reminders not yet delivered, by time.
