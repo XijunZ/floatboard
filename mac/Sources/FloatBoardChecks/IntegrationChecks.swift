@@ -575,3 +575,20 @@ func integrationRebindingLiveChecks() async {
     let texts = ds.reviews(of: d.id).map(\.text)
     check(r.applied == ["r1", "r1", "r2"] && texts.count == 2 && texts.contains { $0.contains("Later: costs rose") }, "a_second_different_review_is_kept_as_another_review")
 }
+
+/// Round 13 (minor): a screened version whose decision couldn't be saved is not marked screened (it is read again).
+@MainActor func screeningRecordFailureChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-screenfail-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "screenfail.sqlite") else { return }
+    DecisionsArea.registerCore()
+    guard let j = JotStore(store: s).create(text: "We decided to stop the newsletter.", now: decisionsNow.addingTimeInterval(-3600)) else { check(false, "sf setup"); return }
+    let job = ScreenJot(ref: "J-\(j.id)@\(DecisionScreening.version(j.text))", kind: "jot", added: "", text: j.text, references: [])
+    let ans = ScreenResult(ref: job.ref, ok: true, decisions: [ScreenFound(quote: "We decided to stop the newsletter", decision: "Stop the newsletter", type: "operational")])
+    s.performForTest("CREATE TRIGGER fail_d BEFORE INSERT ON decisions BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    let o = DecisionScreening.apply([ans], sent: [job], store: s, now: decisionsNow)
+    s.performForTest("DROP TRIGGER fail_d")
+    check(o.screened == 0 && o.unreadable == 1 && DecisionScreening.pending(store: s, now: decisionsNow).contains { $0.ref == job.ref },
+          "screening_keeps_a_version_whose_decision_could_not_be_saved")
+}
