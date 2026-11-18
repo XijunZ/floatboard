@@ -652,3 +652,23 @@ func integrationRebindingLiveChecks() async {
     check(refs.contains { $0.hasPrefix("J-3@") } && refs.contains { $0.hasPrefix("J-2@") } && !refs.contains { $0.hasPrefix("J-1@") },
           "upgrade_17_to_18_screens_jots_written_after_the_mark_and_not_those_before")
 }
+
+/// Round 18 (3): a save that fails is reported, so a sheet or form stays open with its fields: editing a goal answers with
+/// a problem when its write fails, and every swallowed write failure is counted (forms compare the count before closing).
+@MainActor func saveFailureChecks() {
+    let root = checkFolder("fb-savefail")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = checkStore(root, "sf.sqlite", modules: [.resolutions, .jots, .circle]) else { return }
+    let r = ResolutionStore(store: s)
+    guard case .success(let g) = r.create(level: .quarter, period: GoalPeriod.current(.quarter, now: Date()), title: "Ship the plan") else { check(false, "sf setup"); return }
+    s.performForTest("CREATE TRIGGER fail_r BEFORE UPDATE ON resolutions BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    let before = s.failedWrites
+    let problem = r.update(g.id, title: "Ship the plan by Friday", notes: "")
+    check(problem != nil && r.goal(g.id)?.title == "Ship the plan", "a_goal_edit_that_fails_says_so")
+    guard let p = PeopleStore(store: s).create(name: "Ann Example") else { check(false, "sf person"); return }
+    s.performForTest("CREATE TRIGGER fail_p BEFORE UPDATE ON people BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    var q = p; q.name = "Ann B Example"
+    let mid = s.failedWrites
+    PeopleStore(store: s).update(q)
+    check(mid > before && s.failedWrites == mid + 1, "a_swallowed_write_failure_is_counted")
+}

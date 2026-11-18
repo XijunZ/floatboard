@@ -11,6 +11,7 @@ struct DecisionReviewSheet: View {
     @State private var happened = ""
     @State private var sound = ""
     @State private var made: Set<Int64> = []
+    @State private var saveProblem: String?   // a save that failed: the sheet stays open with the answers
 
     var body: some View {
         let ds = DecisionStore(store: store)
@@ -57,18 +58,19 @@ struct DecisionReviewSheet: View {
                     }
                 }
                 HStack {
-                    Button("Snooze a week") { DecisionReviews.snooze(d.id, store: store); close() }
-                    Button("Turn off for this decision") { DecisionReviews.setOn(d.id, false, store: store); close() }
+                    Button("Snooze a week") { closeIfSaved { DecisionReviews.snooze(d.id, store: store) } }
+                    Button("Turn off for this decision") { closeIfSaved { DecisionReviews.setOn(d.id, false, store: store) } }
                     Spacer()
                     Button("Cancel") { close() }.keyboardShortcut(.cancelAction)
                     Button("Save review") {
-                        DecisionReviews.answer(d.id, happened: happened, sound: sound, store: store)
-                        close()
+                        if DecisionReviews.answer(d.id, happened: happened, sound: sound, store: store) != nil { close() }
+                        else { saveProblem = "Couldn't save (see Activity). Your words are still here; try again." }
                     }
                     .keyboardShortcut(.defaultAction)
                     .disabled((happened + sound).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || d.reviewState == .done)
                 }
                 .font(.system(size: 12))
+                if let saveProblem { Text(saveProblem).font(.system(size: 11)).foregroundStyle(.red) }
             } else {
                 Text("This decision is gone.").foregroundStyle(.secondary)
                 Button("Close") { close() }
@@ -86,6 +88,13 @@ struct DecisionReviewSheet: View {
                 .padding(4)
                 .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.primary.opacity(0.15)))
         }
+    }
+
+    /// Runs a save and closes only when no write failed (the store counts them); otherwise says so and stays open.
+    private func closeIfSaved(_ save: () -> Void) {
+        let before = store.failedWrites
+        save()
+        if store.failedWrites == before { close() } else { saveProblem = "Couldn't save (see Activity). Your words are still here; try again." }
     }
 }
 

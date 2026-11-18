@@ -40,9 +40,14 @@ import SQLite3
         guard g.status == .active else { return "\(g.shortID.text) was reviewed and stays as it was." }
         guard !t.isEmpty else { return "A goal needs a few words." }
         guard t != g.title || notes != g.notes else { return nil }
-        store.perform {
-            try store.db.run("INSERT INTO resolution_history(goal_id, title, notes, at) VALUES(?,?,?,?)", [id, g.title, g.notes, now])
-            try store.db.run("UPDATE resolutions SET title=?, notes=?, updated=? WHERE id=?", [t, notes, now, id])
+        do {
+            try store.performThrowing {
+                try store.db.run("INSERT INTO resolution_history(goal_id, title, notes, at) VALUES(?,?,?,?)", [id, g.title, g.notes, now])
+                try store.db.run("UPDATE resolutions SET title=?, notes=?, updated=? WHERE id=?", [t, notes, now, id])
+            }
+        } catch {
+            store.activity("resolutions", .error, "Could not save \(g.shortID.text)", detail: "\(error)")
+            return "Couldn't save \(g.shortID.text) (see Activity). Your words are still here; try again."
         }
         changed()
         return nil
