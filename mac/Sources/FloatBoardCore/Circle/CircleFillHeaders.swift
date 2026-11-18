@@ -72,6 +72,16 @@ public struct FillHeader: Equatable, Hashable, Sendable {
         return out
     }
 
+    /// How many WhatsApp message records Circle's reader kept for these handles (one per handle, day and direction).
+    public static func records(store: Store, handles: [Handle]) -> Int {
+        var n = 0
+        for h in handles where h.kind == .whatsapp || h.kind == .phone {
+            n += Int((try? store.db.query("SELECT count(*) FROM circle_exchanges WHERE channel='whatsapp' AND handle_kind=? AND handle=?", // try?-ok: unreadable counts as none; only the note's number
+                                          [h.kind.rawValue, h.value]) { DB.int($0, 0) })?.first ?? 0)
+        }
+        return n
+    }
+
     /// International digits of a phone or WhatsApp number ("+44 7700 900123", "07700 900123" or a chat id).
     static func phoneDigits(_ raw: String) -> String? {
         let t = raw.lowercased()
@@ -83,8 +93,10 @@ public struct FillHeader: Equatable, Hashable, Sendable {
 /// The form fields Claude may fill, and how typed handles are read (an unreadable one is reported, never dropped silently).
 public struct ContactFormFields: Equatable {
     public var name: String, company: String, emails: String, phones: String
-    public init(name: String, company: String, emails: String, phones: String) {
-        self.name = name; self.company = company; self.emails = emails; self.phones = phones
+    /// The form's WhatsApp number field.
+    public var whatsapp: String
+    public init(name: String, company: String, emails: String, phones: String, whatsapp: String = "") {
+        self.name = name; self.company = company; self.emails = emails; self.phones = phones; self.whatsapp = whatsapp
     }
 
     /// "Filled by Claude…" naming what changed; nil when nothing did (no note then).

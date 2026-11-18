@@ -83,7 +83,7 @@ public enum WhatsAppLocal {
 
     /// Copies WhatsApp's database to a private temporary folder, opens the copy and runs `body` on it; the copy is
     /// deleted afterwards. WhatsApp's own files are only read.
-    static func withCopy<T>(_ folder: URL, _ body: (OpaquePointer) throws -> T) throws -> T {
+    static func withCopy<T>(_ folder: URL, file: String = WhatsAppLocal.file, _ body: (OpaquePointer) throws -> T) throws -> T {
         let fm = FileManager.default
         let src = folder.appendingPathComponent(file)
         guard fm.fileExists(atPath: folder.path) else { throw ReadError.notInstalled }
@@ -219,7 +219,7 @@ public enum WhatsAppLocal {
         var text: String? { if case .text(let v) = self { return v }; return nil }
     }
 
-    private static func rows(_ db: OpaquePointer, _ sql: String, _ args: [Value]) throws -> [[Value]] {
+    static func rows(_ db: OpaquePointer, _ sql: String, _ args: [Value]) throws -> [[Value]] {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
             throw ReadError.unreadable(String(cString: sqlite3_errmsg(db)))

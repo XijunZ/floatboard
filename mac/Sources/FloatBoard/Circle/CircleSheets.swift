@@ -99,9 +99,13 @@ struct SuggestionsSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     section("From your conversations (replies both ways)", empty: conv.isEmpty) {
                         ForEach(conv) { s in
-                            row(s.name.isEmpty ? Handles.display(s.handle) : s.name,
+                            row(s.name.isEmpty ? LIDBook.display(store: store, s.handle) : s.name,
                                 "\(s.channels.map(\.title).joined(separator: ", ")) · \(s.exchanges) days of messages · last \(CircleFmt.ago(s.last))") {
-                                Button("Add") { add(PersonFormRequest(personID: nil, name: s.name, handles: [s.handle])) }
+                                Button("Add") {
+                                    // A linked id with a known number comes with the number too (same person).
+                                    let number = Handles.isLinkedID(s.handle) ? LIDBook.phone(store: store, s.handle.value).map { Handle(kind: .phone, value: $0) } : nil
+                                    add(PersonFormRequest(personID: nil, name: s.name, handles: [s.handle] + (number.map { [$0] } ?? [])))
+                                }
                                 Button("Not now") { c.dismiss(s.key) }
                             }
                         }

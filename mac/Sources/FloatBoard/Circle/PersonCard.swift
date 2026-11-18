@@ -250,8 +250,8 @@ struct PersonCard: View {
             ForEach(hs, id: \.self) { h in
                 HStack(spacing: 6) {
                     Text(h.kind.title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
-                    if let l = Handles.chatLink(h), let u = URL(string: l) { Link(Handles.display(h), destination: u).font(.system(size: 12)) }
-                    else { Text(Handles.display(h)).font(.system(size: 12)).textSelection(.enabled) }
+                    if let l = Handles.chatLink(h), let u = URL(string: l) { Link(LIDBook.display(store: store, h), destination: u).font(.system(size: 12)) }
+                    else { Text(LIDBook.display(store: store, h)).font(.system(size: 12)).textSelection(.enabled) }
                 }
             }
         }
