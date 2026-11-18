@@ -99,16 +99,20 @@
     renderDecisions();
   }
 
-  function queueDecision(a) {
-    if (!a) return;
-    var acc = confirmedAccount() || (decisions && decisions.account) || null;
-    if (!acc) { toast("Sign in again to do this."); return; }
+  // Queues an action under `account` (the account its form or sheet was opened in; otherwise the confirmed one or the cached
+  // copy's). True only once it is kept on this phone; false: nothing was queued (the caller keeps its form open).
+  function queueDecision(a, account) {
+    if (!a) return false;
+    var acc = account || confirmedAccount() || (decisions && decisions.account) || null;
+    if (!acc) { toast("Sign in again to do this."); return false; }
     if (decQueue.account !== acc) loadDecisionCache();   // a queue this phone already holds (screen not opened yet) is kept
-    if (decQueue.account !== acc) decQueue = { account: acc, actions: [] };
-    decQueue.actions.push(a);
-    saveDecQueue();
+    var next = decisionEnqueue(decQueue, a, acc);
+    if (!next) { toast("Changes of another account are still waiting on this phone. Sign in to it, or sign out, first."); return false; }
+    if (!storeDurable(DEC_QUEUE_KEY, next)) return false;
+    decQueue = next;
     renderDecisions();
     syncDecisions();
+    return true;
   }
 
   function renderDecisions() {
@@ -143,6 +147,7 @@
   }
 
   function decisionSheet(d) {
+    var origin = sessionStamp();
     openSheet(function (sheet) {
       sheet.appendChild(el("h3", null, d.text));
       sheet.appendChild(el("p", "sub", d.id + " · " + decisionDetail(d) + " · " + (d.status === "maybe" ? "Maybe" : d.status)));
@@ -162,7 +167,8 @@
       if (canDismiss(d)) {
         var n = el("button", "btn secondary", "Not a decision");
         n.addEventListener("click", function () {
-          queueDecision(notDecisionAction(d, newId(), new Date().toISOString()));
+          if (!sameSession(origin)) { closeSheet(); toast("You changed account, so nothing was marked."); return; }
+          if (!queueDecision(notDecisionAction(d, newId(), new Date().toISOString()), origin.account)) return;
           closeSheet();
           toast("Marked not a decision. Your Mac adds it to the Decisions rulebook.");
         });
@@ -173,6 +179,7 @@
   }
 
   function reviewSheet(d) {
+    var origin = sessionStamp();
     openSheet(function (sheet) {
       sheet.appendChild(el("h3", null, "Review " + d.id));
       sheet.appendChild(el("p", "dec-quote", d.text));
@@ -188,7 +195,8 @@
         e.preventDefault();
         var act = reviewAction(d, a1.value, a2.value, newId(), new Date().toISOString());
         if (!act) { toast("Write what happened first."); return; }
-        queueDecision(act);
+        if (!sameSession(origin)) { closeSheet(); toast("You changed account, so this review was not saved."); return; }
+        if (!queueDecision(act, origin.account)) { toast("Couldn't keep this review on the phone. Your words are still here; try Save again."); return; }
         closeSheet();
         toast("Review saved. Your Mac keeps it as a jot.");
       });
@@ -201,6 +209,7 @@
   // sync, linked to the jot.
   function decisionForm(selection, source, context) {
     var form = decisionFormStart(selection), touched = {};
+    var origin = sessionStamp();   // the account and session the form belongs to (shared session check, app.client.js)
     openSheet(function (sheet) {
       sheet.appendChild(el("h3", null, "Make decision"));
       var f = el("form", "dec-form");
@@ -235,13 +244,18 @@
         Object.keys(fields).forEach(function (k) { form[k] = fields[k].value; });
         var act = makeDecisionAction(form, selection, source, newId(), new Date().toISOString());
         if (!act) { toast("Write the decision first."); return; }
-        queueDecision(act);
+        if (!sameSession(origin)) {   // signed out or another account since the form opened: never saved under it
+          closeSheet();
+          toast("You changed account, so this decision was not saved.");
+          return;
+        }
+        if (!queueDecision(act, origin.account)) { toast("Couldn't keep this decision on the phone. Your words are still here; try Save again."); return; }
         closeSheet();
         toast("Decision saved. Your Mac records it on its next sync.");
       });
       api("/app/api/decisions/fill", { method: "POST", body: { selection: String(selection || "").slice(0, 8000), context: String(context || "").slice(0, 8000) } })
         .then(function (answer) {
-          if (!fields.text.isConnected) return;   // the sheet was closed
+          if (!fields.text.isConnected || !sameSession(origin)) return;   // the sheet was closed, or another account now
           Object.keys(fields).forEach(function (k) { form[k] = fields[k].value; });
           var filled = decisionFormFill(form, touched, answer);
           Object.keys(fields).forEach(function (k) { if (!touched[k]) fields[k].value = filled[k]; });
