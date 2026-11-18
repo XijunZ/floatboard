@@ -116,8 +116,26 @@ extension CircleStore {
     @discardableResult
     public func applyEngineUpdates(_ items: [EngineUpdate], now: Date = Date()) -> Int {
         var added = 0
+        store.perform { added = try applyEngineUpdateRows(items, now: now) }
+        return added
+    }
+
+    /// One page of What's new and its cursor, written together: when the write fails nothing is kept (the old cursor stays,
+    /// so the page comes again) and the error is thrown. Returns how many were new.
+    @discardableResult
+    public func importUpdatePage(_ items: [EngineUpdate], cursorKey: String, cursor: String, now: Date = Date()) throws -> Int {
+        try store.performThrowing {
+            let n = try applyEngineUpdateRows(items, now: now)
+            try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [cursorKey, cursor])
+            return n
+        }
+    }
+
+    /// The body of `applyEngineUpdates`, for callers inside a transaction.
+    func applyEngineUpdateRows(_ items: [EngineUpdate], now: Date) throws -> Int {
+        var added = 0
         let iso = ISO8601DateFormatter()
-        store.perform {
+        do {
             for u in items {
                 guard let pid = livePerson(u.person) else { continue }
                 if u.kind == "officer_candidate" {

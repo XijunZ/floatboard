@@ -392,3 +392,43 @@ private func fakeWhatsAppForCircle(_ folder: URL, now: Date) -> Bool {
     let again = c.applyPhoneActions([CirclePhoneAction(id: "pw-00001", person: p.shortID.text, action: "contacted", madeAt: iso)])
     check(again.applied == ["pw-00001"] && c.exchanges(of: p.id).contains { $0.channel == .manual }, "failed_phone_write_applies_on_retry")
 }
+
+/// Codex round 2 #2: a page from the engine and its cursor are written together; a failed write keeps the old cursor, so the
+/// page comes again (nothing is skipped for good).
+@MainActor func circleSyncAtomicChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-circle-atomic-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = circleStore(root, "atomic.sqlite") else { return }
+    let c = CircleStore(store: s)
+    guard let p = c.add(name: "Wes Example", tier: .network, tags: ItemTags(primary: nil, others: []), details: CircleDetails(),
+                        handles: [Handle(kind: .email, value: "wes@example.com")]).person else { return }
+    let pid = p.shortID.text
+    let client = ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k") { req in
+        let path = req.url!.path, q = req.url!.query ?? ""
+        func ok(_ o: Any) -> (Data, HTTPURLResponse) {
+            (try! JSONSerialization.data(withJSONObject: o), HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let first = q.contains("after=0")
+        switch path {
+        case "/v2/circle/exchanges":
+            return ok(["exchanges": first ? [["seq": 5, "key": "gmail:x:1:0", "channel": "gmail", "direction": "in", "at": "2026-11-16T10:00:00.000Z",
+                                              "account": "me@example.com", "handle": "wes@example.com", "name": "Wes"]] : [], "readers": [], "next": first ? 5 : 5, "more": false])
+        case "/v2/circle/updates":
+            return ok(["updates": first ? [["seq": 9, "key": "news:\(pid):w", "person": pid, "kind": "news_person", "title": "Wes Example speaks",
+                                            "detail": "", "url": "https://example.com/w", "at": "2026-11-15T10:00:00.000Z", "match": "possible"]] : [],
+                       "next": first ? 9 : 9, "more": false])
+        case "/v2/circle/actions": return ok(["actions": []])
+        default: return ok(["ok": true])
+        }
+    }
+    s.performForTest("CREATE TRIGGER fail_x BEFORE INSERT ON circle_exchanges BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+    s.performForTest("CREATE TRIGGER fail_u BEFORE INSERT ON circle_updates BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+    let problems = await CircleSync.run(store: s, client: client, connector: "c1", now: circleDay(17))
+    check(problems.count >= 2 && c.meta("circle_engine_exchanges:c1") == nil && c.meta("circle_engine_updates:c1") == nil,
+          "failed_page_write_keeps_the_old_cursor")
+    s.performForTest("DROP TRIGGER fail_x"); s.performForTest("DROP TRIGGER fail_u")
+    _ = await CircleSync.run(store: s, client: client, connector: "c1", now: circleDay(17))
+    check(c.exchanges(of: p.id).contains { $0.channel == .gmail } && c.updates(p.id).first?.title == "Wes Example speaks"
+          && c.meta("circle_engine_exchanges:c1") == "5", "failed_page_comes_again_and_is_taken_in")
+}

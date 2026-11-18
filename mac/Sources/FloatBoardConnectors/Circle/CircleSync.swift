@@ -50,14 +50,14 @@ public enum CircleSync {
                           let at = frac.date(from: e.at) ?? iso.date(from: e.at) else { return nil }
                     return ExchangeInput(channel: ch, direction: dir, at: at, handle: Handle(kind: .email, value: e.handle), name: e.name, ref: e.account)
                 }
-                c.record(inputs, now: now)
                 for r in page.readers {
                     let name = r.reader == "outlook" ? "outlook" : r.reader
                     c.setChannel(name, asOf: r.asOf.flatMap { frac.date(from: $0) ?? iso.date(from: $0) },
                                  completeFrom: r.completeFrom.flatMap { frac.date(from: $0) ?? iso.date(from: $0) }, cursor: "",
                                  note: (r.note ?? "").isEmpty ? (name == "outlook" ? Channel.outlook.limits ?? "" : "inbox and Sent") : r.note ?? "")
                 }
-                c.setMeta(exchangeCursor + ":" + id, String(page.next))
+                // The page and its cursor in one transaction: a failed write keeps the old cursor (the page comes again).
+                try c.importExchangePage(inputs, cursorKey: exchangeCursor + ":" + id, cursor: String(page.next), now: now)
                 if !page.more { break }
             }
         }
@@ -65,8 +65,7 @@ public enum CircleSync {
             for _ in 0..<10 {
                 let after = Int64(c.meta(updateCursor + ":" + id) ?? "") ?? 0
                 let page = try await client.circleUpdates(after: after)
-                c.applyEngineUpdates(page.updates, now: now)
-                c.setMeta(updateCursor + ":" + id, String(page.next))
+                try c.importUpdatePage(page.updates, cursorKey: updateCursor + ":" + id, cursor: String(page.next), now: now)
                 if !page.more { break }
             }
         }
