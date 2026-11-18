@@ -10,7 +10,7 @@ public enum CircleClock {
     public static let conversationWindow: TimeInterval = 14 * 86400
     public static let outreachQuiet: TimeInterval = 7 * 86400
 
-    /// The tier's default (Family 1 month, Close friend 2 weeks, Network 3 months), or the person's own days; Investor caps
+    /// The tier's default (Family 1 month, Close friend 2 weeks, Friend 6 weeks, Network 3 months), or the person's own days; Investor caps
     /// it at 3 months (`TagRules.intervalCapMonths`).
     public static func interval(tier: PersonTier, tags: [String], intervalDays: Int?) -> DateComponents {
         let base: DateComponents
@@ -19,6 +19,7 @@ public enum CircleClock {
             switch tier {
             case .family: base = DateComponents(month: 1)
             case .close: base = DateComponents(day: 14)
+            case .friend: base = DateComponents(day: 42)
             case .network: base = DateComponents(month: 3)
             }
         }

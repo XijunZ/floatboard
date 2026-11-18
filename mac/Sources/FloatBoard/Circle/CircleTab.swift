@@ -8,7 +8,8 @@ struct CircleTab: View {
     @EnvironmentObject var store: Store
     @ObservedObject private var nav = CircleNav.shared
     @State private var query = ""
-    @State private var tier: PersonTier?
+    @State private var tiers = CircleTierFilter()
+    @State private var tiersLoaded = false
     @State private var tagFilter: Set<String> = []
     @State private var sort: Sort = .due
     @State private var dueOnly = false
@@ -68,10 +69,7 @@ struct CircleTab: View {
                     Label("Due this week \(due.count)", systemImage: "clock").font(.system(size: 12, weight: dueOnly ? .semibold : .regular))
                 }.buttonStyle(.bordered).tint(due.contains(where: \.overdue) ? .orange : nil).fixedSize()
                 TextField("Search names, companies, handles", text: $query).textFieldStyle(.roundedBorder).frame(width: 220)
-                Picker("", selection: $tier) {
-                    Text("All tiers").tag(PersonTier?.none)
-                    ForEach(PersonTier.allCases, id: \.self) { Text($0.title).tag(PersonTier?.some($0)) }
-                }.labelsHidden().frame(width: 120)
+                TierToggles(filter: $tiers)
                 Menu(tagFilter.isEmpty ? "All tags" : tagFilter.sorted().joined(separator: ", ")) {
                     ForEach(store.tags.map(\.name), id: \.self) { t in
                         Button { if tagFilter.contains(t) { tagFilter.remove(t) } else { tagFilter.insert(t) } } label: {
@@ -89,12 +87,14 @@ struct CircleTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .controlSize(.small)
+        .onAppear { if !tiersLoaded { tiers = CircleTierFilter.load(store: store); tiersLoaded = true } }
+        .onChange(of: tiers) { _, new in if tiersLoaded { new.save(store: store) } }
     }
 
     private func filtered(_ all: [Person], clocks: [Int64: Clocks], details: [Int64: CircleDetails], handles: [Int64: [Handle]], due: Set<Int64>) -> [Person] {
         var out = all.filter { p in
             if dueOnly && !due.contains(p.id) { return false }
-            if let tier, p.tier != tier { return false }
+            if !tiers.shows(p.tier) { return false }
             if !tagFilter.isEmpty && !TagFilter.matches(store.itemTags(p.shortID), any: tagFilter) { return false }
             guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return true }
             let d = details[p.id] ?? CircleDetails()
@@ -114,7 +114,7 @@ struct CircleTab: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 if people.isEmpty {
-                    Text(query.isEmpty && tier == nil && tagFilter.isEmpty && !dueOnly ? "No one yet. Add someone, or look at Suggestions." : "No one matches.")
+                    Text(query.isEmpty && tiers.showsAll && tagFilter.isEmpty && !dueOnly ? "No one yet. Add someone, or look at Suggestions." : "No one matches.")
                         .font(.system(size: 12)).foregroundStyle(.secondary).padding(10)
                 }
                 ForEach(people) { p in

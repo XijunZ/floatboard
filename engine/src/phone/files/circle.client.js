@@ -6,7 +6,9 @@
 
   var CIRCLE_KEY = "floatboard.circle";        // { account, copy, at }
   var CIRCLE_QUEUE_KEY = "floatboard.circleq"; // { account, actions: [...] }
-  var CIRCLE_SEND_BYTES = 30000;               // under the engine's 32 KB cap for /app/api/circle/action
+  var CIRCLE_SEND_BYTES = 30000;
+  // The tiers' names, closest first; a tier not listed (a newer Mac) shows no label.
+  var CIRCLE_TIERS = { family: "Family", close: "Close friend", friend: "Friend", network: "Network" };               // under the engine's 32 KB cap for /app/api/circle/action
   var circleCopy = null;
   var circleQueue = { account: null, actions: [] };
   var circleQuery = "";
@@ -125,7 +127,7 @@
     b.type = "button";
     b.appendChild(el("div", "t", p.name));
     var meta = el("div", "meta");
-    meta.appendChild(el("span", null, ({ family: "Family", close: "Close friend", network: "Network" })[p.tier] || ""));
+    meta.appendChild(el("span", null, CIRCLE_TIERS[p.tier] || ""));
     meta.appendChild(el("span", null, "talked " + circleAgo(p.last_talked, Date.now())));
     if (p.waiting) meta.appendChild(el("span", "late", CIRCLE_DONE[p.waiting]));
     else if (p.due) meta.appendChild(el("span", "late", "Due"));
@@ -161,7 +163,7 @@
     openSheet(function (sheet) {
       sheet.dataset.circle = "1";
       sheet.appendChild(el("h3", null, p.name));
-      sheet.appendChild(el("p", "sub", [({ family: "Family", close: "Close friend", network: "Network" })[p.tier], p.company].concat(p.tags || []).filter(Boolean).join(" · ")));
+      sheet.appendChild(el("p", "sub", [CIRCLE_TIERS[p.tier] || "", p.company].concat(p.tags || []).filter(Boolean).join(" · ")));
       var now = Date.now();
       sheet.appendChild(el("p", "sub", "Last talked " + circleAgo(p.last_talked, now) + " · heard from " + circleAgo(p.last_heard, now)
         + " · outreach " + circleAgo(p.last_outreach, now)));

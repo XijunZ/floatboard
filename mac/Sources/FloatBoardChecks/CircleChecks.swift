@@ -304,3 +304,34 @@ let circleV14Drops = ["circle_people", "person_handles", "circle_exchanges", "ci
     check(after.company == "Fund Two" && after.role.isEmpty && after.notes.isEmpty && c.details(b.id).company == "Fund",
           "split_keeps_fields_edited_after_the_merge")
 }
+
+/// Round 16: a fourth tier, Friend, between Close friend and Network (every 6 weeks by default), stored as "friend" in the
+/// existing text column; and the list's tier toggles, remembered across launches.
+@MainActor func friendTierChecks() {
+    let root = checkFolder("fb-friend")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = circleStore(root, "friend.sqlite") else { return }
+    check(PersonTier.allCases.map(\.title) == ["Family", "Close friend", "Friend", "Network"], "tiers_are_family_close_friend_friend_network")
+    let iv = CircleClock.interval(tier: .friend, tags: [], intervalDays: nil)
+    check(iv.day == 42 && CircleClock.label(iv) == "6 weeks", "friend_is_every_6_weeks_by_default")
+    let c = CircleStore(store: s)
+    guard let ann = c.add(name: "Ann Example", tier: .friend, tags: ItemTags(primary: nil, others: []), details: CircleDetails(), handles: []).person,
+          let ben = c.add(name: "Ben Example", tier: .close, tags: ItemTags(primary: nil, others: []), details: CircleDetails(), handles: []).person else { check(false, "friend setup"); return }
+    let raw = (try? s.db.query("SELECT tier FROM people WHERE id=?", [ann.id]) { DB.text($0, 0) })?.first // try?-ok: nil fails the check
+    check(raw == "friend" && PeopleStore(store: s).person(ann.id)?.tier == .friend, "friend_is_stored_as_friend_and_read_back")
+    check(c.setTier([ben.id], .friend).isEmpty && PeopleStore(store: s).person(ben.id)?.tier == .friend
+          && PeopleStore(store: s).person(ann.id)?.tier == .friend, "change_tier_to_friend")
+    check(CircleCopy.phone(store: s, now: Date()).people.contains { $0.id == ann.shortID.text && $0.tier == "friend" }, "phone_copy_carries_friend")
+
+    // The tier toggles: all shown at first; click hides one; option-click shows only that one (again: all); kept on the board.
+    var f = CircleTierFilter.load(store: s)
+    check(f.shown == Set(PersonTier.allCases), "all_tiers_shown_at_first")
+    f.toggle(.network); f.save(store: s)
+    check(CircleTierFilter.load(store: s).shown == [.family, .close, .friend] && !CircleTierFilter.load(store: s).shows(.network), "a_tier_toggled_off_is_remembered")
+    f.only(.friend)
+    let only = f.shown
+    f.only(.friend)
+    check(only == [.friend] && f.shown == Set(PersonTier.allCases), "option_click_shows_only_that_tier_and_again_shows_all")
+    f = CircleTierFilter.load(store: s); f.toggle(.family); f.toggle(.close); f.toggle(.friend)
+    check(f.shown.isEmpty == false, "the_last_shown_tier_cannot_be_hidden")
+}

@@ -69,3 +69,31 @@ struct TierChip: View {
             .foregroundStyle(.secondary)
     }
 }
+
+/// The tier toggles above the Circle list, one chip per tier, in the look of the board's group chips: filled while its
+/// people are shown, outlined and dimmed while hidden. Click hides or shows that tier; Option-click shows only that tier
+/// (again: all). Kept across launches (CircleTierFilter).
+struct TierToggles: View {
+    @Binding var filter: CircleTierFilter
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(PersonTier.allCases, id: \.self) { t in
+                let on = filter.shows(t)
+                Text(t.title)
+                    .font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+                    .foregroundStyle(on ? Color.primary : Color.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(on ? Color.primary.opacity(0.12) : Color.clear))
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(on ? 0 : 0.25), lineWidth: 1))
+                    .contentShape(Capsule())
+                    .onTapGesture {
+                        if NSEvent.modifierFlags.contains(.option) { filter.only(t) } else { filter.toggle(t) }
+                    }
+                    .help(on ? "Hide \(t.title) (Option-click: only \(t.title))" : "Show \(t.title) (Option-click: only \(t.title))")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityValue(on ? "shown" : "hidden")
+            }
+        }
+    }
+}

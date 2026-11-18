@@ -98,7 +98,7 @@ Settings in `meta`: `circle_backfill_months` (default 12), `circle_engine_cursor
     or a manual "We talked" (**builder's call**: a second button next to "I contacted them" for calls and in person, so a call
     can count as a conversation; the one-tap "I contacted them" stays outreach, as §9 says);
   - *last heard from* = latest incoming; *last outreach* = latest outgoing or "I contacted them";
-  - interval = per-person days, else tier default (Family 1 month, Close friend 2 weeks, Network 3 months, by calendar
+  - interval = per-person days, else tier default (Family 1 month, Close friend 2 weeks, Friend 6 weeks, Network 3 months, by calendar
     months), capped at 3 months by Investor (`TagRules.intervalCapMonths`);
   - due date = last conversation (else date added) + interval; **due** = due date ≤ now, not snoozed, no outreach in the last
     7 days. Snooze or ✗ = snoozed until now + one interval.
