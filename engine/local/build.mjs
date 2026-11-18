@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "../migrations");
-const out = join(here, "../../mac/Resources/engine.js");
+const out = process.env.FLOATBOARD_ENGINE_OUT || join(here, "../../mac/Resources/engine.js");   // the env: tests only
 mkdirSync(dirname(out), { recursive: true });
 
 const migrations = {

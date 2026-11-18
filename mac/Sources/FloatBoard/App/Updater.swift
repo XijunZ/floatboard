@@ -113,19 +113,8 @@ final class Updater: ObservableObject {
             return
         }
         let engine = FileManager.default.fileExists(atPath: dir + "/engine/wrangler.local.toml")
-        // Each step is logged; `set -e` stops at the first failure. The login shell gives the same tools as Terminal.
-        let script = """
-            set -e
-            cd \(Self.quote(dir))
-            echo "== $(date) updating from $(git rev-parse --short HEAD)"
-            if [ -n "$(git status --porcelain --untracked-files=no)" ]; then echo "STOP: the source folder has changes that aren't committed"; exit 3; fi
-            git fetch --quiet origin main
-            if [ -n "$(git log --oneline origin/main..HEAD)" ]; then echo "STOP: the source folder has commits that aren't on GitHub"; exit 4; fi
-            git merge --ff-only --quiet origin/main
-            \(engine ? "cd engine && npm ci --silent && npm run --silent update && cd .." : "echo 'no online engine deployed from this Mac'")
-            cd mac && ./scripts/build-app.sh
-            echo "== done $(git rev-parse --short HEAD)"
-            """
+        // Each step is logged; `set -e` stops at the first failure (UpdateCheck.updateScript). The login shell gives the same tools as Terminal.
+        let script = UpdateCheck.updateScript(dir: dir, deploysEngine: engine)
         state = .updating("Updating… (1–2 minutes; FloatBoard reopens when done)")
         store?.activity("updates", .info, "Updating FloatBoard", detail: engine ? "code, online engine and app" : "code and app")
         let log = Self.logURL
@@ -160,5 +149,4 @@ final class Updater: ObservableObject {
         }
     }
 
-    static func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 }
