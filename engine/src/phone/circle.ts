@@ -7,7 +7,7 @@
 import type { Env } from "../env";
 import { nowISO } from "../env";
 import { readCappedJSON } from "../lib/http";
-import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
+import { accountMarker, appJSON, phoneWrite, requireAppSession, sameOrigin } from "./auth";
 import { circleOn, unseal } from "../circle/common";
 import { circleFetch } from "../circle/net";
 import { draftInput } from "../circle/ai";
@@ -33,17 +33,12 @@ export async function handleCircleApp(req: Request, env: Env): Promise<Response 
       pending: pending?.n ?? 0 }, 200, s.setCookie);
   }
   if (path === "/app/api/circle/action" && req.method === "POST") {
-    if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);
-    const s = await requireAppSession(req, env);
-    if (!s) return appJSON({ error: "not signed in" }, 401);
-    const b = await readCappedJSON(req, 32_000);
-    if (!b.ok) return appJSON({ error: "Invalid JSON" }, 400, s.setCookie);
     // Every tap names its account: the queue's (in the app) or the reminder's (a notification button). Missing or empty is
     // refused (400; an old notification then opens the app, which asks first); another account's is refused (409).
-    const from = (b.body as any)?.account, mine = await accountMarker(s.userId);
-    if (typeof from !== "string" || !from) return appJSON({ error: "account is required" }, 400, s.setCookie);
-    if (from !== mine) return appJSON({ error: "This belongs to another account", account: mine }, 409, s.setCookie);
-    const list = (b.body as any)?.actions;
+    const w = await phoneWrite(req, env, 32_000);
+    if (!w.ok) return w.res;
+    const { s, account: mine } = w;
+    const list = w.body?.actions;
     if (!Array.isArray(list) || list.length > MAX_BATCH) return appJSON({ error: `actions must be a list of at most ${MAX_BATCH}` }, 400, s.setCookie);
     const accepted: string[] = [], dropped: { id: string | null; reason: string }[] = [];
     const stmts: D1PreparedStatement[] = [];

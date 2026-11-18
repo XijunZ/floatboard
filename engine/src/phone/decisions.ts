@@ -20,7 +20,7 @@ import { decrypt, encrypt } from "../lib/crypto";
 import { readCappedJSON } from "../lib/http";
 import { route } from "../lib/router";
 import { fillDecisionForm } from "../routes/decisions";
-import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
+import { accountMarker, appJSON, phoneWrite, requireAppSession, sameOrigin } from "./auth";
 
 export const MAX_COPY = 300;
 const MAX_ACTIONS = 50;
@@ -139,16 +139,12 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
       updated: row?.updated ?? null, waiting: await waiting(env, s.userId) }, 200, s.setCookie);
   }
   if (path === "/app/api/decisions/action" && req.method === "POST") {
-    if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);
-    const s = await requireAppSession(req, env);
-    if (!s) return appJSON({ error: "not signed in" }, 401);
-    const rb = await readCappedJSON(req, 300_000);
-    if (!rb.ok) return appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie);
     // The account the phone's queue was made under, checked here at the moment of storing: a page holding a stale
     // confirmation (another account signed in since) is refused and keeps its queue.
-    const mine = await accountMarker(s.userId);
-    if (typeof rb.body?.account !== "string") return appJSON({ error: "account is required" }, 400, s.setCookie);
-    if (rb.body.account !== mine) return appJSON({ error: "These changes belong to another account.", account: mine }, 409, s.setCookie);
+    const w = await phoneWrite(req, env, 300_000);
+    if (!w.ok) return w.res;
+    const { s, body: rbBody, account: mine } = w;
+    const rb = { body: rbBody };
     const raw = rb.body?.actions;
     if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_ACTIONS) return appJSON({ error: `actions must be a list of 1 to ${MAX_ACTIONS}` }, 400, s.setCookie);
     const parsed = raw.map(parseAction);

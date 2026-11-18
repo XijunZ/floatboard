@@ -94,3 +94,29 @@ describe("jots: an applied phone change and its 'seen' mark are written together
     expect([seen!.n, rows!.n]).toEqual([1, 1]);
   });
 });
+
+// Round 13 (B5): the three phone write routes (Circle, Decisions, Jots) open with the same checks, in the same order:
+// same origin (403), signed in (401), body under the route's cap (413 too large, 400 not JSON), an account named (400),
+// this session's account (409, naming it).
+describe("phone writes: one opening check for Circle, Decisions and Jots", () => {
+  const routes = [
+    { path: "/app/api/circle/action", cap: 32_000 },
+    { path: "/app/api/decisions/action", cap: 300_000 },
+    { path: "/app/api/jots", cap: 512_000 },
+  ];
+  for (const r of routes) {
+    it(`same_opening_checks_${r.path.split("/").slice(3).join("_")}`, async () => {
+      const { cookie, account: mine } = await phone("Open" + r.path.length);
+      const post = (body: string, origin: string | null = BASE, c: string | null = cookie) =>
+        call(r.path, { method: "POST", headers: { ...(c ? { Cookie: c } : {}), ...(origin ? { Origin: origin } : {}) }, body });
+      expect((await post("{}", "https://evil.test")).status).toBe(403);
+      expect((await post("{}", BASE, null)).status).toBe(401);
+      expect((await post("x".repeat(r.cap + 10))).status).toBe(413);
+      expect((await post("not json")).status).toBe(400);
+      expect((await post(JSON.stringify({ account: "", actions: [] }))).status).toBe(400);
+      const other = await post(JSON.stringify({ account: "someone-else", actions: [] }));
+      expect(other.status).toBe(409);
+      expect((await other.json<any>()).account).toBe(mine);
+    });
+  }
+});

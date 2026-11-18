@@ -24,7 +24,7 @@ import { alertFor } from "../reminders/alerts";
 import type { AlertItem } from "../triage/run";
 import { recapKey } from "../sources/fathom";
 import type { Message } from "../sources/types";
-import { accountMarker, appJSON, requireAppSession, sameOrigin } from "../phone/auth";
+import { accountMarker, appJSON, phoneWrite, requireAppSession } from "../phone/auth";
 import { corrected, skewOf } from "../phone/board";
 
 const DAY = 86400_000;
@@ -344,21 +344,23 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
 export async function handleJotsApp(req: Request, env: Env): Promise<Response | null> {
   const path = new URL(req.url).pathname;
   if (path !== "/app/api/jots") return null;
-  if (req.method === "POST" && !sameOrigin(req)) return appJSON({ error: "refused" }, 403);
-  const s = await requireAppSession(req, env);
-  if (!s) return appJSON({ error: "not signed in" }, 401);
-  if (!(await jotsOn(env, s.userId))) return appJSON({ error: "jots_off" }, 409, s.setCookie);
-  // `account`: which account this session belongs to (the phone drops an answer for another one, and names its queue's).
-  const account = await accountMarker(s.userId);
-  if (req.method === "GET") return appJSON({ account, jots: await phoneList(env, s.userId) }, 200, s.setCookie);
-  if (req.method !== "POST") return appJSON({ error: "not found" }, 404, s.setCookie);
+  const off = async (s: { userId: string; setCookie?: string }) => (await jotsOn(env, s.userId)) ? null : appJSON({ error: "jots_off" }, 409, s.setCookie);
+  if (req.method !== "POST") {
+    const s = await requireAppSession(req, env);
+    if (!s) return appJSON({ error: "not signed in" }, 401);
+    const closed = await off(s);
+    if (closed) return closed;
+    // `account`: which account this session belongs to (the phone drops an answer for another one, and names its queue's).
+    if (req.method === "GET") return appJSON({ account: await accountMarker(s.userId), jots: await phoneList(env, s.userId) }, 200, s.setCookie);
+    return appJSON({ error: "not found" }, 404, s.setCookie);
+  }
   const receivedMs = Date.now();
-  const rb = await readCappedJSON(req, MAX_PHONE_BYTES);
-  if (!rb.ok) return appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie);
   // The account the phone's queue was made under, checked at the moment of storing (the Decisions rule): a page still
   // holding another account's queue is refused (409) and keeps it.
-  if (typeof rb.body?.account !== "string" || !rb.body.account) return appJSON({ error: "account is required" }, 400, s.setCookie);
-  if (rb.body.account !== account) return appJSON({ error: "These changes belong to another account.", account }, 409, s.setCookie);
+  const w = await phoneWrite(req, env, MAX_PHONE_BYTES, { before: off });
+  if (!w.ok) return w.res;
+  const { s, account } = w;
+  const rb = { body: w.body };
   const actions = rb.body.actions;
   if (!Array.isArray(actions) || actions.length > MAX_ACTIONS) return appJSON({ error: `actions must be a list of at most ${MAX_ACTIONS}` }, 400, s.setCookie);
   const skew = skewOf(isISO(rb.body.sent_at) ? rb.body.sent_at : null, receivedMs);
