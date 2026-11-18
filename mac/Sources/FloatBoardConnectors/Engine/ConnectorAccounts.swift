@@ -67,6 +67,7 @@ public enum ConnectorAccounts {
             throw error
         }
         try Credentials.set(key, credentialName(id))
+        ConnectorMemory.forget(connector: id, store: store)   // a new or re-pointed engine gets the phone's copies again
         reported[id] = nil
     }
 

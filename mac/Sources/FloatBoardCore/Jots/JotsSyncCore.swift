@@ -192,6 +192,19 @@ public struct JotAck: Equatable {
         }
     }
 
+    public static let engineKey = "jots.pushed_engine"
+
+    /// The engine account the phone's copy is sent to (a fingerprint of its address and key). Another one (a new engine, a
+    /// re-pointed connector, a new key) holds none of this Mac's jots: every recent jot is sent again.
+    public func useEngine(_ fingerprint: String) {
+        let current = (try? store.db.query("SELECT value FROM meta WHERE key=?", [Self.engineKey]) { DB.text($0, 0) })?.first // try?-ok: unknown = treated as another engine (sent again: harmless)
+        guard current != fingerprint else { return }
+        store.perform {
+            try store.db.run("UPDATE jot_sync SET pushed=NULL")
+            try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [Self.engineKey, fingerprint])
+        }
+    }
+
     /// Makes the engine get this jot again at the next push.
     func resend(_ id: Int64) {
         store.perform { try store.db.run("UPDATE jot_sync SET pushed=NULL WHERE jot_id=?", [id]) }

@@ -33,6 +33,7 @@ public enum JotsSync {
             }
             JotStore(store: store).attachPendingMeetingNotes(now: now)
             step = "send jots to the phone"
+            core.useEngine(client.accountFingerprint)   // another engine account: every recent jot goes again
             let push = core.toPush(now: now)
             let nudge = JotNudge(store: store).state(now: now)
             if !push.isEmpty || lastNudge[id] != nudge {

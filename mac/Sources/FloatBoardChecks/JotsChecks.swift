@@ -576,3 +576,26 @@ extension ISO8601DateFormatter {
     js.update(first.id, text: "We decided to move the offsite", now: now.addingTimeInterval(-5 * 86400))
     check(DecisionScreening.pending(store: store, now: now.addingTimeInterval(60)).contains { $0.ref.hasPrefix("J-\(first.id)@") }, "late_edit_of_an_older_jot_is_screened")
 }
+
+/// Round 13 (J4): what was sent to the phone's copy is remembered per engine account, so moving to another engine (or
+/// another key) sends every recent jot again, and the Decisions copy is sent again too.
+@MainActor func jotPushedPerEngineChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-jot-fp-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let store: Store
+    do { store = Store(db: try DB(url: root.appendingPathComponent("fp.sqlite"))) } catch { check(false, "fp setup: \(error)"); return }
+    store.setModule(.jots, on: true)
+    let js = JotStore(store: store), core = JotsSyncCore(store: store), now = Date()
+    _ = js.create(text: "One", now: now); _ = js.create(text: "Two", now: now)
+    core.useEngine("engine-A")
+    core.markPushed(core.toPush(now: now))
+    check(core.toPush(now: now).isEmpty, "jots_pushed_once_to_an_engine")
+    core.useEngine("engine-A")
+    check(core.toPush(now: now).isEmpty, "same_engine_keeps_what_was_pushed")
+    core.useEngine("engine-B")
+    check(core.toPush(now: now).count == 2, "another_engine_gets_every_recent_jot_again")
+    DecisionPhone.setSentHash("abc", store: store, connector: "c1")
+    ConnectorMemory.forget(connector: "c1", store: store)
+    check(DecisionPhone.sentHash(store: store, connector: "c1") == nil && core.toPush(now: now).count == 2, "repointing_a_connector_forgets_what_it_was_sent")
+}

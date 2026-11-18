@@ -1,3 +1,4 @@
+import CryptoKit
 import FloatBoardCore
 import Foundation
 
@@ -285,6 +286,12 @@ public struct ConnectorClient {
 
     /// The engine's address, for telling one engine's board copy from another's.
     public var engineAddress: String { baseURL.absoluteString }
+
+    /// The engine account this client talks to (its address and key), as a short fingerprint: what was sent through it is
+    /// remembered per account, never per board.
+    public var accountFingerprint: String {
+        SHA256.hash(data: Data((baseURL.absoluteString + "\n" + key).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
 
     /// Calls a phone app route; a 404 means this engine has no phone app (`ConnectorError.noPhoneApp`).
     private func phoneCall(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
