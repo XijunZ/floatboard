@@ -216,8 +216,15 @@ route("POST", "/v2/jots/ack", async (req, env, user) => {
     // Earlier texts sent with this version are in the Mac's history now.
     await env.DB.prepare("DELETE FROM jot_copy_versions WHERE user_id=? AND key=? AND rev<=?").bind(user.id, it.key, it.rev).run();
     if (it.mac_id) {
-      // A copy the Mac sent under its own number before acking this capture is the same jot: one copy stays.
-      await env.DB.prepare("DELETE FROM jot_copies WHERE user_id=? AND mac_id=? AND key<>?").bind(user.id, it.mac_id, it.key).run();
+      // A copy the Mac sent under its own number before acking this capture is the same jot: one copy stays. One with a phone
+      // change still waiting is kept, so that change reaches the Mac at its next pass (matched by mac_id).
+      await env.DB.prepare("DELETE FROM jot_copies WHERE user_id=? AND mac_id=? AND key<>? AND waiting=0").bind(user.id, it.mac_id, it.key).run();
+      const kept = await env.DB.prepare("SELECT 1 AS x FROM jot_copies WHERE user_id=? AND mac_id=? AND key<>?").bind(user.id, it.mac_id, it.key).first();
+      if (kept) {
+        // That copy (with its waiting change) now stands for the jot: this capture is confirmed by going, the copy stays.
+        acked += (await env.DB.prepare("DELETE FROM jot_copies WHERE user_id=? AND key=? AND rev=? AND waiting=1").bind(user.id, it.key, it.rev).run()).meta.changes;
+        continue;
+      }
     }
     acked += (await env.DB.prepare(`UPDATE jot_copies SET waiting=0, mac_id=coalesce(?, mac_id), mac_saved_at=? WHERE user_id=? AND key=? AND rev=? AND waiting=1`)
       .bind(it.mac_id ?? null, now, user.id, it.key, it.rev).run()).meta.changes;
