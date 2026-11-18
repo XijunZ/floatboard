@@ -16,8 +16,10 @@ const putJots = (key: string, body: unknown) => call("/v2/jots", { method: "PUT"
 const waiting = (key: string) => call("/v2/jots/waiting", { key }).then((r) => r.json<{ jots: any[] }>());
 const ack = (key: string, items: unknown[]) => call("/v2/jots/ack", { method: "POST", key, body: JSON.stringify({ items }) });
 const phoneJots = (cookie: string) => call("/app/api/jots", { headers: { Cookie: cookie } }).then((r) => r.json<{ jots: any[] }>());
-const phoneSend = (cookie: string, actions: unknown[], sentAt = iso(Date.now())) =>
-  call("/app/api/jots", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify({ sent_at: sentAt, actions }) });
+// Every phone write names its queue's account (integration round 7): the session's own, as /app/api/me names it.
+const accountOf = async (cookie: string) => (await (await call("/app/api/me", { headers: { Cookie: cookie } })).json<any>()).account;
+const phoneSend = async (cookie: string, actions: unknown[], sentAt = iso(Date.now())) =>
+  call("/app/api/jots", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify({ account: await accountOf(cookie), sent_at: sentAt, actions }) });
 
 async function setup(name: string, modules = ON) {
   const u = await newUser(name);

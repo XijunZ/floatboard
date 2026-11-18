@@ -113,15 +113,17 @@ self.addEventListener("pushsubscriptionchange", (event) => {
 function circleButton(event) {
   const person = event.notification.data && event.notification.data.circle;
   const action = event.action;
-  const account = (event.notification.data && event.notification.data.account) || "";
+  // An old alert may carry no account: none is sent (the engine then refuses it and the app opens, asking first).
+  const account = event.notification.data && event.notification.data.account;
   const id = "nb-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
-  const body = JSON.stringify({ account, actions: [{ id, person, action, made_at: new Date().toISOString() }] });
+  const actions = [{ id, person, action, made_at: new Date().toISOString() }];
+  const body = JSON.stringify(account ? { account, actions } : { actions });
   return fetch("/app/api/circle/action", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body })
     .then((r) => {
       if (r.status === 409) return self.clients.openWindow("/app/");   // another account's alert: nothing is marked
       if (!r.ok) throw new Error("not sent");
     })
-    .catch(() => self.clients.openWindow("/app/#circle=" + action + ":" + person + ":" + account));
+    .catch(() => self.clients.openWindow("/app/#circle=" + action + ":" + person + (account ? ":" + account : "")));
 }
 
 self.addEventListener("notificationclick", (event) => {

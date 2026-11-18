@@ -42,10 +42,11 @@
     var asked = sessionStamp();   // the shared session check (app.client.js): a sign-out or another account meanwhile drops the answer
     var still = function (respAccount) { return sameSession(asked, respAccount); };
     try {
-      if (circleQueue.actions.length) {
+      if (circleQueue.actions.length && circleQueue.account) {
         var sent = circleQueue.actions.slice(0, 50);
-        var r = await api("/app/api/circle/action", { method: "POST", body: { actions: sent } });
-        if (!still()) return;   // signed out or another account meanwhile: nothing of this answer is kept
+        // The queue's own account goes with it: the engine refuses another account's (409; the queue stays here).
+        var r = await api("/app/api/circle/action", { method: "POST", body: { account: circleQueue.account, actions: sent } });
+        if (!still(r.account)) return;   // signed out or another account meanwhile: nothing of this answer is kept
         var done = (r.accepted || []).concat((r.dropped || []).map(function (d) { return d.id; }));
         circleQueue.actions = circleQueue.actions.filter(function (a) { return done.indexOf(a.id) < 0; });
         store(CIRCLE_QUEUE_KEY, circleQueue);
