@@ -99,6 +99,19 @@ extension CircleStore {
         store.perform { try writeDetailsRow(personID, d) }
     }
 
+    /// `livePerson`, throwing when a row can't be read (nil only for a person who is really unknown).
+    func livePersonOrThrow(_ text: String) throws -> Int64? {
+        guard let id = ShortID.parse(text), id.kind == .person else { return nil }
+        var n = id.number
+        for _ in 0..<5 {
+            if let p = try people.personOrThrow(n), !p.deleted { return n }
+            guard let kept = try store.db.query("SELECT kept FROM circle_merges WHERE merged=? AND split IS NULL ORDER BY id DESC LIMIT 1", [n], { DB.int($0, 0) }).first
+            else { return nil }
+            n = kept
+        }
+        return nil
+    }
+
     /// The live person an id names, following merges (an update for a merged person goes to whom they were merged into).
     func livePerson(_ text: String) -> Int64? {
         guard let id = ShortID.parse(text), id.kind == .person else { return nil }

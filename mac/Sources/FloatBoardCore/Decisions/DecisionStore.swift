@@ -297,9 +297,17 @@ public struct DecisionFilter: Equatable {
     /// "Not a decision" (weekly review, card, phone): the decision is dismissed (its links hidden) and its quote is queued as an
     /// example for the Decisions rulebook (no AI call). Undo (`undoNotADecision`) takes both back while the example is unsent.
     public func notADecision(_ id: Int64, now: Date = Date()) {
-        guard let d = decision(id), !d.deleted else { return }
+        do { try notADecisionOrThrow(id, now: now) } catch {
+            store.activity("decisions", .error, "Could not mark a decision as not a decision", detail: "\(error)")
+        }
+    }
+
+    /// The same, throwing when it can't be read or written (nothing is changed then): the phone's action is acknowledged only
+    /// once this returned. A decision already dismissed, or gone, is nothing to do.
+    public func notADecisionOrThrow(_ id: Int64, now: Date = Date()) throws {
+        guard let d = try decisionOrThrow(id), !d.deleted else { return }
         let example = DecisionRulebook.exampleLine(d)
-        store.perform {
+        try store.performThrowing {
             try store.db.run("UPDATE decisions SET not_decision=1, deleted=1, updated=? WHERE id=?", [now, id])
             try store.hideLinks(of: d.shortID)
             try store.db.run("INSERT INTO decision_examples(decision_id, text, created) VALUES(?,?,?)", [id, example, now])
@@ -390,7 +398,18 @@ public struct DecisionFilter: Equatable {
 
     // MARK: Rows
 
+    /// One decision, nil when there is none; throws when it can't be read (a caller that acknowledges must not take an
+    /// error for "not found").
+    public func decisionOrThrow(_ id: Int64) throws -> Decision? { try readThrowing("WHERE id=?", [id]).first }
+
     func read(_ tail: String, _ args: [Any?]) -> [Decision] {
+        do { return try readThrowing(tail, args) } catch {
+            store.activity("decisions", .error, "Could not read decisions", detail: "\(error)")
+            return []
+        }
+    }
+
+    func readThrowing(_ tail: String, _ args: [Any?]) throws -> [Decision] {
         do {
             return try store.db.query("SELECT \(Self.columns) FROM decisions \(tail)", args) { s in
                 Decision(id: DB.int(s, 0), text: DB.text(s, 1), quote: DB.text(s, 2), sourceItem: ShortID.parse(DB.text(s, 3)),
@@ -402,9 +421,6 @@ public struct DecisionFilter: Equatable {
                          reviewDue: DB.date(s, 18), reviewAskAfter: DB.date(s, 19), reviewed: DB.date(s, 20), notDecision: DB.int(s, 21) != 0,
                          added: DB.date(s, 22) ?? Date(), updated: DB.date(s, 23) ?? Date(), deleted: DB.int(s, 24) != 0)
             }
-        } catch {
-            store.activity("decisions", .error, "Could not read decisions", detail: "\(error)")
-            return []
         }
     }
 }

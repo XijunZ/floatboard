@@ -326,3 +326,83 @@ import SQLite3
     let r4 = DecisionPhone.apply([make("s1", "Keep the old supplier")], store: s, now: decisionsNow)
     check(r3.applied == ["s1"] && r4.applied == ["s1"] && ds.all().filter { $0.text == "Keep the old supplier" }.count == 1, "phone_decision_recorded_once_after_retry")
 }
+
+// MARK: Round 7: nothing from the phone is acknowledged unless it was kept (Claude review, A-D)
+
+@MainActor func integrationPhoneAckChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-int-acks-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "acks.sqlite") else { return }
+    DecisionsArea.registerCore()
+    let ds = DecisionStore(store: s), js = JotStore(store: s)
+    guard let d1 = ds.record(DecisionDraft(text: "Move the offsite"), now: decisionsNow.addingTimeInterval(-40 * 86400)),
+          let d2 = ds.record(DecisionDraft(text: "Hire later"), now: decisionsNow.addingTimeInterval(-2 * 86400)) else { check(false, "acks setup"); return }
+    let review = PhoneDecisionAction(id: "rv1", decision: d1.shortID.text, action: "review", happened: "It went well", sound: "yes")
+    // (A) The review's jot can't be written: not acknowledged, the review still open; written later: once.
+    s.performForTest("CREATE TRIGGER fail_jot BEFORE INSERT ON jots BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    let a1 = DecisionPhone.apply([review], store: s, now: decisionsNow)
+    check(a1.applied.isEmpty && a1.skipped.isEmpty && a1.waiting == ["rv1"] && ds.decision(d1.id)?.reviewState != .done,
+          "phone_review_storage_failure_is_retried_not_acked")
+    s.performForTest("DROP TRIGGER fail_jot")
+    let a2 = DecisionPhone.apply([review, PhoneDecisionAction(id: "rv2", decision: d2.shortID.text, action: "review", happened: " ", sound: "")],
+                                 store: s, now: decisionsNow)
+    check(a2.applied == ["rv1"] && a2.skipped.map(\.0) == ["rv2"] && ds.decision(d1.id)?.reviewState == .done && ds.reviews(of: d1.id).count == 1,
+          "phone_review_saved_once_empty_answer_skipped")
+    // (B) "Not a decision" whose write fails: not acknowledged, the decision kept.
+    s.performForTest("CREATE TRIGGER fail_ex BEFORE INSERT ON decision_examples BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    let nd = PhoneDecisionAction(id: "nd1", decision: d2.shortID.text, action: "not_decision")
+    let b1 = DecisionPhone.apply([nd], store: s, now: decisionsNow)
+    check(b1.applied.isEmpty && b1.waiting == ["nd1"] && ds.decision(d2.id)?.deleted == false, "phone_not_a_decision_failure_is_retried_not_acked")
+    s.performForTest("DROP TRIGGER fail_ex")
+    check(DecisionPhone.apply([nd], store: s, now: decisionsNow).applied == ["nd1"] && ds.decision(d2.id)?.notDecision == true, "phone_not_a_decision_applied_after_retry")
+    // (B) The decisions table can't be read: waiting, never "not found" and acknowledged.
+    s.performForTest("ALTER TABLE decisions RENAME TO decisions_away")
+    let b2 = DecisionPhone.apply([PhoneDecisionAction(id: "rv3", decision: d1.shortID.text, action: "review", happened: "x", sound: "")], store: s, now: decisionsNow)
+    s.performForTest("ALTER TABLE decisions_away RENAME TO decisions")
+    check(b2.applied.isEmpty && b2.skipped.isEmpty && b2.waiting == ["rv3"], "decision_read_error_is_waiting_not_not_found")
+    check(DecisionPhone.apply([PhoneDecisionAction(id: "rv4", decision: "D-99999", action: "review", happened: "x", sound: "")], store: s, now: decisionsNow)
+            .skipped.map(\.0) == ["rv4"], "unknown_decision_is_still_skipped")
+    // (C) A phone edit of a jot whose row can't be read: not acknowledged; read again: applied.
+    guard let j = js.create(text: "Budget notes", now: decisionsNow.addingTimeInterval(-3600)) else { check(false, "acks jot"); return }
+    let edit = EngineJot(key: "J-\(j.id)", macID: j.id, text: "Budget notes, edited on the phone", kind: "jot", source: "typed",
+                         added: decisionsNow.addingTimeInterval(-3600), updated: decisionsNow, deleted: false, rev: 2)
+    s.performForTest("ALTER TABLE jots RENAME TO jots_away")
+    let c1 = JotsSyncCore(store: s).apply([edit], now: decisionsNow)
+    s.performForTest("ALTER TABLE jots_away RENAME TO jots")
+    check(c1.isEmpty, "jot_read_error_does_not_ack_the_phone_edit")
+    let c2 = JotsSyncCore(store: s).apply([edit], now: decisionsNow)
+    check(c2.count == 1 && js.jot(j.id)?.text == "Budget notes, edited on the phone", "phone_edit_applied_after_the_read_works")
+}
+
+// MARK: Round 7 sweep (D): Circle and the older phone Make decision
+
+@MainActor func integrationAckSweepChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-int-sweep-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "sweep.sqlite") else { return }
+    DecisionsArea.registerCore()
+    let c = CircleStore(store: s)
+    var det = CircleDetails(); det.intervalDays = 14
+    guard let p = c.add(name: "Sweep Person", tier: .close, tags: ItemTags(primary: nil, others: []), details: det,
+                        handles: [], now: decisionsNow.addingTimeInterval(-86400)).person else { check(false, "sweep setup"); return }
+    // A person whose row can't be read is not "unknown" (acknowledged and dropped): it stays for the next sync.
+    let tap = CirclePhoneAction(id: "sw1", person: p.shortID.text, action: "snooze", madeAt: ISO8601DateFormatter().string(from: decisionsNow))
+    s.performForTest("ALTER TABLE people RENAME TO people_away")
+    let r1 = c.applyPhoneActions([tap], now: decisionsNow)
+    s.performForTest("ALTER TABLE people_away RENAME TO people")
+    check(r1.applied.isEmpty && r1.skipped.isEmpty && r1.failed == ["sw1"], "circle_person_read_error_is_retried_not_skipped")
+    // A snooze never writes defaults over details it couldn't read.
+    s.performForTest("ALTER TABLE circle_people RENAME TO circle_people_away")
+    let r2 = c.applyPhoneActions([tap], now: decisionsNow)
+    s.performForTest("ALTER TABLE circle_people_away RENAME TO circle_people")
+    check(r2.failed == ["sw1"] && c.details(p.id).intervalDays == 14, "circle_snooze_never_overwrites_unread_details")
+    check(c.applyPhoneActions([tap], now: decisionsNow).applied == ["sw1"] && c.details(p.id).snoozedUntil != nil, "circle_snooze_applied_after_retry")
+    // An older phone's jot Make decision whose decision can't be written is not acknowledged.
+    guard let j = JotStore(store: s).create(text: "We go with plan B", now: decisionsNow) else { check(false, "sweep jot"); return }
+    s.performForTest("CREATE TRIGGER fail_dec2 BEFORE INSERT ON decisions BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+    let handed = JotActions.makeDecision?(s, "We go with plan B", j.shortID)
+    s.performForTest("DROP TRIGGER fail_dec2")
+    check(handed == false, "older_phone_make_decision_storage_failure_is_not_acked")
+}

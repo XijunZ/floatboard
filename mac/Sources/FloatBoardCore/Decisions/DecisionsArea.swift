@@ -22,7 +22,8 @@ import Foundation
             guard !line.isEmpty else { return true }
             let d = DecisionStore(store: store).record(DecisionDraft(text: String(line.prefix(300)), quote: String(text.prefix(4000)), status: .maybe,
                                                                      source: .phone, sourceItem: source))
-            store.activity("decisions", .info, "Kept a Make decision from the phone as a Maybe draft", detail: d?.shortID.text ?? source.text)
+            guard let d else { return false }   // not written (the error is in Activity): not acknowledged, it comes again
+            store.activity("decisions", .info, "Kept a Make decision from the phone as a Maybe draft", detail: d.shortID.text)
             return true
         }
     }

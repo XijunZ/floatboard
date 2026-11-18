@@ -141,7 +141,12 @@ extension CircleStore {
         let isoF = ISO8601DateFormatter(), frac = ISO8601DateFormatter()
         frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         for a in actions {
-            guard let pid = livePerson(a.person), let p = people.person(pid) else { r.skipped.append((a.id, "unknown person")); continue }
+            // A read that fails is not "unknown": the action stays queued (failed, not acknowledged) and comes again.
+            let pid: Int64?, found: Person?
+            do { pid = try livePersonOrThrow(a.person); found = try pid.flatMap { try people.personOrThrow($0) } } catch {
+                firstError = firstError ?? error; r.failed.append(a.id); continue
+            }
+            guard let pid, let p = found else { r.skipped.append((a.id, "unknown person")); continue }
             guard ["contacted", "talked", "snooze"].contains(a.action) else { r.skipped.append((a.id, "unknown action")); continue }
             let at = min(isoF.date(from: a.madeAt) ?? frac.date(from: a.madeAt) ?? now, now)
             do {
@@ -150,7 +155,7 @@ extension CircleStore {
                     case "contacted": try manualRow(pid, .outgoing, at)
                     case "talked": try manualRow(pid, .met, at)
                     default:
-                        var d = details(pid)
+                        var d = try detailsOrThrow(pid)   // never defaults written over fields that couldn't be read
                         let until = CircleClock.add(CircleClock.interval(tier: p.tier, tags: store.itemTags(p.shortID).all, intervalDays: d.intervalDays), to: at)
                         if (d.snoozedUntil ?? .distantPast) < until { d.snoozedUntil = until; try writeDetailsRow(pid, d) }
                     }

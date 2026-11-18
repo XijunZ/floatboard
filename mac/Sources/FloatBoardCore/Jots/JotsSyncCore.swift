@@ -93,8 +93,18 @@ public struct JotAck: Equatable {
                 if applyAction(r, now: now) { acks.append(JotAck(key: r.key, rev: r.rev, macID: nil)) }
                 continue
             }
-            if let id = r.macID ?? js.jot(origin: r.key)?.id {
-                guard let j = js.jot(id) else { acks.append(JotAck(key: r.key, rev: r.rev, macID: id)); continue }
+            // Looked up with errors kept apart from "not here": a read that fails leaves the row waiting (never acked as gone).
+            let found: Int64?, known: Jot?
+            do {
+                found = try r.macID ?? js.jotIDOrThrow(origin: r.key)
+                known = try found.flatMap { try js.jotOrThrow($0) }
+            } catch {
+                store.activity("jots", .error, "Could not read a jot for a change from the phone; it stays on the engine and is tried again",
+                               detail: "\(r.key): \(error)")
+                continue
+            }
+            if let id = found {
+                guard let j = known else { acks.append(JotAck(key: r.key, rev: r.rev, macID: id)); continue }
                 // History, text and deletion in ONE transaction that throws; acked only after it commits. A failure (in Activity)
                 // leaves the row waiting on the engine, which keeps its copies.
                 let newer = r.updated > j.updated
@@ -123,11 +133,15 @@ public struct JotAck: Equatable {
             } else {
                 saved = js.add(r.text, kind: JotKind(rawValue: r.kind) ?? .jot, source: ItemSource(rawValue: r.source) ?? .phone, origin: r.key,
                                tags: r.tags, now: r.added)
-                if let s = saved, r.updated > r.added { store.perform { try store.db.run("UPDATE jots SET updated=? WHERE id=?", [r.updated, s.id]) } }
-                if let s = saved, r.deleted { js.delete(s.id, now: r.updated) }
             }
             guard let saved else { continue }   // the write failed (it is in Activity): it stays waiting
-            do { try store.performThrowing { try js.keepInHistoryRow(saved.id, r.versions) } } catch {
+            // A later edit time and a delete made on the phone, with the earlier texts, in one transaction: acked only after it.
+            do {
+                try store.performThrowing {
+                    if r.kind != JotKind.meetingNotes.rawValue && (r.updated > r.added || r.deleted) { try applyPhoneRow(saved.id, r) }
+                    try js.keepInHistoryRow(saved.id, r.versions)
+                }
+            } catch {
                 // The jot is saved; its earlier texts are not: not acked, so the next pass (finding it by key) tries the history again.
                 store.activity("jots", .error, "Could not keep a jot's earlier texts from the phone; tried again", detail: "\(saved.shortID.text): \(error)")
                 continue
@@ -140,7 +154,14 @@ public struct JotAck: Equatable {
     /// Phone Make task / Make decision on a jot's text. True when done (acked).
     private func applyAction(_ r: EngineJot, now: Date) -> Bool {
         let js = JotStore(store: store)
-        let source = r.ref.flatMap { ref in ShortID.parse(ref).map(\.number) ?? js.jot(origin: ref)?.id }.map { ShortID(kind: .jot, number: $0) }
+        // The jot it was made from; a lookup that fails is not "no jot": the action waits (not acked) and comes again.
+        let source: ShortID?
+        do {
+            source = try r.ref.flatMap { ref in try ShortID.parse(ref).map(\.number) ?? js.jotIDOrThrow(origin: ref) }.map { ShortID(kind: .jot, number: $0) }
+        } catch {
+            store.activity("jots", .error, "Could not read the jot of a phone action; it stays on the engine and is tried again", detail: "\(r.key): \(error)")
+            return false
+        }
         if r.kind == "action:make_decision" {
             guard let hook = JotActions.makeDecision, let source else { return false }
             return hook(store, r.text, source)

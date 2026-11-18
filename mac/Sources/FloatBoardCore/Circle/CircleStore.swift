@@ -19,6 +19,11 @@ import Foundation
         reminded_at, reminder_task, updates_on, news_muted, feed_url, officer_id, officer_name, officer_confirmed, manual_checked
         """
 
+    /// A person's Circle fields (defaults when none were saved); throws when they can't be read, so nothing is written over them.
+    public func detailsOrThrow(_ personID: Int64) throws -> CircleDetails {
+        try store.db.query("SELECT \(Self.detailColumns) FROM circle_people WHERE person_id=?", [personID]) { Self.readDetails($0) }.first ?? CircleDetails()
+    }
+
     public func details(_ personID: Int64) -> CircleDetails {
         do {
             return try store.db.query("SELECT \(Self.detailColumns) FROM circle_people WHERE person_id=?", [personID]) { Self.readDetails($0) }.first

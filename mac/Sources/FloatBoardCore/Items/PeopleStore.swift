@@ -93,7 +93,17 @@ public struct Person: Identifiable, Equatable {
         return String(decoding: d, as: UTF8.self)
     }
 
+    /// One person, nil when there is none; throws when it can't be read (callers that acknowledge must not take it for "unknown").
+    public func personOrThrow(_ id: Int64) throws -> Person? { try readThrowing("WHERE id=?", [id]).first }
+
     private func read(_ tail: String, _ args: [Any?]) -> [Person] {
+        do { return try readThrowing(tail, args) } catch {
+            store.activity("people", .error, "Could not read people", detail: "\(error)")
+            return []
+        }
+    }
+
+    private func readThrowing(_ tail: String, _ args: [Any?]) throws -> [Person] {
         do {
             return try store.db.query("SELECT id, name, aliases, tier, source, added, updated, deleted FROM people \(tail)", args) { s in
                 let aliases = (try? JSONSerialization.jsonObject(with: Data(DB.text(s, 2).utf8))) as? [String] ?? [] // try?-ok: unreadable aliases read as none; the stored text is untouched
@@ -101,9 +111,6 @@ public struct Person: Identifiable, Equatable {
                               source: ItemSource(rawValue: DB.text(s, 4)) ?? .typed, added: DB.date(s, 5) ?? Date(),
                               updated: DB.date(s, 6) ?? Date(), deleted: DB.int(s, 7) != 0)
             }
-        } catch {
-            store.activity("people", .error, "Could not read people", detail: "\(error)")
-            return []
         }
     }
 }

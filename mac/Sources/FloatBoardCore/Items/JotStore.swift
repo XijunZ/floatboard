@@ -44,16 +44,25 @@ public struct JotVersion: Equatable {
                        linkFirst: [(ShortID, ItemLinkKind, LinkMaker)]) -> Jot? {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         var id: Int64?
-        store.perform {
-            let n = try store.db.run("INSERT INTO jots(text, kind, source, added, updated) VALUES(?,?,?,?,?)",
-                                     [text, kind.rawValue, source.rawValue, now, now])
-            let me = ShortID(kind: .jot, number: n)
-            for (other, k, by) in linkFirst { try store.linkRow(me, other, kind: k, madeBy: by, actor: .user, now: now) }
-            try store.linkMentionsRow(in: text, previous: "", from: me, now: now)
-            id = n
-        }
+        store.perform { id = try createRow(text: text, kind: kind, source: source, now: now, linkFirst: linkFirst) }
         return id.flatMap { jot($0) }
     }
+
+    /// The body of `create`, for callers already inside a transaction (a phone review's jot, written together with the review).
+    /// Returns the new jot's id; throws on any failure (the caller's transaction is rolled back).
+    func createRow(text: String, kind: JotKind = .jot, source: ItemSource = .typed, now: Date,
+                   linkFirst: [(ShortID, ItemLinkKind, LinkMaker)], actor: Actor = .user) throws -> Int64 {
+        let n = try store.db.run("INSERT INTO jots(text, kind, source, added, updated) VALUES(?,?,?,?,?)",
+                                 [text, kind.rawValue, source.rawValue, now, now])
+        let me = ShortID(kind: .jot, number: n)
+        for (other, k, by) in linkFirst { try store.linkRow(me, other, kind: k, madeBy: by, actor: actor, now: now) }
+        try store.linkMentionsRow(in: text, previous: "", from: me, now: now)
+        return n
+    }
+
+    /// One jot, or nil when there is none; throws when it can't be read (a caller that acknowledges must not take an error
+    /// for "gone").
+    public func jotOrThrow(_ id: Int64) throws -> Jot? { try readThrowing("WHERE id=?", [id]).first }
 
     /// Replaces a jot's text; the previous text goes to its history. Same text: nothing changes (false). Ids newly typed are linked.
     @discardableResult
@@ -108,15 +117,17 @@ public struct JotVersion: Equatable {
     }
 
     private func read(_ tail: String, _ args: [Any?]) -> [Jot] {
-        do {
-            return try store.db.query("SELECT id, text, kind, source, added, updated, deleted FROM jots \(tail)", args) { s in
-                Jot(id: DB.int(s, 0), text: DB.text(s, 1), kind: JotKind(rawValue: DB.text(s, 2)) ?? .jot,
-                    source: ItemSource(rawValue: DB.text(s, 3)) ?? .typed, added: DB.date(s, 4) ?? Date(), updated: DB.date(s, 5) ?? Date(),
-                    deleted: DB.int(s, 6) != 0)
-            }
-        } catch {
+        do { return try readThrowing(tail, args) } catch {
             store.activity("jots", .error, "Could not read jots", detail: "\(error)")
             return []
+        }
+    }
+
+    private func readThrowing(_ tail: String, _ args: [Any?]) throws -> [Jot] {
+        try store.db.query("SELECT id, text, kind, source, added, updated, deleted FROM jots \(tail)", args) { s in
+            Jot(id: DB.int(s, 0), text: DB.text(s, 1), kind: JotKind(rawValue: DB.text(s, 2)) ?? .jot,
+                source: ItemSource(rawValue: DB.text(s, 3)) ?? .typed, added: DB.date(s, 4) ?? Date(), updated: DB.date(s, 5) ?? Date(),
+                deleted: DB.int(s, 6) != 0)
         }
     }
 }

@@ -79,6 +79,12 @@ extension JotStore {
     }
 
     /// The jot that arrived with this engine key, if any (deleted ones too).
+    /// The id of the jot saved under this origin key, nil when none; throws when it can't be read.
+    public func jotIDOrThrow(origin: String) throws -> Int64? {
+        guard !origin.isEmpty else { return nil }
+        return try store.db.query("SELECT id FROM jots WHERE origin=?", [origin]) { DB.int($0, 0) }.first
+    }
+
     public func jot(origin: String) -> Jot? {
         guard !origin.isEmpty else { return nil }
         let id = (try? store.db.query("SELECT id FROM jots WHERE origin=?", [origin]) { DB.int($0, 0) })?.first // try?-ok: unreadable = not found; the caller saves it again under its unique key, which the database refuses

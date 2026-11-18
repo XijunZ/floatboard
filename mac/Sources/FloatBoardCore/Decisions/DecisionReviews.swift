@@ -52,16 +52,38 @@ import Foundation
     /// A review already answered is not answered again (nil): the phone may send the same answer twice.
     @discardableResult
     public static func answer(_ id: Int64, happened: String, sound: String, source: ItemSource = .typed, store: Store, now: Date = Date()) -> Jot? {
-        guard let d = DecisionStore(store: store).decision(id), !d.deleted, d.reviewState != .done else { return nil }
-        guard !(happened + sound).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        guard let jot = JotStore(store: store).create(text: reviewText(d, happened: happened, sound: sound), source: source, now: now) else { return nil }
-        // The heading names D-n, which JotStore links as a typed id (related, manual); the link is the review's own instead.
-        store.unlink(jot.shortID, d.shortID)
-        store.link(jot.shortID, d.shortID, kind: .reviewOf, madeBy: .auto, actor: .connector("decisions"), now: now)
-        let tags = store.itemTags(d.shortID)
-        if let p = tags.all.first { store.setTags(jot.shortID, primary: p, others: Array(tags.all.dropFirst()), now: now) }
-        store.perform { try store.db.run("UPDATE decisions SET review_state='done', reviewed=?, updated=? WHERE id=?", [now, now, id]) }
-        return jot
+        do {
+            if case .saved(let jot) = try answerOrThrow(id, happened: happened, sound: sound, source: source, store: store, now: now) { return jot }
+            return nil
+        } catch {
+            store.activity("decisions", .error, "Could not save a decision review", detail: "\(error)")
+            return nil
+        }
+    }
+
+    /// What became of an answer: saved, already answered (a repeat), or one that can never be saved (empty, or the decision is
+    /// gone). Throws when it couldn't be read or written; nothing is changed then.
+    public enum AnswerOutcome: Equatable { case saved(Jot), alreadyAnswered, invalid(String) }
+
+    /// `answer` as one transaction: the review jot (linked review-of the decision first, so the D-n its heading names never
+    /// replaces that link), its tags and the decision's review state are written together or not at all.
+    public static func answerOrThrow(_ id: Int64, happened: String, sound: String, source: ItemSource = .typed, store: Store,
+                                     now: Date = Date()) throws -> AnswerOutcome {
+        guard let d = try DecisionStore(store: store).decisionOrThrow(id) else { return .invalid("decision not found") }
+        if d.reviewState == .done { return .alreadyAnswered }
+        if d.deleted { return .invalid("decision removed") }
+        guard !(happened + sound).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .invalid("empty answer") }
+        let js = JotStore(store: store)
+        let n = try store.performThrowing { () -> Int64 in
+            let n = try js.createRow(text: reviewText(d, happened: happened, sound: sound), source: source, now: now,
+                                     linkFirst: [(d.shortID, .reviewOf, .auto)], actor: .connector("decisions"))
+            let tags = store.itemTags(d.shortID)
+            if let p = tags.all.first { try store.setTagsRow(ShortID(kind: .jot, number: n), primary: p, others: Array(tags.all.dropFirst()), now: now) }
+            try store.db.run("UPDATE decisions SET review_state='done', reviewed=?, updated=? WHERE id=?", [now, now, id])
+            return n
+        }
+        guard let jot = try js.jotOrThrow(n) else { throw DBError.sql("the review jot was not found after saving") }
+        return .saved(jot)
     }
 
     /// Snooze: the review comes back `snoozeDays` days from now (or from its date, if that is later).

@@ -97,21 +97,26 @@ public struct PhoneDecisionAction: Codable, Equatable {
                 }
                 continue
             }
-            guard let id = ShortID.parse(a.decision), id.kind == .decision, let d = ds.decision(id.number) else {
-                skipped.append((a.id, "decision not found")); continue
-            }
-            switch a.action {
-            case "review":
-                if d.reviewState == .done { applied.append(a.id); continue }    // already answered (a repeat)
-                if d.deleted { skipped.append((a.id, "decision removed")); continue }
-                if DecisionReviews.answer(d.id, happened: a.happened ?? "", sound: a.sound ?? "", source: .phone, store: store, now: now) != nil {
+            // Acknowledged only once what it asks for is kept: a read or write that fails leaves it on the engine (waiting).
+            guard let id = ShortID.parse(a.decision), id.kind == .decision else { skipped.append((a.id, "decision not found")); continue }
+            do {
+                guard try ds.decisionOrThrow(id.number) != nil else { skipped.append((a.id, "decision not found")); continue }
+                switch a.action {
+                case "review":
+                    switch try DecisionReviews.answerOrThrow(id.number, happened: a.happened ?? "", sound: a.sound ?? "", source: .phone, store: store, now: now) {
+                    case .saved, .alreadyAnswered: applied.append(a.id)      // a repeat is acknowledged too
+                    case .invalid(let why): skipped.append((a.id, why))
+                    }
+                case "not_decision":
+                    try ds.notADecisionOrThrow(id.number, now: now)
                     applied.append(a.id)
-                } else { skipped.append((a.id, "empty answer")) }
-            case "not_decision":
-                if !d.deleted { ds.notADecision(d.id, now: now) }
-                applied.append(a.id)
-            default:
-                skipped.append((a.id, "unknown action"))
+                default:
+                    skipped.append((a.id, "unknown action"))
+                }
+            } catch {
+                store.activity("decisions", .error, "Could not take in a change from the phone; it stays on the engine and is tried again",
+                               detail: "\(a.decision): \(error)")
+                waiting.append(a.id)
             }
         }
         return (applied, skipped, waiting)
