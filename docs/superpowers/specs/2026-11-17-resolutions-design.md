@@ -37,7 +37,7 @@ No new link table: every relation uses the foundation's `links`:
 `resolution_history` is the one table beyond `resolutions` (builder's call: the five-year picture is edited in place at
 the yearly review and its earlier text must not be lost; ordinary goals use the same table for edits made while active).
 
-## 2. Rules (core, `FloatBoardCore/Items/Resolutions.swift`)
+## 2. Rules (core, `FloatBoardCore/Items/Resolution*.swift`: models, store, registration, nudges)
 
 | Rule | How |
 |---|---|
