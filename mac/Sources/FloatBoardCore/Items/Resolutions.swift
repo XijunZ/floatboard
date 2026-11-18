@@ -420,15 +420,15 @@ public struct GoalProgress: Equatable {
             }
         }
         // The note first, so it is never lost even if the rest fails (the jot then says what was decided).
-        var noteJot: ShortID?
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedNote.isEmpty {
             let head = "Review of “\(g.title)” (\(g.period.title)): \(outcome.title.lowercased())"
                 + (outcome == .changed ? " to “\(wording)”" : "")
-            guard let j = JotStore(store: store).create(text: head + "\n\n" + trimmedNote, kind: .jot, source: .typed, now: now) else {
+            // The review-of link is made with the jot, before ids typed in the note (even this goal's own) are linked.
+            guard JotStore(store: store).create(text: head + "\n\n" + trimmedNote, kind: .jot, source: .typed, now: now,
+                                                linkFirst: [(g.shortID, .reviewOf, .auto)]) != nil else {
                 return .failure(GoalRefusal("Could not save the review note; see Activity."))
             }
-            noteJot = j.shortID
         }
         let openTasks = Set(progressOwnOpenTasks(id))
         // Goals of the new period with no parent yet whose chain of earlier versions (carried on, perhaps several times,
@@ -455,7 +455,6 @@ public struct GoalProgress: Equatable {
                 }
                 newID = n
             }
-            if let noteJot { try store.linkRow(noteJot, g.shortID, kind: .reviewOf, madeBy: .auto, actor: .user, now: now) }
         }
         changed()
         guard goal(id)?.status == outcome.status else { return .failure(GoalRefusal("Could not save the review; see Activity.")) }
