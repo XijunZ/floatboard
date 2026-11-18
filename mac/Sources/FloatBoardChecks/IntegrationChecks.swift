@@ -558,3 +558,20 @@ func integrationRebindingLiveChecks() async {
           "birthday_and_due_reminders_are_two_reminders")
     check(pend.first { $0.kind == "circle_birthday" }?.id.hasPrefix("rb-circle_birthday-") == true, "birthday_reminder_has_its_own_id")
 }
+
+/// Round 13 (J2): a second review answer from the phone with different words is kept as another review jot; the same words
+/// again (a repeat) add nothing.
+@MainActor func secondReviewChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-review2-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "review2.sqlite") else { return }
+    DecisionsArea.registerCore()
+    let ds = DecisionStore(store: s)
+    guard let d = ds.record(DecisionDraft(text: "Move the offsite"), now: decisionsNow.addingTimeInterval(-40 * 86400)) else { check(false, "review2 setup"); return }
+    let a1 = PhoneDecisionAction(id: "r1", decision: d.shortID.text, action: "review", happened: "It went well", sound: "yes")
+    let a2 = PhoneDecisionAction(id: "r2", decision: d.shortID.text, action: "review", happened: "Later: costs rose", sound: "partly")
+    let r = DecisionPhone.apply([a1, a1, a2], store: s, now: decisionsNow)
+    let texts = ds.reviews(of: d.id).map(\.text)
+    check(r.applied == ["r1", "r1", "r2"] && texts.count == 2 && texts.contains { $0.contains("Later: costs rose") }, "a_second_different_review_is_kept_as_another_review")
+}
