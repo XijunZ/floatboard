@@ -25,6 +25,15 @@ function ipv6Private(h: string): boolean {
   if (mapped) return ipv4Private(mapped[1].split(".").map(Number));
   const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(s);
   if (hex) { const a = parseInt(hex[1], 16), b = parseInt(hex[2], 16); return ipv4Private([a >> 8, a & 255, b >> 8, b & 255]); }
+  // NAT64 (64:ff9b::/96) carries an IPv4 address in its last 32 bits.
+  const nat = /^64:ff9b::(?:([0-9a-f]{1,4}):([0-9a-f]{1,4})|(\d+\.\d+\.\d+\.\d+))$/.exec(s);
+  if (nat) {
+    if (nat[3]) return ipv4Private(nat[3].split(".").map(Number));
+    const a = parseInt(nat[1], 16), b = parseInt(nat[2], 16);
+    return ipv4Private([a >> 8, a & 255, b >> 8, b & 255]);
+  }
+  // Anything else under ::/80 (the old IPv4-compatible form, e.g. ::127.0.0.1 written as ::7f00:1) is not a public address.
+  if (s.startsWith("::")) return true;
   const first = parseInt(s.split(":")[0] || "0", 16);
   return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00;
 }

@@ -438,7 +438,7 @@ private func fakeWhatsAppForCircle(_ folder: URL, now: Date) -> Bool {
 /// answers, and a "manual" redirect is not followed (the engine checks each hop itself).
 @MainActor func circleBridgeChecks() {
     check(["127.0.0.1", "10.0.0.5", "172.20.1.1", "192.168.1.2", "169.254.1.1", "100.64.3.4", "0.0.0.0", "224.0.0.1", "::1", "::", "fe80::1",
-           "fd00::1", "::ffff:192.168.0.1", "64:ff9b::a00:1"].allSatisfy { !PublicAddress.isPublic($0) }
+           "fd00::1", "::ffff:192.168.0.1", "64:ff9b::a00:1", "::127.0.0.1", "::7f00:1"].allSatisfy { !PublicAddress.isPublic($0) }
           && ["8.8.8.8", "93.184.216.34", "2606:4700::1111"].allSatisfy { PublicAddress.isPublic($0) }, "bridge_classifies_private_addresses")
     func req(_ url: String, publicOnly: Bool, redirect: String = "manual", answers: [String]) -> (URLRequest?, [String]) {
         var asked: [String] = []

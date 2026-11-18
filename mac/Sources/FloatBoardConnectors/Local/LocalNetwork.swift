@@ -15,6 +15,7 @@ public enum PublicAddress {
         if b.allSatisfy({ $0 == 0 }) || (b[0..<15].allSatisfy { $0 == 0 } && b[15] == 1) { return false }   // :: and ::1
         if b[0..<10].allSatisfy({ $0 == 0 }) && b[10] == 0xff && b[11] == 0xff { return publicV4(Array(b[12..<16])) }   // ::ffff:a.b.c.d
         if b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b { return publicV4(Array(b[12..<16])) }        // 64:ff9b::/96
+        if b[0..<10].allSatisfy({ $0 == 0 }) { return false }   // the rest of ::/80 (old IPv4-compatible form): not public
         if (b[0] & 0xfe) == 0xfc || (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) || b[0] == 0xff { return false }           // fc00::/7, fe80::/10, ff00::/8
         return true
     }

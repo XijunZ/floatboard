@@ -330,7 +330,7 @@ describe("circle: feed fetches stay on the public internet (Codex round 2, #1)",
     const { publicHttpUrl } = await import("../../src/circle/safe-url");
     for (const bad of ["file:///etc/passwd", "ftp://example.com/feed", "http://localhost/feed", "http://app.localhost/x", "http://127.0.0.1/feed",
       "http://2130706433/", "http://0x7f.0.0.1/", "http://10.1.2.3/", "http://172.16.0.1/", "http://192.168.1.1/", "http://169.254.169.254/latest",
-      "http://100.64.0.1/", "http://0.0.0.0/", "http://[::1]/", "http://[fe80::1]/", "http://[fd00::1]/", "http://[::ffff:127.0.0.1]/", "http://user:pw@example.com/"]) {
+      "http://100.64.0.1/", "http://0.0.0.0/", "http://[::1]/", "http://[::127.0.0.1]/", "http://[64:ff9b::7f00:1]/", "http://[64:ff9b::10.0.0.1]/", "http://[fe80::1]/", "http://[fd00::1]/", "http://[::ffff:127.0.0.1]/", "http://user:pw@example.com/"]) {
       expect(publicHttpUrl(bad), bad).toBeNull();
     }
     expect(publicHttpUrl("https://blog.example.com/feed")?.href).toBe("https://blog.example.com/feed");
