@@ -101,6 +101,9 @@ async function rowOut(env: Env, r: Row) {
 let putRaceHook: (() => Promise<void>) | undefined;
 /** Tests only: runs between an upload's read of a row and its write, to stand in for a phone change landing in between. */
 export function setJotsPutRaceHook(f: (() => Promise<void>) | undefined) { putRaceHook = f; }
+let phoneRaceHook: (() => Promise<void>) | undefined;
+/** Tests only: runs between a phone change's read of the copy and its write (a Mac upload landing in between). */
+export function setJotsPhoneRaceHook(f: (() => Promise<void>) | undefined) { phoneRaceHook = f; }
 
 const PUT_TRIES = 6;
 const hasVersions = "EXISTS (SELECT 1 FROM jot_copy_versions v WHERE v.user_id=jot_copies.user_id AND v.key=jot_copies.key)";
@@ -272,6 +275,7 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
     row = await env.DB.prepare("SELECT key, updated, deleted, rev, text_enc FROM jot_copies WHERE user_id=? AND mac_id=?").bind(userId, Number(macID))
       .first<{ key: string; updated: string; deleted: number; rev: number; text_enc: string }>();
   }
+  if (phoneRaceHook) await phoneRaceHook();
   if (a.op === "make_task" || a.op === "make_decision") {
     await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,text_enc,kind,source,tags,added,updated,waiting,rev,ref)
         VALUES(?,?,?,?,'phone','[]',?,?,1,1,?)`).bind(userId, `action:${id}`, await encrypt(env, text), `action:${a.op}`, made, made, row?.key ?? a.key), seen]);
@@ -280,10 +284,14 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
   if (!row) {
     // A jot the copy no longer holds (removed 30 days after the Mac saved it, or never here): the change waits for the Mac,
     // which applies it to its jot by number or key (newest wins), or keeps it as a new jot. Never dropped.
-    await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,mac_id,text_enc,kind,source,tags,added,updated,deleted,waiting,rev)
+    const ins = await env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,mac_id,text_enc,kind,source,tags,added,updated,deleted,waiting,rev)
         VALUES(?,?,?,?,'jot','phone','[]',?,?,?,1,1)`).bind(userId, a.key, macID ? Number(macID) : null, await encrypt(env, a.op === "edit" ? text : ""),
-        made, made, a.op === "delete" ? 1 : 0), seen]);
-    return "ok";
+        made, made, a.op === "delete" ? 1 : 0).run();
+    if (ins.meta.changes) { await seen.run(); return "ok"; }
+    // A copy appeared meanwhile (a Mac upload, by key or by number): read it and go through the version-checked path below.
+    row = await env.DB.prepare("SELECT key, updated, deleted, rev, text_enc FROM jot_copies WHERE user_id=? AND (key=? OR mac_id=?)")
+      .bind(userId, a.key, macID ? Number(macID) : -1).first<{ key: string; updated: string; deleted: number; rev: number; text_enc: string }>();
+    if (!row) return drop("busy");   // kept on the phone and sent again
   }
   for (let attempt = 0; attempt < PUT_TRIES; attempt++) {
     if (attempt > 0) {
