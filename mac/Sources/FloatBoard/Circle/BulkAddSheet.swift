@@ -85,7 +85,7 @@ struct BulkAddSheet: View {
             Image(systemName: picked.contains(r.key) ? "checkmark.square.fill" : "square").foregroundStyle(r.inCircle ? Color.secondary.opacity(0.4) : .secondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(r.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.tail)
-                Text([r.phone ?? r.handles.first.map { $0.kind == .wechat ? "WeChat" : LIDBook.display(store: store, $0) } ?? "",
+                Text([r.phone.map(Handles.phoneText) ?? r.handles.first.map { $0.kind == .wechat ? "WeChat" : LIDBook.display(store: store, $0) } ?? "",
                       source == .wechat ? "seen on \(r.messages) day\(r.messages == 1 ? "" : "s")"
                           : (r.messages > 0 ? "\(r.messages) message\(r.messages == 1 ? "" : "s")" : "no messages"),
                       r.last.map { "last \(CircleFmt.f("d MMM yyyy", $0))" }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))

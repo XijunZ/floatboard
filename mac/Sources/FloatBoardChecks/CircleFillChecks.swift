@@ -80,7 +80,8 @@ import FloatBoardCore
     check(byLid.contains(FillHeader(name: "Lid Example", address: "", phone: "447700900111")) && byLid.allSatisfy { $0.name == "Lid Example" }
           && !byLid.contains { $0.phone.contains("@") || $0.address.contains("@lid") }, "fill_finds_a_linked_id_chat_and_its_real_number")
     check(Handles.display(Handle(kind: .whatsapp, value: "98765432101234@lid")) == "WhatsApp contact (no number shared)"
-          && Handles.display(Handle(kind: .phone, value: "447700900123")) == "447700900123", "linked_id_is_shown_in_words")
+          && Handles.display(Handle(kind: .phone, value: "447700900123")) == "+447700900123"
+          && Handles.normalize(.phone, Handles.phoneText("447700900123")) == "447700900123", "linked_id_is_shown_in_words")
     // Add with a name, a phone, a WhatsApp number and notes saves the person with both handles and the notes.
     let typed = ContactFormFields.handles([.phone: "07700 900789", .whatsapp: "+44 7700 900789"])
     var det = CircleDetails(); det.notes = "Met at the conference"

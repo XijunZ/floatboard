@@ -56,8 +56,15 @@ public enum Handles {
     /// True for a WhatsApp linked id ("<digits>@lid"): the contact chose not to share a number.
     public static func isLinkedID(_ h: Handle) -> Bool { h.kind == .whatsapp && h.value.hasSuffix("@lid") }
 
-    /// How a handle is shown to the owner: a linked id in words (its digits are not a phone number), the rest as stored.
-    public static func display(_ h: Handle) -> String { isLinkedID(h) ? "WhatsApp contact (no number shared)" : h.value }
+    /// How a handle is shown to the owner: a linked id in words (its digits are not a phone number), a phone number with its
+    /// leading "+" (stored as international digits, shown as "+447700900123"), the rest as stored.
+    public static func display(_ h: Handle) -> String {
+        if isLinkedID(h) { return "WhatsApp contact (no number shared)" }
+        return h.kind == .phone ? phoneText(h.value) : h.value
+    }
+
+    /// A stored phone number (international digits) as shown and edited: with a leading "+". `normalize` reads it back.
+    public static func phoneText(_ digits: String) -> String { digits.hasPrefix("+") ? digits : "+" + digits }
 
     public static func fromWhatsApp(_ jid: String) -> Handle? {
         let j = jid.lowercased()
