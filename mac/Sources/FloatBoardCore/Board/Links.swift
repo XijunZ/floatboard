@@ -122,7 +122,14 @@ extension Store {
     /// Puts back the link the last ✕ removed, as it was (kind, maker, date).
     public func undoUnlink() {
         guard let u = lastUnlinked else { return }
-        perform { try restoreLinks([u.row]) }
+        perform {
+            // A goal's parent (a serves link between two goals, the child as subject) comes back in place of any parent set
+            // since: a goal never has two.
+            if u.row.kind == .serves, u.row.from.kind == .resolution, u.row.to.kind == .resolution, let child = ShortID.parse(u.row.subject) {
+                try ResolutionStore.deleteParentLinksRow(self, child: child, except: child == u.row.from ? u.row.to : u.row.from)
+            }
+            try restoreLinks([u.row])
+        }
         lastUnlinked = nil
     }
 

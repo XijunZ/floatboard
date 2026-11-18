@@ -406,3 +406,28 @@ import SQLite3
     s.performForTest("DROP TRIGGER fail_dec2")
     check(handed == false, "older_phone_make_decision_storage_failure_is_not_acked")
 }
+
+// MARK: Round 7 (H): one parent per goal through unlink, reparent, undo and "No parent"
+
+@MainActor func integrationGoalParentChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-int-parent-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "parent.sqlite") else { return }
+    Resolutions.register()
+    let rs = ResolutionStore(store: s)
+    let year = GoalPeriod.current(.year, now: decisionsNow), quarter = GoalPeriod.current(.quarter, now: decisionsNow)
+    guard case .success(let a) = rs.create(level: .year, period: year, title: "Grow the team", now: decisionsNow),
+          case .success(let b) = rs.create(level: .year, period: year, title: "Keep costs flat", now: decisionsNow),
+          case .success(let c) = rs.create(level: .quarter, period: quarter, title: "Hire two engineers", parent: a.id, now: decisionsNow)
+    else { check(false, "parent setup"); return }
+    let parents = { () -> [ShortID] in
+        s.itemLinks(of: c.shortID).filter { $0.other.kind == .resolution && $0.kind == .serves && $0.isSubject }.map(\.other)
+    }
+    s.unlinkWithUndo(c.shortID, a.shortID)                                        // ✕ on the parent chip
+    check(rs.setParent(c.id, b.id, now: decisionsNow.addingTimeInterval(60)) == nil && parents() == [b.shortID], "reparent_after_unlink")
+    s.undoUnlink()                                                                // Undo brings A back: it replaces B, never a second parent
+    check(parents() == [a.shortID] && rs.parent(of: c.id)?.id == a.id, "undo_unlink_of_a_parent_replaces_the_current_parent")
+    check(rs.setParent(c.id, nil, now: decisionsNow.addingTimeInterval(120)) == nil && parents().isEmpty && rs.parent(of: c.id) == nil,
+          "no_parent_removes_every_parent_link")
+}
