@@ -21,9 +21,12 @@ import { circleFetch } from "./net";
 import { fetchPublic, publicHttpUrl } from "./safe-url";
 import { circleOn, haikuFor, line, seal, unseal } from "./common";
 
-/** The most calls one person can take in a run, and the news match's share (one call, the client retries up to twice). */
-const PER_PERSON_CALLS = 7;
+/** The news match's share (one call, the client retries up to twice), reserved once per run when anyone has news on. */
 const MATCH_CALLS = 3;
+/** The most calls one person can take: 1-2 news searches, 1 Companies House call, a feed with up to 3 redirects. */
+export function personCalls(p: WatchPerson, chKey: boolean): number {
+  return (p.news ? ((p.firm || p.company) ? 2 : 1) : 0) + (p.ch && chKey ? 1 : 0) + (p.feed_url ? 4 : 0);
+}
 const DAY = 86400_000;
 export const RECHECK_MS = 7 * DAY;
 const CH = "https://api.company-information.service.gov.uk";
@@ -92,10 +95,11 @@ export async function runCircleUpdates(env: Env, userId: string, budget: Budget,
     };
     const mark = (person: string, kind: string) => { deferred.push(env.DB.prepare(`INSERT INTO circle_checked(user_id,person,kind,checked_at) VALUES(?,?,?,?)
         ON CONFLICT(user_id,person,kind) DO UPDATE SET checked_at=excluded.checked_at`).bind(userId, person, kind, new Date(now).toISOString())); };
+    const matchReserve = people.some((p) => p.news) ? MATCH_CALLS : 0;
     for (const p of people) {
-      // Up to 7 calls for one person (2 news searches, Companies House, a feed with 3 redirects), plus the news match at the end
-      // (one call, up to 3 with the client's retries).
-      if (budget.remaining < PER_PERSON_CALLS + MATCH_CALLS) break;
+      // This person's own need, with the news match's share kept back once for the end. One that doesn't fit stops the
+      // run (the next run starts with the people not checked).
+      if (budget.remaining < personCalls(p, !!chKey) + matchReserve) break;
       let looked = false;
       const ownPending = pending.length, ownDeferred = deferred.length;
       try {
