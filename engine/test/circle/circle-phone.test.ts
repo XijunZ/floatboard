@@ -77,6 +77,28 @@ describe("phone Circle", () => {
     expect(APP_JS).toMatch(/function dropAccountData\(\)[\s\S]*?circleDrop\(\)/);
   });
 
+  it("a_link_never_marks_anyone_by_itself_it_asks_first", () => {
+    const people = copy.people.slice(0, 3);
+    expect(L.circleConfirm({ action: "talked", person: "P-1" }, people)).toEqual({ action: "talked", person: "P-1", text: "Mark talked to Kim Example?" });
+    expect(L.circleConfirm({ action: "contacted", person: "P-2" }, people).text).toBe("Mark José Example as contacted?");
+    expect(L.circleConfirm({ action: "snooze", person: "P-3" }, people).text).toBe("Snooze 王美玲?");
+    expect(L.circleConfirm({ action: "talked", person: "P-99" }, people)).toBeNull();   // someone not on this phone: nothing shown
+    const body = /function circleFromHash\(\) \{([\s\S]*?)\n  \}\n/.exec(CIRCLE_JS)![1];
+    expect(body).toContain("openSheet");
+    expect(body.indexOf("circleAct(")).toBeGreaterThan(body.indexOf('addEventListener("click"'));
+  });
+
+  it("a_link_from_another_accounts_notification_shows_nothing", () => {
+    const acc = "a".repeat(32), other = "b".repeat(32);
+    const h = L.circleHash("#circle=talked:P-1:" + acc);
+    expect(h).toEqual({ action: "talked", person: "P-1", account: acc });
+    expect(L.circleConfirm(h, copy.people.slice(0, 3), acc)?.person).toBe("P-1");
+    expect(L.circleConfirm(h, copy.people.slice(0, 3), other)).toBeNull();
+    expect(SW_JS).toContain("account");
+    expect(SW_JS).toMatch(/r\.status === 409/);
+    expect(SW_JS).toMatch(/#circle=" \+ action \+ ":" \+ person \+ ":" \+ account/);
+  });
+
   it("service_worker_adds_contacted_and_snooze_to_circle_alerts", () => {
     expect(SW_JS).toContain('action: "contacted", title: "Contacted"');
     expect(SW_JS).toContain('action: "snooze", title: "Snooze"');

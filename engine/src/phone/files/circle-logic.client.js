@@ -63,8 +63,11 @@
 
   // A notification button arrives as "#circle=contacted:P-12" when the service worker could not send it itself.
   function circleHash(hash) {
-    var m = /[#&]circle=(contacted|talked|snooze):(P-\d{1,12})/.exec(hash || "");
-    return m ? { action: m[1], person: m[2] } : null;
+    var m = /[#&]circle=(contacted|talked|snooze):(P-\d{1,12})(?::([0-9a-f]{32}))?/.exec(hash || "");
+    if (!m) return null;
+    var h = { action: m[1], person: m[2] };
+    if (m[3]) h.account = m[3];
+    return h;
   }
 
   // An answer is used only if the phone is still in the session and account it was asked for (no sign-out or account
@@ -72,4 +75,14 @@
   function circleAccept(start, now, respAccount) {
     if (!start || !now || start.epoch !== now.epoch || !start.account || start.account !== now.account) return false;
     return respAccount == null || respAccount === start.account;
+  }
+
+  // What the confirm sheet for a link's action says (a link never acts by itself); null for someone not on this phone.
+  // A link that names another account (an old alert after switching) shows nothing.
+  function circleConfirm(h, people, account) {
+    if (h && h.account && h.account !== account) return null;
+    var p = h && (people || []).filter(function (x) { return x && x.id === h.person; })[0];
+    if (!p) return null;
+    var text = h.action === "talked" ? "Mark talked to " + p.name + "?" : h.action === "snooze" ? "Snooze " + p.name + "?" : "Mark " + p.name + " as contacted?";
+    return { action: h.action, person: p.id, text: text };
   }

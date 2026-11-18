@@ -324,3 +324,70 @@ describe("circle: notification buttons", () => {
 });
 
 beforeEach(() => { setCircleFetch(null); });
+
+describe("circle: feed fetches stay on the public internet (Codex round 2, #1)", () => {
+  it("unsafe_feed_urls_are_refused_when_watched", async () => {
+    const { publicHttpUrl } = await import("../../src/circle/safe-url");
+    for (const bad of ["file:///etc/passwd", "ftp://example.com/feed", "http://localhost/feed", "http://app.localhost/x", "http://127.0.0.1/feed",
+      "http://2130706433/", "http://0x7f.0.0.1/", "http://10.1.2.3/", "http://172.16.0.1/", "http://192.168.1.1/", "http://169.254.169.254/latest",
+      "http://100.64.0.1/", "http://0.0.0.0/", "http://[::1]/", "http://[fe80::1]/", "http://[fd00::1]/", "http://[::ffff:127.0.0.1]/", "http://user:pw@example.com/"]) {
+      expect(publicHttpUrl(bad), bad).toBeNull();
+    }
+    expect(publicHttpUrl("https://blog.example.com/feed")?.href).toBe("https://blog.example.com/feed");
+    expect(publicHttpUrl("http://93.184.216.34/rss")).not.toBeNull();
+    const u = await circleUser("Unsafe feed");
+    const r = await call("/v2/circle/watch", { method: "PUT", key: u.key, body: JSON.stringify({ people: [{ person: "P-1", name: "A", feed_url: "http://127.0.0.1:8080/admin" }] }) });
+    expect(r.status).toBe(400);
+  });
+
+  it("redirects_are_checked_each_hop_and_stop_after_three", async () => {
+    const u = await circleUser("Redirect feed");
+    const { seal } = await import("../../src/circle/common");
+    const watchOf = async (feed: string) => env.DB.prepare(`INSERT INTO circle_watch(user_id,data_enc,updated) VALUES(?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET data_enc=excluded.data_enc`).bind(u.id, await seal(env as any,
+      [{ person: "P-1", name: "A", firm: "", company: "", officer_id: "", born: "", feed_url: feed, news: false, ch: false }]), iso(NOW)).run();
+    const asked: string[] = [];
+    const redirects: Record<string, string> = { "https://a.example.com/feed": "http://169.254.169.254/latest/meta-data",
+      "https://b.example.com/1": "https://b.example.com/2", "https://b.example.com/2": "https://b.example.com/3",
+      "https://b.example.com/3": "https://b.example.com/4", "https://b.example.com/4": "https://b.example.com/5" };
+    const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      asked.push(url);
+      expect(init?.redirect).toBe("manual");
+      if (redirects[url]) return new Response(null, { status: 302, headers: { Location: redirects[url] } });
+      return new Response(`<rss><channel><item><title>Post</title><link>https://b.example.com/p</link></item></channel></rss>`);
+    }) as typeof fetch;
+    await watchOf("https://a.example.com/feed");
+    await runCircleUpdates(env as any, u.id, new Budget(40), { now: NOW, fetchFn: f });
+    expect(asked).toEqual(["https://a.example.com/feed"]);            // the private hop is never fetched
+    await env.DB.prepare("DELETE FROM circle_checked WHERE user_id=?").bind(u.id).run();
+    asked.length = 0;
+    await watchOf("https://b.example.com/1");
+    await runCircleUpdates(env as any, u.id, new Budget(40), { now: NOW, fetchFn: f });
+    expect(asked).toEqual(["https://b.example.com/1", "https://b.example.com/2", "https://b.example.com/3", "https://b.example.com/4"]);
+    const res = await (await call("/v2/circle/updates", { key: u.key })).json<any>();
+    expect(res.updates.filter((x: any) => x.kind === "post")).toEqual([]);
+  });
+});
+
+describe("circle: notification buttons are bound to their account (Codex round 2, #4)", () => {
+  it("push_carries_the_account_and_the_server_refuses_another", async () => {
+    const { circlePushExtras } = await import("../../src/reminders/alerts");
+    const { accountMarker } = await import("../../src/phone/auth");
+    const a = await circleUser("Account A"), b = await circleUser("Account B");
+    const extras = await circlePushExtras(a.id, "rb-circle_due-P-1-2026-11-18");
+    expect(extras).toEqual({ circle: "P-1", account: await accountMarker(a.id) });
+    expect(await circlePushExtras(a.id, "due:5")).toEqual({});
+    expect(JSON.parse(payloadJSON({ title: "t", body: "b", url: "/app/", ...extras }))).toMatchObject({ circle: "P-1", account: extras.account });
+    expect(JSON.parse(payloadJSON({ title: "t", body: "b", url: "/app/", circle: "P-1", account: "<script>" })).account).toBeUndefined();
+    // A's notification tapped while the phone is signed in to B: refused, nothing queued for B.
+    const { cookie } = await pairPhone(b.key);
+    const made = iso(Date.now() - 60_000);
+    const send = (account: string) => call("/app/api/circle/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE },
+      body: JSON.stringify({ account, actions: [{ id: "nbact-0001", person: "P-1", action: "contacted", made_at: made }] }) });
+    expect((await send(extras.account!)).status).toBe(409);
+    expect((await (await call("/v2/circle/actions", { key: b.key })).json<any>()).actions).toEqual([]);
+    expect((await send(await accountMarker(b.id))).status).toBe(200);
+    expect((await (await call("/v2/circle/actions", { key: b.key })).json<any>()).actions).toHaveLength(1);
+  });
+});
