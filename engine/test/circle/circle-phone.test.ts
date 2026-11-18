@@ -85,6 +85,24 @@ describe("phone Circle", () => {
     expect(body.indexOf("circleAct(")).toBeGreaterThan(body.indexOf('addEventListener("click"'));
   });
 
+  it("a_link_waits_for_the_copy_and_account_before_it_is_cleared", () => {
+    // Round 7 (J): on first launch or right after a switch the copy (or the account) isn't there yet: the link waits.
+    const acc = "a".repeat(32), hash = "#circle=talked:P-1:" + acc;
+    expect(L.circleLinkStep("", copy, acc)).toEqual({ step: "none" });
+    expect(L.circleLinkStep(hash, null, acc)).toEqual({ step: "wait" });
+    expect(L.circleLinkStep(hash, copy, null)).toEqual({ step: "wait" });
+    expect(L.circleLinkStep(hash, copy, acc)).toMatchObject({ step: "ask", confirm: { person: "P-1", action: "talked" } });
+    expect(L.circleLinkStep("#circle=talked:P-99:" + acc, copy, acc)).toEqual({ step: "drop" });          // nobody on this phone
+    expect(L.circleLinkStep(hash, copy, "b".repeat(32))).toEqual({ step: "drop" });                        // another account's alert
+    // The app clears the address only once the sheet is shown (or the link can never be shown), and tries again after
+    // each copy it loads.
+    const fn = (name: string) => new RegExp("function " + name + "\\([^)]*\\) \\{([\\s\\S]*?)\\n  \\}\\n").exec(CIRCLE_JS)![1];
+    const body = fn("circleFromHash");
+    expect(body.indexOf("history.replaceState")).toBeGreaterThan(body.indexOf("circleLinkStep("));
+    expect(body).toMatch(/step === "wait"\) return;/);
+    expect(fn("circleSync")).toMatch(/circleCopy = got\.copy;[\s\S]*circleFromHash\(\)/);
+  });
+
   it("a_link_from_another_accounts_notification_shows_nothing", () => {
     const acc = "a".repeat(32), other = "b".repeat(32);
     const h = L.circleHash("#circle=talked:P-1:" + acc);

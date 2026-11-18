@@ -55,6 +55,7 @@
       if (!still(got.account)) return;
       if (got.copy) {
         circleCopy = got.copy;
+        if (circleHash(location.hash)) circleFromHash();   // a link that waited for the copy (first launch, or after a switch)
         // Actions the engine already holds stay shown until the Mac's next copy reflects them.
         store(CIRCLE_KEY, { account: asked.account, copy: circleCopy, at: Date.now() });
       }
@@ -211,11 +212,11 @@
   // A notification button the service worker could not send itself arrives in the address (#circle=contacted:P-12). A link
   // never acts by itself (anyone can make one): it opens a confirm sheet, and only the tap marks the person.
   function circleFromHash() {
-    var h = circleHash(location.hash);
-    if (!h) return;
-    history.replaceState(null, "", location.pathname + location.search);
-    var c = circleConfirm(h, circleView(circleCopy, [], Date.now()).people, circleAccount());
-    if (!c) return;
+    var next = circleLinkStep(location.hash, circleCopy, circleAccount());
+    if (next.step === "none" || next.step === "wait") return;   // waiting: tried again after the next copy loads
+    history.replaceState(null, "", location.pathname + location.search);   // shown now, or it can never be: the address is cleared
+    if (next.step === "drop") return;
+    var c = next.confirm;
     var asked = sessionStamp();
     openSheet(function (sheet) {
       sheet.dataset.circle = "1";
