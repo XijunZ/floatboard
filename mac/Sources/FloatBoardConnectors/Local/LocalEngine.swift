@@ -206,12 +206,10 @@ public final class LocalEngine {
             let transport = self.transport
             Task { @MainActor in
                 do {
-                    guard let p = try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
-                          let url = URL(string: p["url"] as? String ?? "") else { throw URLError(.badURL) }
-                    var req = URLRequest(url: url, timeoutInterval: 60)
-                    req.httpMethod = p["method"] as? String ?? "GET"
-                    for pair in p["headers"] as? [[String]] ?? [] where pair.count == 2 { req.addValue(pair[1], forHTTPHeaderField: pair[0]) }
-                    if let b = p["body"] as? String { req.httpBody = Data(base64Encoded: b) }
+                    guard let p = try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] else { throw URLError(.badURL) }
+                    // Name resolution blocks: done off the main thread. "Public only" fetches (Circle's feeds) are refused when
+                    // the name points into a private network (LocalNetwork.swift).
+                    let req = try await Task.detached { try LocalEngine.request(from: p) }.value
                     let (data, resp) = try await transport(req)
                     let http = resp as? HTTPURLResponse
                     let headers = (http?.allHeaderFields ?? [:]).map { ["\($0.key)", "\($0.value)"] }

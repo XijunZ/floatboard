@@ -391,3 +391,13 @@ describe("circle: notification buttons are bound to their account (Codex round 2
     expect((await (await call("/v2/circle/actions", { key: b.key })).json<any>()).actions).toHaveLength(1);
   });
 });
+
+describe("circle: feed fetches on the Mac's engine (Codex round 3, #1)", () => {
+  it("marks_feed_fetches_public_only_for_the_mac_bridge", async () => {
+    const { fetchPublic } = await import("../../src/circle/safe-url");
+    const inits: any[] = [];
+    await fetchPublic((async (_u: RequestInfo | URL, init?: RequestInit) => { inits.push(init); return new Response("ok"); }) as typeof fetch, "https://blog.example.com/feed");
+    expect(inits[0]).toMatchObject({ redirect: "manual", fbPublicOnly: true });
+    // The Mac runtime passing these to the app is checked on the Mac (circleBridgeChecks reads engine/local/runtime.js).
+  });
+});
