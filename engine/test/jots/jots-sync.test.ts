@@ -83,6 +83,23 @@ describe("jots: phone captures and edits reach the Mac", () => {
     expect(jots.map((j) => j.key)).toEqual(["phone:cap-0002"]);
   });
 
+  it("a_waiting_phone_edit_of_the_macs_copy_survives_the_capture_ack", async () => {
+    // Claude review, round 12: capture → edit during the Mac's intake → rev miss → Mac makes J-42 → phone edits J-42 → confirm.
+    const u = await setup("Interleave");
+    await phoneSend(u.cookie, [{ id: "cap-0042", op: "add", text: "First words", made_at: iso(Date.now() - 9000) }]);
+    const w1 = await waiting(u.key);                                   // the Mac starts taking the capture in
+    await phoneSend(u.cookie, [{ id: "edit-0420", op: "edit", key: "phone:cap-0042", text: "First words, edited", made_at: iso(Date.now() - 8000) }]);
+    const miss = await (await ack(u.key, [{ key: "phone:cap-0042", rev: w1.jots[0].rev, mac_id: 42 }])).json<any>();
+    expect(miss.acked).toBe(0);                                        // the rev moved on: still waiting
+    await putJots(u.key, { jots: [jot(42, { text: "First words", source: "phone", updated: iso(Date.now() - 7000) })] });   // the Mac's J-42
+    await phoneSend(u.cookie, [{ id: "edit-0421", op: "edit", key: "J-42", text: "Edited on the phone as J-42", made_at: iso(Date.now() - 1000) }]);
+    const w2 = await waiting(u.key);
+    const capture = w2.jots.find((j: any) => j.key === "phone:cap-0042")!;
+    await ack(u.key, [{ key: "phone:cap-0042", rev: capture.rev, mac_id: 42 }]);   // confirmed before the Mac saw the J-42 edit
+    const w3 = await waiting(u.key);
+    expect(w3.jots.map((j: any) => [j.key, j.mac_id, j.text])).toEqual([["J-42", 42, "Edited on the phone as J-42"]]);
+  });
+
   it("newest_change_wins_between_phone_and_mac", async () => {
     const u = await setup("Newest");
     const t0 = Date.now() - 60_000;
