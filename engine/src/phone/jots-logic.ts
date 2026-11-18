@@ -16,4 +16,4 @@ export const JOTS_JS: string = JOTS_SRC;
 
 /** Names the tests pull out of JOTS_JS. */
 export const JOTS_EXPORTS = ["jotsView", "jotsFilter", "jotTags", "jotDayLabel", "takeJotBatch", "afterJotSend", "jotWaitingText", "launchTarget",
-  "sharedText", "selectionTitle", "markJotsAttempted", "undoJotDelete"];
+  "sharedText", "selectionTitle", "markJotsAttempted", "undoJotDelete", "JotsScreen"];
