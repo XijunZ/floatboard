@@ -68,7 +68,7 @@ describe("circle: in-app taps and notification buttons are bound to the account"
   it("the_phone_sends_each_queues_account_and_checks_the_answers", () => {
     expect(APP_JS).toMatch(/\/app\/api\/jots", \{ method: "POST", body: Object\.assign\(\{ account: heldBy \}/);
     expect(APP_JS).toMatch(/sameSession\(stamp, r\.account\)/);   // Jots
-    expect(APP_JS).toMatch(/\/app\/api\/circle\/action", \{ method: "POST", body: \{ account: circleQueue\.account, actions: sent \}/);
+    expect(APP_JS).toMatch(/\/app\/api\/circle\/action", \{ method: "POST", body: \{ account: circleQueue\.account, actions: t\.actions \}/);
     expect(APP_JS).toMatch(/if \(!still\(r\.account\)\) return;/);   // Circle
   });
 });

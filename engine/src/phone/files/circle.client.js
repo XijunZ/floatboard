@@ -6,6 +6,7 @@
 
   var CIRCLE_KEY = "floatboard.circle";        // { account, copy, at }
   var CIRCLE_QUEUE_KEY = "floatboard.circleq"; // { account, actions: [...] }
+  var CIRCLE_SEND_BYTES = 30000;               // under the engine's 32 KB cap for /app/api/circle/action
   var circleCopy = null;
   var circleQueue = { account: null, actions: [] };
   var circleQuery = "";
@@ -43,13 +44,28 @@
     var still = function (respAccount) { return sameSession(asked, respAccount); };
     try {
       if (circleQueue.actions.length && circleQueue.account) {
-        var sent = circleQueue.actions.slice(0, 50);
-        // The queue's own account goes with it: the engine refuses another account's (409; the queue stays here).
-        var r = await api("/app/api/circle/action", { method: "POST", body: { account: circleQueue.account, actions: sent } });
-        if (!still(r.account)) return;   // signed out or another account meanwhile: nothing of this answer is kept
-        var done = (r.accepted || []).concat((r.dropped || []).map(function (d) { return d.id; }));
-        circleQueue.actions = circleQueue.actions.filter(function (a) { return done.indexOf(a.id) < 0; });
-        store(CIRCLE_QUEUE_KEY, circleQueue);
+        var t = queueTake(circleQueue.actions, 50, CIRCLE_SEND_BYTES, byteLength(JSON.stringify({ account: circleQueue.account, actions: [] })));
+        if (t.tooBig) {   // too big for any send: dropped with a message, never holding up the queue
+          circleQueue.actions = queueWithout(circleQueue.actions, [t.tooBig]);
+          storeDurable(CIRCLE_QUEUE_KEY, circleQueue);
+          toast("A Circle change was too big to send and was removed.");
+        } else {
+          // The queue's own account goes with it: the engine refuses another account's (409; the queue stays here).
+          var r;
+          try {
+            r = await api("/app/api/circle/action", { method: "POST", body: { account: circleQueue.account, actions: t.actions } });
+          } catch (e) {
+            // A malformed action would block the queue for good: the engine names it (an older engine: the first goes).
+            if (e && e.status === 400 && still()) {
+              circleQueue.actions = queueAfterRefusal(circleQueue.actions, e.id);
+              storeDurable(CIRCLE_QUEUE_KEY, circleQueue);
+            }
+            throw e;
+          }
+          if (!still(r.account)) return;   // signed out or another account meanwhile: nothing of this answer is kept
+          circleQueue.actions = queueWithout(circleQueue.actions, (r.accepted || []).concat((r.dropped || []).map(function (d) { return d.id; })));
+          storeDurable(CIRCLE_QUEUE_KEY, circleQueue);
+        }
       }
       var got = await api("/app/api/circle");
       if (!still(got.account)) return;
@@ -68,9 +84,10 @@
   function circleAct(person, action, asked) {
     if (!sameSession(asked)) { closeSheet(); return; }
     var a = circleAction(person, action, newId(), new Date().toISOString());
-    circleQueue.account = circleAccount();
-    circleQueue.actions.push(a);
-    store(CIRCLE_QUEUE_KEY, circleQueue);
+    var next = { account: circleAccount(), actions: circleQueue.actions.concat([a]) };
+    // Shown as done only once this phone has kept it (storage full or off: nothing is pretended).
+    if (!storeDurable(CIRCLE_QUEUE_KEY, next)) { toast("Couldn't save that on this phone. Try again."); return; }
+    circleQueue = next;
     toast(CIRCLE_DONE[action]);
     circleRender();
     circleSync();

@@ -87,13 +87,7 @@
     try { if (value == null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage off */ }
   }
   // The same write, but says whether it is really kept (read back): for a change the owner must not lose, such as a decision.
-  function storeDurable(key, value) {
-    try {
-      var text = JSON.stringify(value);
-      localStorage.setItem(key, text);
-      return localStorage.getItem(key) === text;
-    } catch (e) { return false; }
-  }
+  // storeDurable(key, value): the shared queue save (sync.client.js).
   function load(key) {
     try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch (e) { return null; }
   }

@@ -132,6 +132,49 @@
     return { actions: (actions || []).filter(function (a) { return !gone[a.id]; }), dropped: dropped };
   }
 
+  // ------------------------------------------------------------ Shared queue helpers (Jots, Circle, Decisions)
+  // Each screen keeps its own queue ({ account, actions }) under its own key; these are the parts they share.
+
+  // The next send: the oldest actions, at most `max` and with the body under `bytes` (`base`: the body's size without its
+  // actions). The oldest action too big for any send is named in `tooBig` (the screen drops it with a message), so it never
+  // holds up the queue.
+  function queueTake(actions, max, bytes, base) {
+    var out = [], size = base || 0, list = actions || [];
+    for (var i = 0; i < list.length && out.length < max; i++) {
+      var n = byteLength(JSON.stringify(list[i])) + 1;
+      if (size + n > bytes) {
+        if (!out.length) return { actions: [], tooBig: list[i].id };
+        break;
+      }
+      out.push(list[i]); size += n;
+    }
+    return { actions: out, tooBig: null };
+  }
+
+  // The queue without the actions the engine took or can never take (`ids`).
+  function queueWithout(actions, ids) {
+    var done = {};
+    (ids || []).forEach(function (id) { done[id] = true; });
+    return (actions || []).filter(function (a) { return !done[a.id]; });
+  }
+
+  // A refused batch (400): drop the action the engine named; an older engine names none, then the first.
+  function queueAfterRefusal(actions, id) {
+    var q = actions || [];
+    if (typeof id === "string" && q.some(function (a) { return a.id === id; })) return q.filter(function (a) { return a.id !== id; });
+    return q.slice(1);
+  }
+
+  // Saves a queue and reads it back: false when this phone could not keep it (storage full or off), so a change is only
+  // shown as made once it will survive a reload.
+  function storeDurable(key, value) {
+    try {
+      var text = JSON.stringify(value);
+      localStorage.setItem(key, text);
+      return localStorage.getItem(key) === text;
+    } catch (e) { return false; }
+  }
+
   // send(body) resolves with the engine's answer or rejects with an error carrying .status. Only a 400 splits the batch:
   // 429, other errors and no connection go up unchanged (the queue stays and is retried with back-off).
   async function sendBatch(body, send, now) {
