@@ -97,13 +97,17 @@ public struct JotAck: Equatable {
                 continue
             }
             // Looked up with errors kept apart from "not here": a read that fails leaves the row waiting (never acked as gone).
-            var found: Int64?, known: Jot?
+            var found: Int64?, known: Jot?, reused = false
             do {
                 found = try r.macID ?? js.jotIDOrThrow(origin: r.key)
                 known = try found.flatMap { try js.jotOrThrow($0) }
+                // The same jot only when it was added at the same moment: after an older backup is restored, a new jot here
+                // can have the number the phone still uses for another one; that one is never touched (recovered below).
+                if r.macID != nil, let k = known, !Self.sameJot(k, r) { known = nil; reused = true }
                 // A jot this Mac no longer has (an older backup was restored): one recovered earlier is found by its key.
-                if r.macID != nil, known == nil, let again = try js.jotIDOrThrow(origin: r.key) {
-                    found = again; known = try js.jotOrThrow(again)
+                if r.macID != nil, known == nil, let again = try js.jotIDOrThrow(origin: r.key),
+                   let k = try js.jotOrThrow(again), Self.sameJot(k, r) {
+                    found = again; known = k; reused = false
                 }
             } catch {
                 store.activity("jots", .error, "Could not read a jot for a change from the phone; it stays on the engine and is tried again",
@@ -115,7 +119,8 @@ public struct JotAck: Equatable {
                     // Missing here: nothing with words is ever acked unsaved. It is recovered (text, earlier texts, deletion) in one
                     // transaction under its key, then acked with the recovered jot's number; a failure leaves it waiting.
                     guard !r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                        acks.append(JotAck(key: r.key, rev: r.rev, macID: id)); continue
+                        // Nothing to keep; a number now used by another jot is not handed back with it.
+                        acks.append(JotAck(key: r.key, rev: r.rev, macID: reused ? nil : id)); continue
                     }
                     do {
                         let n = try store.performThrowing { () throws -> Int64 in
@@ -219,6 +224,10 @@ public struct JotAck: Equatable {
             return false
         }
     }
+
+    /// Whether a local jot and the phone's copy are the same jot: added at the same moment (the copy's time has millisecond
+    /// precision). A Mac jot and a phone capture keep their added time for life, here and on the engine.
+    static func sameJot(_ j: Jot, _ r: EngineJot) -> Bool { abs(j.added.timeIntervalSince(r.added)) < 0.002 }
 
     /// The phone's newer version of a jot, inside the caller's transaction (throws, never swallows): its text first (the old
     /// text to the history, ids typed in it linked), then restore or delete, so an edit followed by a delete keeps the latest text.

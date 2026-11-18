@@ -108,6 +108,8 @@ let phoneRaceHook: (() => Promise<void>) | undefined;
 export function setJotsPhoneRaceHook(f: (() => Promise<void>) | undefined) { phoneRaceHook = f; }
 
 const PUT_TRIES = 6;
+/** One jot on both sides: the same added time (millisecond times from two clocks' formatting: 2 ms of slack). */
+const sameAdded = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) <= 2;
 const hasVersions = "EXISTS (SELECT 1 FROM jot_copy_versions v WHERE v.user_id=jot_copies.user_id AND v.key=jot_copies.key)";
 
 /**
@@ -119,9 +121,21 @@ const hasVersions = "EXISTS (SELECT 1 FROM jot_copy_versions v WHERE v.user_id=j
 async function putOne(env: Env, userId: string, j: MacJot, now: string): Promise<boolean> {
   const enc = await encrypt(env, j.text);
   for (let attempt = 0; attempt < PUT_TRIES; attempt++) {
-    const have = await env.DB.prepare("SELECT key, waiting, updated, rev, text_enc FROM jot_copies WHERE user_id=? AND mac_id=?").bind(userId, j.id)
-      .first<{ key: string; waiting: number; updated: string; rev: number; text_enc: string }>();
+    const have = await env.DB.prepare("SELECT key, waiting, updated, added, rev, text_enc FROM jot_copies WHERE user_id=? AND mac_id=?").bind(userId, j.id)
+      .first<{ key: string; waiting: number; updated: string; added: string; rev: number; text_enc: string }>();
     if (putRaceHook) await putRaceHook();
+    if (have && !sameAdded(have.added, j.added)) {
+      // Another jot holds this number: the Mac restored an older backup and a new jot took it. The old copy is never
+      // overwritten: it is set apart (a key of its own, no number) and waits, so the Mac keeps it as a jot of its own with
+      // its earlier texts; then this jot gets a row of its own.
+      const apart = /^J-\d+$/.test(have.key) ? `${have.key}~${Date.parse(have.added)}` : have.key;
+      const stmts = [env.DB.prepare("UPDATE jot_copies SET key=?, mac_id=NULL, waiting=1 WHERE user_id=? AND key=? AND rev=?").bind(apart, userId, have.key, have.rev)];
+      if (apart !== have.key) {
+        stmts.push(env.DB.prepare("UPDATE jot_copy_versions SET key=? WHERE user_id=? AND key=? AND changes() > 0").bind(apart, userId, have.key));
+      }
+      await env.DB.batch(stmts);
+      continue;   // read again: the number is free now (or a change landed meanwhile)
+    }
     if (!have) {
       const r = await env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,mac_id,text_enc,kind,source,tags,added,updated,deleted,mac_saved_at,waiting,rev)
           VALUES(?,?,?,?,?,?,?,?,?,?,?,0,0)`)

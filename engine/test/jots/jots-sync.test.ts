@@ -10,8 +10,11 @@ import { purgeJots, runJotNudges, setJotsPhoneRaceHook, setJotsPutRaceHook } fro
 const DAY = 86400_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 const ON = { jots: true, circle: false, decisions: false, resolutions: false };
+// One added time for every jot a test sends by number: the same jot keeps its added time (round 19: a jot with the same
+// number but another added time is another jot).
+const ADDED = iso(Date.now() - 60_000);
 const jot = (id: number, over: Record<string, unknown> = {}) => ({ id, text: `Jot ${id}`, kind: "jot", source: "typed", tags: [],
-  added: iso(Date.now() - 60_000), updated: iso(Date.now() - 60_000), deleted: false, ...over });
+  added: ADDED, updated: iso(Date.now() - 60_000), deleted: false, ...over });
 const putJots = (key: string, body: unknown) => call("/v2/jots", { method: "PUT", key, body: JSON.stringify(body) });
 const waiting = (key: string) => call("/v2/jots/waiting", { key }).then((r) => r.json<{ jots: any[] }>());
 const ack = (key: string, items: unknown[]) => call("/v2/jots/ack", { method: "POST", key, body: JSON.stringify({ items }) });
@@ -78,7 +81,7 @@ describe("jots: phone captures and edits reach the Mac", () => {
     expect((await (await ack(u.key, [{ key: "phone:cap-0002", rev: w.jots[0].rev, mac_id: 7 }])).json<any>()).acked).toBe(1);
     expect((await waiting(u.key)).jots).toHaveLength(0);
     // The Mac then sends J-7: the same copy, not a second one.
-    await putJots(u.key, { jots: [jot(7, { text: "Idea on the bus", source: "phone" })] });
+    await putJots(u.key, { jots: [jot(7, { text: "Idea on the bus", source: "phone", added: w.jots[0].added })] });   // the Mac keeps the capture's added time
     const { jots } = await phoneJots(u.cookie);
     expect(jots.map((j) => j.key)).toEqual(["phone:cap-0002"]);
   });
@@ -328,3 +331,50 @@ describe("jots: the daily nudge on the phone", () => {
     }
   });
 });
+
+// Round 19: after the Mac restores an older backup, a new Mac jot can take the number of a jot the copy still holds (its
+// own, or a phone capture's). The added time tells them apart: the old copy is never overwritten; it is set apart under
+// a key of its own, waiting, so the Mac keeps it as a jot of its own (with the phone's text and earlier texts).
+describe("jots: a number reused after a restore", () => {
+  it("a_new_mac_jot_with_a_reused_number_never_overwrites_the_old_copy", async () => {
+    const u = await setup("Reuse");
+    const tOld = Date.now() - 3 * DAY, tNew = Date.now() - 60_000;
+    await putJots(u.key, { jots: [jot(7, { text: "A, the old jot", added: iso(tOld), updated: iso(tOld) })] });
+    await phoneSend(u.cookie, [{ id: "edit-r001", op: "edit", key: "J-7", text: "A, edited on the phone", made_at: iso(Date.now() - 120_000) }]);
+    // The restored board's new jot 7 (a different jot, added later) is uploaded.
+    const r = await putJots(u.key, { jots: [jot(7, { text: "B, new after the restore", added: iso(tNew), updated: iso(tNew) })] });
+    expect((await r.json<any>()).accepted).toEqual([7]);
+    const rows = (await env.DB.prepare("SELECT key, mac_id, waiting, added FROM jot_copies WHERE user_id=? ORDER BY added").bind(u.id).all<any>()).results;
+    expect(rows.length).toBe(2);
+    expect(rows[1]).toMatchObject({ key: "J-7", mac_id: 7 });
+    expect(rows[0].key).not.toBe("J-7");
+    expect(rows[0]).toMatchObject({ mac_id: null, waiting: 1, added: iso(tOld) });
+    const w = await waiting(u.key);
+    const old = w.jots.find((j: any) => j.key === rows[0].key);
+    expect(old?.text).toBe("A, edited on the phone");
+    expect(old?.mac_id ?? null).toBeNull();
+    expect((await phoneJots(u.cookie)).jots.find((j: any) => j.key === "J-7")?.text).toBe("B, new after the restore");
+  });
+
+  it("a_phone_capture_with_a_reused_number_is_set_apart_too", async () => {
+    const u = await setup("ReuseCap");
+    await phoneSend(u.cookie, [{ id: "cap-r0001", op: "add", text: "Captured on the bus", made_at: iso(Date.now() - 2 * DAY) }]);
+    const cap = (await waiting(u.key)).jots[0];
+    await ack(u.key, [{ key: cap.key, rev: cap.rev, mac_id: 9 }]);
+    await putJots(u.key, { jots: [jot(9, { text: "Something else", added: iso(Date.now() - 60_000), updated: iso(Date.now() - 60_000) })] });
+    const capRow = await env.DB.prepare("SELECT mac_id, waiting FROM jot_copies WHERE user_id=? AND key=?").bind(u.id, cap.key).first<any>();
+    expect(capRow).toMatchObject({ mac_id: null, waiting: 1 });
+    const j9 = await env.DB.prepare("SELECT key FROM jot_copies WHERE user_id=? AND mac_id=9").bind(u.id).first<any>();
+    expect(j9.key).toBe("J-9");
+  });
+
+  it("the_same_jot_uploaded_again_is_updated_in_place", async () => {
+    const u = await setup("Same");
+    const t = Date.now() - DAY;
+    await putJots(u.key, { jots: [jot(3, { text: "v1", added: iso(t), updated: iso(t) })] });
+    await putJots(u.key, { jots: [jot(3, { text: "v2", added: iso(t), updated: iso(t + 1000) })] });
+    const rows = (await env.DB.prepare("SELECT key FROM jot_copies WHERE user_id=?").bind(u.id).all<any>()).results;
+    expect(rows.map((x: any) => x.key)).toEqual(["J-3"]);
+  });
+});
+
