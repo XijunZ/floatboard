@@ -24,7 +24,8 @@ public struct SearchHit: Identifiable, Equatable {
 
     /// Results by kind, in id-letter order (tasks, events, jots, people, decisions, goals), at most `limit` each; kinds with
     /// none are left out. A typed id ("T-12") finds exactly that item.
-    public static func run(_ query: String, store: Store, limit: Int = 20) -> [(ItemKind, [SearchHit])] {
+    /// `skipping`: kinds the caller searches itself (Search everything matches people off the main thread).
+    public static func run(_ query: String, store: Store, limit: Int = 20, skipping: Set<ItemKind> = []) -> [(ItemKind, [SearchHit])] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
         if let id = ShortID.parse(q) {
@@ -32,7 +33,7 @@ public struct SearchHit: Identifiable, Equatable {
             return [(id.kind, [SearchHit(id: id, title: s.title, detail: "", date: s.added ?? s.updated)])]
         }
         return ItemKind.allCases.compactMap { kind in
-            guard let p = providers[kind], p.module.map(store.isOn) ?? true else { return nil }
+            guard !skipping.contains(kind), let p = providers[kind], p.module.map(store.isOn) ?? true else { return nil }
             let hits = Array(p.find(store, q).prefix(limit))
             return hits.isEmpty ? nil : (kind, hits)
         }

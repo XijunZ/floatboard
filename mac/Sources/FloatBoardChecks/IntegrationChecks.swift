@@ -489,3 +489,24 @@ func integrationRebindingLiveChecks() async {
     do { leaked = try await LocalEngine.liveNetwork(req).0 } catch { refused = "\(error)".contains("not a public") }
     check(refused && leaked == nil, "live_bridge_throws_away_an_answer_from_a_private_connection")
 }
+
+/// Round 13 (A4): Search everything keeps each person's and each event's search text until the board changes, instead of
+/// rebuilding it on every keystroke; the search over that text can run off the main thread.
+@MainActor func searchIndexChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-search-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "search.sqlite") else { return }
+    CircleDue.register()
+    let c = CircleStore(store: s), none = ItemTags(primary: nil, others: [])
+    for i in 0..<300 { _ = c.add(name: "Person \(i)", tier: .network, tags: none, details: CircleDetails(), handles: []) }
+    let b0 = SearchIndex.builds
+    for q in ["Pe", "Per", "Pers", "Person 2"] { _ = GlobalSearch.run(q, store: s) }
+    check(SearchIndex.builds - b0 == 1, "search_text_built_once_while_typing (\(SearchIndex.builds - b0))")
+    _ = c.add(name: "Zed Newcomer", tier: .network, tags: none, details: CircleDetails(), handles: [])
+    let hits = GlobalSearch.run("Newcomer", store: s).first { $0.0 == .person }?.1 ?? []
+    check(hits.map(\.title) == ["Zed Newcomer"] && SearchIndex.builds - b0 == 2, "search_text_rebuilt_after_a_change")
+    let snapshot = SearchIndex.people(store: s)
+    let found = await Task.detached { SearchIndex.match(snapshot, "Person 29") }.value
+    check(found.contains { $0.title == "Person 29" } && !found.contains { $0.title == "Person 3" }, "search_matching_runs_off_the_main_thread")
+}
