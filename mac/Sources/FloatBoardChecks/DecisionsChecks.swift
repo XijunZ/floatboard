@@ -17,6 +17,7 @@ import FloatBoardConnectors
     decisionChunkChecks(root)
     decisionReviewChecks(root)
     decisionRulebookChecks(root)
+    await decisionRulebookLimitChecks(root)
     decisionPhoneChecks(root)
     await decisionEngineChecks(root)
 }
@@ -306,6 +307,37 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
           && (s.connectors.first { $0.id == "eng" }?.settings[DecisionRulebook.settingsKey] as? String)?.contains("Maybe hire someone?") == true,
           "example_written_into_rulebook_copy")
     check(rows(s, "SELECT count(*) FROM instructions WHERE part='rulebook_decisions'") >= 1, "rulebook_change_is_a_restorable_version")
+}
+
+// MARK: The rulebook stays inside the engine's settings limit (Codex round 2)
+
+@MainActor private func decisionRulebookLimitChecks(_ root: URL) async {
+    let builtIn = "# Decisions rulebook\nA decision is a commitment."
+    let many = (1...150).map { "- Not a decision: \"" + String(repeating: "x", count: 180) + " \($0)\" (was marked operational)" }
+    let capped = DecisionRulebook.withExamples(current: "", builtIn: builtIn, examples: many) ?? ""
+    let kept = capped.components(separatedBy: "\n").filter { $0.hasPrefix("- Not a decision:") }
+    check(capped.utf16.count <= DecisionRulebook.engineLimit && kept.count <= DecisionRulebook.maxExamples && kept.last == many.last
+          && capped.hasPrefix(builtIn), "rulebook_examples_capped_newest_kept_within_limit")
+    // Older examples already in the copy are dropped first when new ones come.
+    let again = DecisionRulebook.withExamples(current: capped, builtIn: builtIn, examples: ["- Not a decision: \"newest\" (was marked strategic)"]) ?? ""
+    check(again.utf16.count <= DecisionRulebook.engineLimit && again.hasSuffix("\"newest\" (was marked strategic)")
+          && again.components(separatedBy: "\n").filter { $0.hasPrefix("- Not a decision:") }.count <= DecisionRulebook.maxExamples, "rulebook_oldest_examples_drop_first")
+    let near = String(repeating: "r", count: DecisionRulebook.engineLimit - 50)
+    let tight = DecisionRulebook.withExamples(current: near, builtIn: builtIn, examples: many)
+    check(tight == nil || tight!.utf16.count <= DecisionRulebook.engineLimit, "rulebook_near_limit_never_exceeds")
+    check(DecisionRulebook.withExamples(current: String(repeating: "r", count: DecisionRulebook.engineLimit + 10), builtIn: builtIn, examples: [many[0]]) == nil,
+          "oversized_copy_gets_no_examples")
+    // An oversized rulebook value (e.g. edited by hand) never blocks the other settings: it is held back, with a warning.
+    guard let s = decisionsStore(root, "limit.sqlite") else { return }
+    let big = String(repeating: "y", count: DecisionRulebook.engineLimit + 1)
+    let json = String(decoding: (try? JSONSerialization.data(withJSONObject: ["rulebook_decisions": big, "learned": "L"])) ?? Data(), as: UTF8.self) // try?-ok: empty fails the check
+    s.performForTest { try s.db.run("INSERT OR REPLACE INTO connectors(id,name,settings_json,settings_version,engine_settings_version) VALUES('lim','lim',?,3,1)", [json]) }
+    s.reload()
+    let eng = goodEngine()
+    let r = await ConnectorSync.run(connector: "lim", store: s, client: eng.client(), now: decisionsNow)
+    let values = eng.bodies("/v2/settings").first?["values"] as? [String: Any]
+    check(r.error == nil && values?["learned"] as? String == "L" && values?["rulebook_decisions"] == nil
+          && s.recentActivity(limit: 20).contains { $0.level == .warning && $0.message.contains("rulebook") }, "oversized_rulebook_held_back_other_settings_sync")
 }
 
 // MARK: Phone copy and actions (§10)

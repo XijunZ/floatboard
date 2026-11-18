@@ -572,6 +572,7 @@
     lastSync = Date.now();
     isOffline = false;
     if (me && me.account) store(BOARD_KEY, { account: me.account, board: board, at: lastSync });
+    retryDecisionQueue();   // Decisions: its own queue goes too once the connection is back (files/decisions.client.js)
     return sup.count;
   }
 
@@ -641,7 +642,6 @@
     if (pendingShare !== null && board && me) { var shared = pendingShare; pendingShare = null; shareInto(shared); }
     if (syncAgain && failures === 0 && me) { syncAgain = false; sync(); }
     if (me && failures === 0) circleSync(); // Circle: send its taps, then fetch its copy
-    if (me && failures === 0) decisionsFlush(); // Decisions: send changes queued offline (reviews, Make decision)
   }
 
   async function openBoard() {

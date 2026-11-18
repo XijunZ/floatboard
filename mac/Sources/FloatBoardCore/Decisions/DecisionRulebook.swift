@@ -7,6 +7,10 @@ import Foundation
     public static let settingsKey = "rulebook_decisions"
     public nonisolated static let heading = "## Examples you marked"
     static let maxQuote = 200
+    /// The engine refuses a rulebook longer than this (UTF-16 units, as JavaScript counts), and with it the whole settings push.
+    public nonisolated static let engineLimit = 20_000
+    /// At most this many examples are kept (the newest); older ones drop out first.
+    public nonisolated static let maxExamples = 60
 
     /// `- Not a decision: "<quote>" (marked <type>)`, the quote cut to 200 characters on one line.
     public static func exampleLine(_ d: Decision) -> String {
@@ -16,18 +20,32 @@ import Foundation
         return "- Not a decision: \"\(q)\" (was marked \(d.type.rawValue))"
     }
 
-    /// The copy with the examples added under the heading (each once). nil when there is nothing to start from yet (no copy and
-    /// the built-in text not known): the examples wait.
+    static let intro = "The owner said these are not decisions. Do not record anything like them."
+    static let examplePrefix = "- Not a decision:"
+
+    /// The copy with the examples added under the heading (each once), keeping only the newest `maxExamples` and never
+    /// longer than the engine accepts (oldest examples drop out first). nil when there is nothing to start from yet (no copy
+    /// and the built-in text not known), or when the copy is too long to take any example: the examples then wait.
     public nonisolated static func withExamples(current: String, builtIn: String?, examples: [String]) -> String? {
         let mine = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard var text = mine.isEmpty ? builtIn?.trimmingCharacters(in: .whitespacesAndNewlines) : mine, !text.isEmpty else { return nil }
-        let lines = Set(text.components(separatedBy: "\n"))
-        let new = examples.filter { !lines.contains($0) }
+        guard let text = mine.isEmpty ? builtIn?.trimmingCharacters(in: .whitespacesAndNewlines) : mine, !text.isEmpty else { return nil }
+        guard text.utf16.count <= engineLimit else { return nil }
+        var head = text, section: [String] = []
+        if let r = text.range(of: heading) {
+            head = String(text[..<r.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            section = text[r.upperBound...].components(separatedBy: "\n")
+        }
+        let old = section.filter { $0.hasPrefix(examplePrefix) }
+        let other = section.filter { !$0.hasPrefix(examplePrefix) && !$0.trimmingCharacters(in: .whitespaces).isEmpty && $0 != intro }
+        let new = examples.filter { !old.contains($0) }
         guard !new.isEmpty else { return text }
-        if !text.contains(heading) {
-            text += "\n\n\(heading)\nThe owner said these are not decisions. Do not record anything like them.\n"
-        } else if !text.hasSuffix("\n") { text += "\n" }
-        return text + new.joined(separator: "\n")
+        var all: [String] = []
+        for e in old + new where !all.contains(e) { all.append(e) }
+        all = Array(all.suffix(maxExamples))
+        func build(_ list: [String]) -> String { ([head, "", heading, intro] + other + list).joined(separator: "\n") }
+        while !all.isEmpty && build(all).utf16.count > engineLimit { all.removeFirst() }
+        guard !all.isEmpty, all.contains(where: { new.contains($0) }) else { return nil }
+        return build(all)
     }
 
     /// The built-in text the connector's copy is based on, as RulebookSync noted it.
@@ -46,7 +64,13 @@ import Foundation
         let waiting = pending(store: store)
         guard !waiting.isEmpty, let info = store.connectors.first(where: { $0.id == id }) else { return 0 }
         let current = info.settings[settingsKey] as? String ?? ""
-        guard let text = withExamples(current: current, builtIn: given ?? builtIn(store, connector: id), examples: waiting) else { return 0 }
+        guard let text = withExamples(current: current, builtIn: given ?? builtIn(store, connector: id), examples: waiting) else {
+            if current.utf16.count > engineLimit - 300 {
+                store.activity("decisions", .warning, "The Decisions rulebook is too long to take \"Not a decision\" examples",
+                               detail: "Shorten it in Settings › Rules & learning; the examples wait until then.")
+            }
+            return 0
+        }
         do {
             if text != current.trimmingCharacters(in: .whitespacesAndNewlines) {
                 try store.saveConnectorSettings(connector: id, values: [settingsKey: text], now: now, source: .you,
