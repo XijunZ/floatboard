@@ -369,3 +369,25 @@ describe("circle: feed fetches stay on the public internet (Codex round 2, #1)",
     expect(res.updates.filter((x: any) => x.kind === "post")).toEqual([]);
   });
 });
+
+describe("circle: notification buttons are bound to their account (Codex round 2, #4)", () => {
+  it("push_carries_the_account_and_the_server_refuses_another", async () => {
+    const { circlePushExtras } = await import("../../src/reminders/alerts");
+    const { accountMarker } = await import("../../src/phone/auth");
+    const a = await circleUser("Account A"), b = await circleUser("Account B");
+    const extras = await circlePushExtras(a.id, "rb-circle_due-P-1-2026-11-18");
+    expect(extras).toEqual({ circle: "P-1", account: await accountMarker(a.id) });
+    expect(await circlePushExtras(a.id, "due:5")).toEqual({});
+    expect(JSON.parse(payloadJSON({ title: "t", body: "b", url: "/app/", ...extras }))).toMatchObject({ circle: "P-1", account: extras.account });
+    expect(JSON.parse(payloadJSON({ title: "t", body: "b", url: "/app/", circle: "P-1", account: "<script>" })).account).toBeUndefined();
+    // A's notification tapped while the phone is signed in to B: refused, nothing queued for B.
+    const { cookie } = await pairPhone(b.key);
+    const made = iso(Date.now() - 60_000);
+    const send = (account: string) => call("/app/api/circle/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE },
+      body: JSON.stringify({ account, actions: [{ id: "nbact-0001", person: "P-1", action: "contacted", made_at: made }] }) });
+    expect((await send(extras.account!)).status).toBe(409);
+    expect((await (await call("/v2/circle/actions", { key: b.key })).json<any>()).actions).toEqual([]);
+    expect((await send(await accountMarker(b.id))).status).toBe(200);
+    expect((await (await call("/v2/circle/actions", { key: b.key })).json<any>()).actions).toHaveLength(1);
+  });
+});

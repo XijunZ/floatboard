@@ -203,7 +203,7 @@
     var h = circleHash(location.hash);
     if (!h) return;
     history.replaceState(null, "", location.pathname + location.search);
-    var c = circleConfirm(h, circleView(circleCopy, [], Date.now()).people);
+    var c = circleConfirm(h, circleView(circleCopy, [], Date.now()).people, circleAccount());
     if (!c) return;
     openSheet(function (sheet) {
       sheet.appendChild(el("h3", null, c.text));

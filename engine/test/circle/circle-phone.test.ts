@@ -88,6 +88,17 @@ describe("phone Circle", () => {
     expect(body.indexOf("circleAct(")).toBeGreaterThan(body.indexOf('addEventListener("click"'));
   });
 
+  it("a_link_from_another_accounts_notification_shows_nothing", () => {
+    const acc = "a".repeat(32), other = "b".repeat(32);
+    const h = L.circleHash("#circle=talked:P-1:" + acc);
+    expect(h).toEqual({ action: "talked", person: "P-1", account: acc });
+    expect(L.circleConfirm(h, copy.people.slice(0, 3), acc)?.person).toBe("P-1");
+    expect(L.circleConfirm(h, copy.people.slice(0, 3), other)).toBeNull();
+    expect(SW_JS).toContain("account");
+    expect(SW_JS).toMatch(/r\.status === 409/);
+    expect(SW_JS).toMatch(/#circle=" \+ action \+ ":" \+ person \+ ":" \+ account/);
+  });
+
   it("service_worker_adds_contacted_and_snooze_to_circle_alerts", () => {
     expect(SW_JS).toContain('action: "contacted", title: "Contacted"');
     expect(SW_JS).toContain('action: "snooze", title: "Snooze"');
