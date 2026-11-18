@@ -358,7 +358,8 @@ let decisionsNow = Date(timeIntervalSince1970: 1_794_391_200)
                                    PhoneDecisionAction(id: "a3", decision: m.shortID.text, action: "not_decision"),
                                    PhoneDecisionAction(id: "a4", decision: "D-999", action: "review")], store: s, now: decisionsNow)
     let reviewJot = ds.reviews(of: d.id).first
-    check(res.applied == ["a1", "a2", "a3"] && res.skipped.map(\.0) == ["a4"] && reviewJot?.source == .phone && ds.reviews(of: d.id).count == 1,
+    // Round 13 (J2): a2's different words are kept as a second review, never dropped.
+    check(res.applied == ["a1", "a2", "a3"] && res.skipped.map(\.0) == ["a4"] && reviewJot?.source == .phone && ds.reviews(of: d.id).count == 2,
           "phone_review_saved_once_as_phone_jot")
     check(ds.decision(m.id)?.notDecision == true && DecisionRulebook.pending(store: s).count == 1, "phone_not_a_decision_teaches_rulebook")
     s.setModule(.decisions, on: false)

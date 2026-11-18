@@ -67,15 +67,23 @@ import Foundation
 
     /// `answer` as one transaction: the review jot (linked review-of the decision first, so the D-n its heading names never
     /// replaces that link), its tags and the decision's review state are written together or not at all.
+    /// `keepLater`: an answer arriving after the review was done (the phone's, typed before it knew) is kept as another
+    /// review when its words differ; otherwise a done review is not answered again.
     public static func answerOrThrow(_ id: Int64, happened: String, sound: String, source: ItemSource = .typed, store: Store,
-                                     now: Date = Date()) throws -> AnswerOutcome {
+                                     now: Date = Date(), keepLater: Bool = false) throws -> AnswerOutcome {
         guard let d = try DecisionStore(store: store).decisionOrThrow(id) else { return .invalid("decision not found") }
-        if d.reviewState == .done { return .alreadyAnswered }
         if d.deleted { return .invalid("decision removed") }
         guard !(happened + sound).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .invalid("empty answer") }
         let js = JotStore(store: store)
+        let text = reviewText(d, happened: happened, sound: sound)
+        if d.reviewState == .done && !keepLater { return .alreadyAnswered }
+        if d.reviewState == .done {
+            // Answered already: the same words again are a repeat; different words are kept as another review (never dropped).
+            let existing = store.itemLinks(of: d.shortID).filter { $0.kind == .reviewOf && !$0.isSubject && $0.other.kind == .jot }
+            for l in existing where try js.jotOrThrow(l.other.number)?.text == text { return .alreadyAnswered }
+        }
         let n = try store.performThrowing { () -> Int64 in
-            let n = try js.createRow(text: reviewText(d, happened: happened, sound: sound), source: source, now: now,
+            let n = try js.createRow(text: text, source: source, now: now,
                                      linkFirst: [(d.shortID, .reviewOf, .auto)], actor: .connector("decisions"))
             let tags = store.itemTags(d.shortID)
             if let p = tags.all.first { try store.setTagsRow(ShortID(kind: .jot, number: n), primary: p, others: Array(tags.all.dropFirst()), now: now) }

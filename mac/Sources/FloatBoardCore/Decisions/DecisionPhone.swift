@@ -103,7 +103,7 @@ public struct PhoneDecisionAction: Codable, Equatable {
                 guard try ds.decisionOrThrow(id.number) != nil else { skipped.append((a.id, "decision not found")); continue }
                 switch a.action {
                 case "review":
-                    switch try DecisionReviews.answerOrThrow(id.number, happened: a.happened ?? "", sound: a.sound ?? "", source: .phone, store: store, now: now) {
+                    switch try DecisionReviews.answerOrThrow(id.number, happened: a.happened ?? "", sound: a.sound ?? "", source: .phone, store: store, now: now, keepLater: true) {
                     case .saved, .alreadyAnswered: applied.append(a.id)      // a repeat is acknowledged too
                     case .invalid(let why): skipped.append((a.id, why))
                     }
