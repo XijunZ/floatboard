@@ -775,6 +775,7 @@ await circleSyncAtomicChecks()
 await decisionsChecks()
 integrationChecks()
 await integrationRulebookLimitChecks()
+await integrationSettingsSizeChecks()
 resolutionsChecks()
 
 print(failures.isEmpty ? "CHECKS OK" : "CHECKS FAILED: \(failures)")
