@@ -510,3 +510,32 @@ func integrationRebindingLiveChecks() async {
     let found = await Task.detached { SearchIndex.match(snapshot, "Person 29") }.value
     check(found.contains { $0.title == "Person 29" } && !found.contains { $0.title == "Person 3" }, "search_matching_runs_off_the_main_thread")
 }
+
+/// Round 13 (C3): the Circle tab's numbers are worked out once per change (not per keystroke), and merge suggestions are
+/// found by grouping names, not by comparing every pair. 2,000 synthetic people.
+@MainActor func circleSpeedChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-circle-speed-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = integrationStore(root, "speed.sqlite") else { return }
+    s.performForTest {
+        for i in 0..<2000 {
+            try s.db.run("INSERT INTO people(name, aliases, tier, source, added, updated) VALUES(?,?,?,?,?,?)",
+                         [i % 500 == 7 ? "Same Name" : "Person \(i)", i == 1999 ? #"["Person 3"]"# : "[]", "network", "typed", 1_790_000_000.0, 1_790_000_000.0])
+        }
+    }
+    s.reload()
+    let c = CircleStore(store: s)
+    let t0 = Date()
+    let merges = c.mergeSuggestions()
+    let took = Date().timeIntervalSince(t0)
+    check(merges.filter { $0.reason == "Same name" }.count == 6 && merges.contains { $0.reason == "Also known as" } && took < 0.5,
+          "merge_suggestions_for_2000_people_quickly (\(String(format: "%.2f", took)) s)")
+    let now = Date()
+    let b0 = CircleSnapshot.builds
+    for _ in 0..<5 { _ = CircleSnapshot.current(store: s, now: now) }   // five keystrokes
+    check(CircleSnapshot.builds - b0 == 1, "circle_tab_numbers_worked_out_once_per_change")
+    _ = c.add(name: "Newcomer", tier: .network, tags: ItemTags(primary: nil, others: []), details: CircleDetails(), handles: [])
+    let snap = CircleSnapshot.current(store: s, now: now)
+    check(CircleSnapshot.builds - b0 == 2 && snap.people.count == 2001 && snap.suggestionCount >= 7, "circle_tab_numbers_follow_changes")
+}

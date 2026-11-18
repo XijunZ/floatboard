@@ -20,10 +20,9 @@ struct CircleTab: View {
 
     var body: some View {
         let c = CircleStore(store: store)
-        let now = Date()
-        let clocks = c.allClocks(now: now), details = c.allDetails(), handles = c.allHandles()
-        let due = CircleDue.entries(store: store, now: now)
-        let all = PeopleStore(store: store).people()
+        // Worked out once per change (and once a minute for the clocks), not on every keystroke in the search box.
+        let snap = CircleSnapshot.current(store: store)
+        let clocks = snap.clocks, details = snap.details, handles = snap.handles, due = snap.due, all = snap.people
         let shown = filtered(all, clocks: clocks, details: details, handles: handles, due: Set(due.map(\.person.id)))
         VStack(alignment: .leading, spacing: 8) {
             toolbar(due: due, count: all.count)
@@ -59,8 +58,7 @@ struct CircleTab: View {
     // MARK: Toolbar and filters
 
     private func toolbar(due: [DueEntry], count: Int) -> some View {
-        let c = CircleStore(store: store)
-        let suggestions = c.conversationSuggestions().count + c.candidates().count + c.mergeSuggestions().count
+        let suggestions = CircleSnapshot.current(store: store).suggestionCount
         // The title and count never break mid-word; the controls wrap onto a second line at narrow widths (round 9).
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("Circle").font(.system(size: 15, weight: .semibold)).fixedSize()
