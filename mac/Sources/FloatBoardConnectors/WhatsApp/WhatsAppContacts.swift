@@ -6,7 +6,7 @@ import SQLite3
 /// belong to a linked id (<digits>@lid). ContactsV2.sqlite (ZWAADDRESSBOOKCONTACT) first, then LID.sqlite
 /// (ZWAPHONENUMBERLIDPAIR). Missing files, tables or columns give nothing, quietly (no Activity). Nothing is sent anywhere.
 public enum WhatsAppContacts {
-    static let contactsFile = "ContactsV2.sqlite", lidFile = "LID.sqlite"
+    public static let contactsFile = "ContactsV2.sqlite", lidFile = "LID.sqlite"
 
     public static func resolve(_ lids: [String], folder: URL = WhatsAppLocal.folder) -> [String: ResolvedContact] {
         let wanted = Array(Set(lids.map { $0.lowercased() }.filter { $0.hasSuffix("@lid") }))
