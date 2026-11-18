@@ -75,6 +75,27 @@ function cookieValue(req: Request, name: string): string | null {
   return null;
 }
 
+/**
+ * The opening of every phone write that carries a queue (Circle, Decisions, Jots), in one order: same origin (403), signed
+ * in (401), `before` (a route's own gate, such as the area being on), the body under `cap` bytes (413 too large, 400 not
+ * JSON), an account named (400) and it is this session's (409, naming this session's account so the phone keeps its queue).
+ */
+export async function phoneWrite(req: Request, env: Env, cap: number, opts: { before?: (s: AppSession) => Promise<Response | null> } = {}):
+  Promise<{ ok: true; s: AppSession; body: any; account: string } | { ok: false; res: Response }> {
+  if (!sameOrigin(req)) return { ok: false, res: appJSON({ error: "refused" }, 403) };
+  const s = await requireAppSession(req, env);
+  if (!s) return { ok: false, res: appJSON({ error: "not signed in" }, 401) };
+  const gate = opts.before ? await opts.before(s) : null;
+  if (gate) return { ok: false, res: gate };
+  const rb = await readCappedJSON(req, cap);
+  if (!rb.ok) return { ok: false, res: appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie) };
+  const account = await accountMarker(s.userId);
+  const from = rb.body?.account;
+  if (typeof from !== "string" || !from) return { ok: false, res: appJSON({ error: "account is required" }, 400, s.setCookie) };
+  if (from !== account) return { ok: false, res: appJSON({ error: "These changes belong to another account.", account }, 409, s.setCookie) };
+  return { ok: true, s, body: rb.body, account };
+}
+
 /** True when the request's Origin header is exactly the engine's own origin. */
 export function sameOrigin(req: Request): boolean {
   return req.headers.get("Origin") === new URL(req.url).origin;
