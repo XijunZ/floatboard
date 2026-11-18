@@ -28,6 +28,11 @@ public enum UpdateCheck {
     /// The "Update now" script, run in the source folder by a login shell (`set -e`: it stops at the first failure). The engine's
     /// packages are installed for every user (`npm ci`), since the app build bundles the engine for Mac only mode; only
     /// someone who deploys an online engine from this Mac also updates it.
+    /// Where the build installed the app ("INSTALLED_AT=<path>" in its log), so Update now reopens that copy.
+    public static func installedApp(fromLog log: String) -> String? {
+        log.split(separator: "\n").last { $0.hasPrefix("INSTALLED_AT=") }.map { String($0.dropFirst("INSTALLED_AT=".count)) }
+    }
+
     public static func updateScript(dir: String, deploysEngine: Bool) -> String {
         let quoted = "'" + dir.replacingOccurrences(of: "'", with: "'\\''") + "'"
         return """
@@ -41,7 +46,7 @@ public enum UpdateCheck {
             command -v npm >/dev/null || { echo "STOP: npm (Node.js) is needed to build FloatBoard; install Node.js, then try again"; exit 5; }
             (cd engine && npm ci --silent)
             \(deploysEngine ? "(cd engine && npm run --silent update)" : "echo 'no online engine deployed from this Mac'")
-            cd mac && ./scripts/build-app.sh
+            cd mac && FLOATBOARD_FROM_UPDATER=1 ./scripts/build-app.sh
             echo "== done $(git rev-parse --short HEAD)"
             """
     }

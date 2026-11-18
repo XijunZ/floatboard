@@ -52,10 +52,5 @@ PLIST
 # Accessibility permission across rebuilds; fall back to ad-hoc.
 IDENTITY=$(security find-identity -p codesigning 2>/dev/null | awk '/"FloatBoard Local Signing"/ {print $2; exit}')
 codesign --force --sign "${IDENTITY:--}" --identifier "$BUNDLE_ID" "$APP"
-DEST=/Applications
-[ -w "$DEST" ] || DEST="$HOME/Applications"
-mkdir -p "$DEST"
-pkill -x FloatBoard 2>/dev/null || true
-rm -rf "$DEST/FloatBoard.app"
-cp -R "$APP" "$DEST/"
-echo "Installed to $DEST/FloatBoard.app"
+# Copied beside the installed app, then swapped in (a failed copy keeps the old one); says where (INSTALLED_AT=).
+./scripts/install-app.sh "$APP"

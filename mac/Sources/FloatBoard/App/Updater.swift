@@ -129,12 +129,14 @@ final class Updater: ObservableObject {
             var code: Int32 = -1
             do { try p.run(); p.waitUntilExit(); code = p.terminationStatus } catch { code = -1 }
             try? h?.close() // try?-ok: closing the log
-            let tail = (try? String(contentsOf: log, encoding: .utf8))?.split(separator: "\n").suffix(3).joined(separator: " · ") ?? "" // try?-ok: only for the message
-            await MainActor.run { Updater.shared.finished(code: code, tail: tail) }
+            let full = (try? String(contentsOf: log, encoding: .utf8)) ?? "" // try?-ok: only for the message and where it installed
+            let tail = full.split(separator: "\n").suffix(3).joined(separator: " · ")
+            let installed = UpdateCheck.installedApp(fromLog: full)
+            await MainActor.run { Updater.shared.finished(code: code, tail: tail, installed: installed) }
         }
     }
 
-    private func finished(code: Int32, tail: String) {
+    private func finished(code: Int32, tail: String, installed: String?) {
         guard code == 0 else {
             let why = tail.contains("STOP:") ? String(tail[tail.range(of: "STOP:")!.upperBound...]).trimmingCharacters(in: .whitespaces)
                 : "the update stopped (details in ~/Library/Logs/FloatBoard-update.log)"
@@ -144,7 +146,9 @@ final class Updater: ObservableObject {
         }
         store?.activity("updates", .info, "Updated; reopening FloatBoard")
         let cfg = NSWorkspace.OpenConfiguration(); cfg.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/Applications/FloatBoard.app"), configuration: cfg) { _, _ in
+        // The copy the build installed (it may be ~/Applications); the build doesn't stop this app, which quits once the new
+        // one is opening.
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: installed ?? "/Applications/FloatBoard.app"), configuration: cfg) { _, _ in
             DispatchQueue.main.async { NSApp.terminate(nil) }
         }
     }

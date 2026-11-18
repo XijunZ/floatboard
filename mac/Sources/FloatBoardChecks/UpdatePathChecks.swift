@@ -70,3 +70,43 @@ func updatePathChecks() {
     check(noNpm.code != 0 && noNpm.said.contains("npm") && noNpm.said.contains("Node.js") && !fm.fileExists(atPath: out.path),
           "engine_build_stops_clearly_without_npm")
 }
+
+/// Round 13 (A1, A2): installing never leaves no app (copy beside, then swap), and says where it installed so "Update now"
+/// reopens that copy. Checks run the install step on scratch folders only, never touching an installed app or a running one.
+func installStepChecks() {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent("fb-install-\(UUID().uuidString)")
+    defer { try? fm.removeItem(at: root) } // try?-ok: scratch cleanup
+    let script = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("scripts/install-app.sh")
+    let dest = root.appendingPathComponent("Apps"), new = root.appendingPathComponent("build/FloatBoard.app")
+    do {
+        try fm.createDirectory(at: dest.appendingPathComponent("FloatBoard.app/Contents"), withIntermediateDirectories: true)
+        try "old".write(to: dest.appendingPathComponent("FloatBoard.app/Contents/version"), atomically: true, encoding: .utf8)
+        try fm.createDirectory(at: new.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+        try "new".write(to: new.appendingPathComponent("Contents/version"), atomically: true, encoding: .utf8)
+    } catch { check(false, "install setup: \(error)"); return }
+    func run(_ app: URL) -> (Int32, String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = [script.path, app.path]
+        // Scratch destination: the script then never stops or opens any app.
+        p.environment = ["PATH": "/usr/bin:/bin", "FLOATBOARD_INSTALL_DEST": dest.path]
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        do { try p.run() } catch { return (-1, "\(error)") }
+        p.waitUntilExit()
+        return (p.terminationStatus, String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    }
+    let version = { (try? String(contentsOf: dest.appendingPathComponent("FloatBoard.app/Contents/version"), encoding: .utf8)) ?? "none" } // try?-ok: "none" fails the check
+    let bad = run(root.appendingPathComponent("build/Missing.app"))
+    check(bad.0 != 0 && version() == "old" && !fm.fileExists(atPath: dest.appendingPathComponent(".FloatBoard.app.new").path),
+          "a_failed_install_keeps_the_old_app")
+    let ok = run(new)
+    check(ok.0 == 0 && version() == "new" && ok.1.contains("INSTALLED_AT=\(dest.path)/FloatBoard.app")
+          && UpdateCheck.installedApp(fromLog: ok.1) == "\(dest.path)/FloatBoard.app"
+          && !fm.fileExists(atPath: dest.appendingPathComponent(".FloatBoard.app.old").path), "install_swaps_in_the_new_app_and_says_where")
+    check(UpdateCheck.installedApp(fromLog: "no line") == nil && UpdateCheck.updateScript(dir: "/x", deploysEngine: false).contains("FLOATBOARD_FROM_UPDATER=1 ./scripts/build-app.sh"),
+          "update_now_tells_the_build_it_runs_from_the_app")
+    let buildApp = (try? String(contentsOf: script.deletingLastPathComponent().appendingPathComponent("build-app.sh"), encoding: .utf8)) ?? "" // try?-ok: empty fails
+    check(buildApp.contains("./scripts/install-app.sh") && !buildApp.contains("rm -rf \"$DEST/FloatBoard.app\""), "build_app_installs_through_the_safe_step")
+}
