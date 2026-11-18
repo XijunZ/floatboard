@@ -73,3 +73,11 @@
     if (!start || !now || start.epoch !== now.epoch || !start.account || start.account !== now.account) return false;
     return respAccount == null || respAccount === start.account;
   }
+
+  // What the confirm sheet for a link's action says (a link never acts by itself); null for someone not on this phone.
+  function circleConfirm(h, people) {
+    var p = h && (people || []).filter(function (x) { return x && x.id === h.person; })[0];
+    if (!p) return null;
+    var text = h.action === "talked" ? "Mark talked to " + p.name + "?" : h.action === "snooze" ? "Snooze " + p.name + "?" : "Mark " + p.name + " as contacted?";
+    return { action: h.action, person: p.id, text: text };
+  }
