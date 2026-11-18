@@ -57,8 +57,10 @@ describe("jots on the phone: logic", () => {
     expect(L.undoJotDelete([del], del)).toEqual({ queue: [], restore: false });
     // Sent (its answer may have been lost): it stays queued (sent again, applied once) and a restore follows it.
     const sent = L.markJotsAttempted([del], ["d1"]);
-    expect(sent[0].sent).toBe(true);
+    expect(sent[0].attempted).toBe(true);   // round 13 (B10): named as on the board's queue; an older queue's `sent` still counts
     expect(L.undoJotDelete(sent, sent[0])).toEqual({ queue: sent, restore: true });
+    const older = [{ ...del, sent: true }];   // a queue saved before the rename
+    expect(L.undoJotDelete(older, older[0])).toEqual({ queue: older, restore: true });
   });
 
   it("share_and_shortcuts_open_the_right_place", () => {

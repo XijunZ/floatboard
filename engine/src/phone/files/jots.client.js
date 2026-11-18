@@ -90,11 +90,14 @@
     return queueWithout(queue, (result.accepted || []).concat(dropped));
   }
 
+  // Sent at least once (named `attempted`, as on the board's queue; a queue saved by an older version says `sent`).
+  function jotAttempted(a) { return !!(a && (a.attempted || a.sent)); }
+
   // Actions about to be sent are marked: if the answer is lost, Undo must not assume they never arrived.
   function markJotsAttempted(queue, ids) {
     var sent = {};
     (ids || []).forEach(function (id) { sent[id] = true; });
-    return (queue || []).map(function (a) { return sent[a.id] && !a.sent ? Object.assign({}, a, { sent: true }) : a; });
+    return (queue || []).map(function (a) { return sent[a.id] && !jotAttempted(a) ? Object.assign({}, a, { attempted: true }) : a; });
   }
 
   // Undo of a delete: one never sent is taken out of the queue; one sent (or being sent; its answer may be lost) stays and a
@@ -103,7 +106,7 @@
     var q = queue || [];
     var i = -1;
     q.forEach(function (a, n) { if (a.id === del.id) i = n; });
-    if (i >= 0 && !q[i].sent) return { queue: q.slice(0, i).concat(q.slice(i + 1)), restore: false };
+    if (i >= 0 && !jotAttempted(q[i])) return { queue: q.slice(0, i).concat(q.slice(i + 1)), restore: false };
     return { queue: q, restore: true };
   }
 
@@ -399,7 +402,7 @@
       var undo = function () {
         cancel();
         var cur = queue.filter(function (x) { return x.id === a.id; })[0] || a;
-        var step = undoJotDelete(queue, cur.sent || syncing ? Object.assign({}, cur, { sent: true }) : cur);
+        var step = undoJotDelete(queue, jotAttempted(cur) || syncing ? Object.assign({}, cur, { attempted: true }) : cur);
         if (step.restore) queueAction({ op: "restore", key: j.key });
         else { queue = step.queue; saveQueue(); render(); }
       };
