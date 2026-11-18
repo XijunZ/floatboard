@@ -102,7 +102,7 @@ import SwiftUI
 /// Round 8 pictures (`FLOATBOARD_ROUND8SHOTS=1 FloatBoard --snapshot <dir>`, scratch database only): the Add form with a
 /// WhatsApp contact that shares no number, the person pane's tag row and its + menu, and the people list with tag chips.
 @MainActor enum Round8Shots {
-    static func run(dir: String, store: Store, ui: UIState, google: Google) {
+    static func run(dir: String, store: Store, ui: UIState, google: Google, round9: Bool = false) {
         guard LocalData.isScratchDatabase else { print("Round8Shots: scratch database only"); return }
         store.setModule(.circle, on: true)
         let c = CircleStore(store: store), now = Date()
@@ -137,6 +137,16 @@ import SwiftUI
                 }
                 w.close()
             }
+        }
+        if round9 {
+            // Round 9: the list with tier chips and the person pane, at the app's minimum width (800) and a normal one.
+            for w in [800, 1100] {
+                CircleNav.shared.selected = nil
+                save(CircleTab(), "round9-list-\(w)", CGSize(width: w, height: 460))
+                CircleNav.shared.selected = ben?.id
+                save(CircleTab(), "round9-person-\(w)", CGSize(width: w, height: 460))
+            }
+            return
         }
         let form = PersonFormRequest(personID: nil, name: "Lin Example",
                                      handles: [Handle(kind: .phone, value: "447700900111"), Handle(kind: .whatsapp, value: "98765432101234@lid")])

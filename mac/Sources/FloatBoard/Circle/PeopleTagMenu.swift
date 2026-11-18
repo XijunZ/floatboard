@@ -37,6 +37,7 @@ struct PeopleTagMenu<Label: View>: View {
 /// A tag chip in the board card's style: the tag's colour, tinted capsule, semibold.
 struct PersonTagChip: View {
     @EnvironmentObject var store: Store
+    @Environment(\.colorScheme) private var scheme
     let tag: String
     var size: CGFloat = 10
     var remove: (() -> Void)? = nil
@@ -53,7 +54,18 @@ struct PersonTagChip: View {
         .font(.system(size: size))
         .padding(.horizontal, 6).padding(.vertical, 1)
         .background(Capsule().fill(store.color(tag).opacity(0.18)))
-        .foregroundStyle(store.color(tag))
+        .foregroundStyle(store.ink(tag, scheme))
         .fixedSize()
+    }
+}
+
+/// A person's tier in the list, outlined and neutral so it reads as the tier, not as a tag (round 9).
+struct TierChip: View {
+    let tier: PersonTier
+    var body: some View {
+        Text(tier.title).font(.system(size: 10, weight: .medium)).lineLimit(1).fixedSize()
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .overlay(Capsule().stroke(Color.secondary.opacity(0.55), lineWidth: 1))
+            .foregroundStyle(.secondary)
     }
 }

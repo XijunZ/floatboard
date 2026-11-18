@@ -59,29 +59,32 @@ struct CircleTab: View {
     private func toolbar(due: [DueEntry], count: Int) -> some View {
         let c = CircleStore(store: store)
         let suggestions = c.conversationSuggestions().count + c.candidates().count + c.mergeSuggestions().count
-        return HStack(spacing: 8) {
-            Text("Circle").font(.system(size: 15, weight: .semibold))
-            Text("\(count) people").font(.system(size: 11)).foregroundStyle(.secondary)
-            Button { dueOnly.toggle(); nav.selected = nil } label: {
-                Label("Due this week \(due.count)", systemImage: "clock").font(.system(size: 12, weight: dueOnly ? .semibold : .regular))
-            }.buttonStyle(.bordered).tint(due.contains(where: \.overdue) ? .orange : nil)
-            TextField("Search names, companies, handles", text: $query).textFieldStyle(.roundedBorder).frame(width: 220)
-            Picker("", selection: $tier) {
-                Text("All tiers").tag(PersonTier?.none)
-                ForEach(PersonTier.allCases, id: \.self) { Text($0.title).tag(PersonTier?.some($0)) }
-            }.labelsHidden().frame(width: 120)
-            Menu(tagFilter.isEmpty ? "All tags" : tagFilter.sorted().joined(separator: ", ")) {
-                ForEach(store.tags.map(\.name), id: \.self) { t in
-                    Button { if tagFilter.contains(t) { tagFilter.remove(t) } else { tagFilter.insert(t) } } label: {
-                        Label(t, systemImage: tagFilter.contains(t) ? "checkmark" : "circle")
+        // The title and count never break mid-word; the controls wrap onto a second line at narrow widths (round 9).
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Circle").font(.system(size: 15, weight: .semibold)).fixedSize()
+            Text("\(count) people").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
+            FlowLayout(hSpacing: 8, vSpacing: 6) {
+                Button { dueOnly.toggle(); nav.selected = nil } label: {
+                    Label("Due this week \(due.count)", systemImage: "clock").font(.system(size: 12, weight: dueOnly ? .semibold : .regular))
+                }.buttonStyle(.bordered).tint(due.contains(where: \.overdue) ? .orange : nil).fixedSize()
+                TextField("Search names, companies, handles", text: $query).textFieldStyle(.roundedBorder).frame(width: 220)
+                Picker("", selection: $tier) {
+                    Text("All tiers").tag(PersonTier?.none)
+                    ForEach(PersonTier.allCases, id: \.self) { Text($0.title).tag(PersonTier?.some($0)) }
+                }.labelsHidden().frame(width: 120)
+                Menu(tagFilter.isEmpty ? "All tags" : tagFilter.sorted().joined(separator: ", ")) {
+                    ForEach(store.tags.map(\.name), id: \.self) { t in
+                        Button { if tagFilter.contains(t) { tagFilter.remove(t) } else { tagFilter.insert(t) } } label: {
+                            Label(t, systemImage: tagFilter.contains(t) ? "checkmark" : "circle")
+                        }
                     }
-                }
-                if !tagFilter.isEmpty { Divider(); Button("Clear") { tagFilter = [] } }
-            }.frame(width: 120)
-            Picker("Sort", selection: $sort) { ForEach(Sort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.frame(width: 150)
-            Spacer()
-            Button { nav.showSuggestions = true } label: { Label(suggestions > 0 ? "Suggestions \(suggestions)" : "Suggestions", systemImage: "person.badge.plus") }
-            Button { editing = PersonFormRequest(personID: nil) } label: { Label("Add", systemImage: "plus") }.keyboardShortcut("n", modifiers: [.command, .shift])
+                    if !tagFilter.isEmpty { Divider(); Button("Clear") { tagFilter = [] } }
+                }.frame(width: 120)
+                Picker("Sort", selection: $sort) { ForEach(Sort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.frame(width: 150)
+                Button { nav.showSuggestions = true } label: { Label(suggestions > 0 ? "Suggestions \(suggestions)" : "Suggestions", systemImage: "person.badge.plus") }.fixedSize()
+                Button { editing = PersonFormRequest(personID: nil) } label: { Label("Add", systemImage: "plus") }.keyboardShortcut("n", modifiers: [.command, .shift]).fixedSize()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .controlSize(.small)
     }
@@ -126,9 +129,10 @@ struct CircleTab: View {
                                     Text(p.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.tail)
                                     if dueIDs.contains(p.id) { Circle().fill(.orange).frame(width: 6, height: 6) }
                                 }
+                                TierChip(tier: p.tier)   // the tier first, outlined, then the tags (round 9)
                                 ForEach(store.itemTags(p.shortID).all, id: \.self) { t in PersonTagChip(tag: t) }
                             }
-                            Text("\(p.tier.title) · " + (k?.lastConversation.map { "talked \(CircleFmt.ago($0))" } ?? "no conversation seen"))
+                            Text(k?.lastConversation.map { "talked \(CircleFmt.ago($0))" } ?? "no conversation seen")
                                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer()
