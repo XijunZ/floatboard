@@ -160,7 +160,9 @@ describe("decisions: phone copy and actions", () => {
     expect(raw.data_enc).not.toContain("Decision 1");
     const phone = await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>();
     expect(phone.decisions.map((x: any) => x.id)).toEqual(["D-1", "D-2"]);
-    const act = (body: unknown, origin = BASE) => call("/app/api/decisions/action", { method: "POST", headers: { Cookie: cookie, Origin: origin }, body: JSON.stringify(body) });
+    const account = phone.account;
+    const act = (body: any, origin = BASE) => call("/app/api/decisions/action", { method: "POST", headers: { Cookie: cookie, Origin: origin },
+      body: JSON.stringify({ account, ...body }) });
     const a1 = { id: "act-00000001", decision: "D-1", action: "review", happened: "It worked", sound: "Yes", made_at: "2026-11-15T10:00:00Z" };
     expect((await act({ actions: [a1, { id: "act-00000002", decision: "D-2", action: "not_decision" }] })).status).toBe(200);
     expect((await act({ actions: [a1] })).status).toBe(200);           // a repeat is applied once
@@ -181,7 +183,8 @@ describe("decisions: phone copy and actions", () => {
   it("phone_make_decision_is_queued_encrypted_and_reaches_the_mac", async () => {
     const u = await user("PhoneMake");
     const { cookie } = await pairPhone(u.key);
-    const act = (body: unknown) => call("/app/api/decisions/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify(body) });
+    const account = (await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>()).account;
+    const act = (body: any) => call("/app/api/decisions/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify({ account, ...body }) });
     const make = { id: "make-0000001", action: "make", text: "Keep the old supplier", why: "Cheaper", expected: "Costs flat", confidence: "medium",
       type: "operational", quote: "we decided to keep the old supplier", source: "phone:abc-123", made_at: "2026-11-15T10:00:00Z" };
     expect((await act({ actions: [make] })).status).toBe(200);
@@ -220,10 +223,25 @@ describe("decisions: phone copy and actions", () => {
     expect(ga.account).not.toBe(gb.account);
     expect(gb.decisions).toEqual([]);
     const r = await call("/app/api/decisions/action", { method: "POST", headers: { Cookie: pb.cookie, Origin: BASE },
-      body: JSON.stringify({ actions: [{ id: "act-0000b001", decision: "D-1", action: "not_decision" }] }) });
+      body: JSON.stringify({ account: gb.account, actions: [{ id: "act-0000b001", decision: "D-1", action: "not_decision" }] }) });
     expect((await r.json<any>()).account).toBe(gb.account);
     expect((await (await call("/v2/decision-actions", { key: a.key })).json<any>()).actions).toEqual([]);
     expect((await (await call("/v2/decision-actions", { key: b.key })).json<any>()).actions.map((x: any) => x.id)).toEqual(["act-0000b001"]);
+  });
+
+  it("actions_refused_when_the_queue_belongs_to_another_account", async () => {
+    const a = await user("StaleA"), b = await user("StaleB");
+    const pb = await pairPhone(b.key);
+    const accA = (await (await call("/app/api/decisions", { headers: { Cookie: (await pairPhone(a.key)).cookie } })).json<any>()).account;
+    const accB = (await (await call("/app/api/decisions", { headers: { Cookie: pb.cookie } })).json<any>()).account;
+    const send = (account: unknown) => call("/app/api/decisions/action", { method: "POST", headers: { Cookie: pb.cookie, Origin: BASE },
+      body: JSON.stringify({ account, actions: [{ id: "act-0000c001", decision: "D-1", action: "not_decision" }] }) });
+    const r = await send(accA);                     // a page still holding account A's confirmation, now signed in as B
+    expect(r.status).toBe(409);
+    expect((await r.json<any>()).account).toBe(accB);
+    expect((await send(undefined)).status).toBe(400);
+    expect((await (await call("/v2/decision-actions", { key: b.key })).json<any>()).actions).toEqual([]);
+    expect((await send(accB)).status).toBe(200);
   });
 
   it("phone_needs_a_session_and_copy_is_checked", async () => {

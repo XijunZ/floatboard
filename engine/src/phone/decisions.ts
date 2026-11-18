@@ -4,11 +4,12 @@
  *
  * - `PUT /v2/decisions` (Mac, user key): the copy (at most 300), stored encrypted, replacing the previous one.
  * - `GET /app/api/decisions` (phone session): the copy, when it was sent, and how many phone actions wait for the Mac.
- * - `POST /app/api/decisions/action` (phone session, same origin): `{ actions: [{ id, decision: "D-n", action: "review" |
- *   "not_decision", happened?, sound?, made_at? }] }`, at most 50. The phone's own id makes a repeat harmless. The review's
- *   answers are stored encrypted. `action: "make"` (no `decision`) is a new decision from the phone's Make decision form:
- *   `text`, `why`, `expected`, `confidence`, `type`, `quote` (the selected words) and `source` (the jot: `J-n` or the jot's
- *   key), all stored encrypted; the Mac records it.
+ * - `POST /app/api/decisions/action` (phone session, same origin): `{ account, actions: [{ id, decision: "D-n", action: "review" |
+ *   "not_decision", happened?, sound?, made_at? }] }`, at most 50. `account` is the account the queue was made under; another
+ *   account's queue is refused (409). The phone's own id makes a repeat harmless. The review's answers are stored encrypted.
+ *   `action: "make"` (no `decision`) is a new decision from the phone's Make decision form: `text`, `why`, `expected`,
+ *   `confidence`, `type`, `quote` (the selected words) and `source` (the jot: `J-n` or the jot's key), all stored encrypted;
+ *   the Mac records it.
  * - `POST /app/api/decisions/fill` (phone session, same origin): the form filled from a selection by the shared `fill_form`
  *   job (`fillDecisionForm`), the same answer as the Mac's `/v2/decisions/fill`.
  * - `GET /v2/decision-actions` and `POST /v2/decision-actions/ack` (Mac): what waits, oldest first; acked ones are kept a
@@ -143,6 +144,11 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
     if (!s) return appJSON({ error: "not signed in" }, 401);
     const rb = await readCappedJSON(req, 300_000);
     if (!rb.ok) return appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie);
+    // The account the phone's queue was made under, checked here at the moment of storing: a page holding a stale
+    // confirmation (another account signed in since) is refused and keeps its queue.
+    const mine = await accountMarker(s.userId);
+    if (typeof rb.body?.account !== "string") return appJSON({ error: "account is required" }, 400, s.setCookie);
+    if (rb.body.account !== mine) return appJSON({ error: "These changes belong to another account.", account: mine }, 409, s.setCookie);
     const raw = rb.body?.actions;
     if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_ACTIONS) return appJSON({ error: `actions must be a list of 1 to ${MAX_ACTIONS}` }, 400, s.setCookie);
     const parsed = raw.map(parseAction);
@@ -162,7 +168,7 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
     }
     await env.DB.batch(stmts);
     // Stored under the session's own user only: a phone can never queue an action for another account.
-    return appJSON({ account: await accountMarker(s.userId), accepted: list.map((a) => a.clientId), waiting: await waiting(env, s.userId) },
+    return appJSON({ account: mine, accepted: list.map((a) => a.clientId), waiting: await waiting(env, s.userId) },
       200, s.setCookie);
   }
   if (path === "/app/api/decisions/fill" && req.method === "POST") {

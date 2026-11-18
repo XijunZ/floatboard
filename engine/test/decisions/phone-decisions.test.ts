@@ -92,10 +92,26 @@ describe("phone decisions", () => {
   });
 
   it("ui_sends_only_through_the_check_and_caches_under_the_engines_account", () => {
-    expect(DECISIONS_UI_JS).toContain("decisionQueueSendable(decQueue, confirmedAccount())");
+    expect(DECISIONS_UI_JS).toContain("decisionSendBody(decQueue, confirmedAccount())");
     expect(DECISIONS_UI_JS).not.toContain("shownAccount");
     // Signing out (and a change of account) drops the cached copy and the queue with the rest of the account's data.
     const drop = APP_JS.slice(APP_JS.indexOf("function dropAccountData()"));
     expect(drop.slice(0, drop.indexOf("\n  }\n"))).toContain("dropDecisions();");
+  });
+
+  it("send_body_carries_the_queue_account_and_at_most_50", () => {
+    const actions = Array.from({ length: 60 }, (_, i) => ({ id: "a" + i }));
+    expect(L.decisionSendBody({ account: "acc-a", actions }, null)).toBeNull();
+    expect(L.decisionSendBody({ account: "acc-a", actions }, "acc-b")).toBeNull();
+    const b = L.decisionSendBody({ account: "acc-a", actions }, "acc-a");
+    expect(b.account).toBe("acc-a");
+    expect(b.actions.length).toBe(50);
+  });
+
+  it("queue_retried_on_reconnect_and_sync_resume", () => {
+    expect(DECISIONS_UI_JS).toContain('window.addEventListener("online", retryDecisionQueue)');
+    expect(DECISIONS_UI_JS).toContain("decisionSendBody(decQueue, confirmedAccount())");
+    const got = APP_JS.slice(APP_JS.indexOf("function gotBoard("));
+    expect(got.slice(0, got.indexOf("\n  }\n"))).toContain("retryDecisionQueue();");
   });
 });
