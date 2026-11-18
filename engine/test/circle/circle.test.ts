@@ -333,6 +333,11 @@ describe("circle: feed fetches stay on the public internet (Codex round 2, #1)",
       "http://100.64.0.1/", "http://0.0.0.0/", "http://[::1]/", "http://[::127.0.0.1]/", "http://[64:ff9b::7f00:1]/", "http://[64:ff9b::10.0.0.1]/", "http://[fe80::1]/", "http://[fd00::1]/", "http://[::ffff:127.0.0.1]/", "http://user:pw@example.com/"]) {
       expect(publicHttpUrl(bad), bad).toBeNull();
     }
+    // Round 7 (G): NAT64 local-use (64:ff9b:1::/48), 6to4 (2002::/16) and site-local (fec0::/10) are not public either.
+    for (const bad of ["http://[64:ff9b:1::a00:1]/", "http://[2002:c0a8:101::1]/", "http://[2002::1]/", "http://[fec0::1]/", "http://[feff::1]/"]) {
+      expect(publicHttpUrl(bad), bad).toBeNull();
+    }
+    expect(publicHttpUrl("http://[2606:4700::1111]/")).not.toBeNull();
     expect(publicHttpUrl("https://blog.example.com/feed")?.href).toBe("https://blog.example.com/feed");
     expect(publicHttpUrl("http://93.184.216.34/rss")).not.toBeNull();
     const u = await circleUser("Unsafe feed");
