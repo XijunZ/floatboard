@@ -88,7 +88,7 @@ struct PersonForm: View {
                                     ForEach(chatIDs, id: \.self) { h in
                                         HStack(spacing: 4) {
                                             Image(systemName: "message").foregroundStyle(.secondary)
-                                            Text(Handles.display(h)).foregroundStyle(.secondary)
+                                            Text(LIDBook.display(store: store, h)).foregroundStyle(.secondary)
                                             Button { chatIDs.removeAll { $0 == h } } label: { Image(systemName: "xmark.circle.fill") }
                                                 .buttonStyle(.borderless).help("Remove this WhatsApp contact from the person")
                                         }
@@ -225,27 +225,58 @@ struct PersonForm: View {
         let typed = ContactFormFields.handles(handlesText)
         let lookFor = typed.handles + chatIDs
         guard !lookFor.isEmpty || request.personID != nil else { problem = "Add a phone number, email or WhatsApp number first."; return }
-        let headers: [FillHeader]
-        do { headers = try CircleFillHeaders.find(store: store, handles: lookFor, personID: request.personID) } catch {
-            problem = "Couldn't read your messages' details: \(error)"
-            store.activity("circle", .error, "Could not read message headers for the contact form", detail: "\(error)")
-            return
-        }
-        guard !headers.isEmpty else { problem = "No messages found for these numbers or addresses yet."; return }
-        guard let client = CircleRunner.client(store) else { problem = "Connect FloatBoard's engine in Settings › Mode to fill the form."; return }
+        let lids = chatIDs.filter(Handles.isLinkedID).map(\.value)
         filling = true
         Task { @MainActor in
             defer { filling = false }
+            var notes: [String] = []
+            // 1. A WhatsApp linked id: WhatsApp's own contact list on this Mac gives the number and names (no Claude; read off
+            //    the main thread; nothing leaves the Mac).
+            if !lids.isEmpty {
+                let fresh = await Task.detached { WhatsAppContacts.resolve(lids) }.value
+                LIDBook.save(store: store, fresh)
+                let resolved = lids.compactMap { lid in fresh[lid] ?? LIDBook.phone(store: store, lid).map { ResolvedContact(phone: $0, name: "", business: "") } }
+                var fields = currentFields()
+                notes.append(LIDFill.apply(&fields, resolved: resolved, records: CircleFillHeaders.records(store: store, handles: chatIDs)))
+                apply(fields)
+            }
+            // 2. Claude (Haiku) only for what message headers can add, and only for fields still empty.
+            let headers: [FillHeader]
+            do { headers = try CircleFillHeaders.find(store: store, handles: ContactFormFields.handles(handlesText).handles + chatIDs, personID: request.personID) } catch {
+                problem = "Couldn't read your messages' details: \(error)"
+                store.activity("circle", .error, "Could not read message headers for the contact form", detail: "\(error)")
+                return
+            }
+            let f0 = currentFields()
+            let stillEmpty = [f0.name, f0.company, f0.emails, f0.phones].contains { $0.trimmingCharacters(in: .whitespaces).isEmpty }
+            guard !headers.isEmpty, stillEmpty else {
+                if notes.isEmpty { problem = "No messages found for these numbers or addresses yet." } else { filledNote = notes.joined(separator: " ") }
+                return
+            }
+            guard let client = CircleRunner.client(store) else {
+                if notes.isEmpty { problem = "Connect FloatBoard's engine in Settings › Mode to fill the form." } else { filledNote = notes.joined(separator: " ") }
+                return
+            }
             do {
                 let f = try await client.circleFill(headers: headers.prefix(CircleFillHeaders.cap).map(\.dictionary))
-                var fields = ContactFormFields(name: name, company: d.company, emails: handlesText[.email] ?? "", phones: handlesText[.phone] ?? "")
+                var fields = currentFields()
                 let changed = f.fill(&fields)
-                name = fields.name; d.company = fields.company; handlesText[.email] = fields.emails; handlesText[.phone] = fields.phones
-                filledNote = ContactFormFields.note(changed) ?? "Claude found nothing to add from \(headers.count) message header\(headers.count == 1 ? "" : "s")."
+                apply(fields)
+                notes.append(ContactFormFields.note(changed) ?? "Claude found nothing more to add from the message headers.")
+                filledNote = notes.joined(separator: " ")
             } catch {
+                if !notes.isEmpty { filledNote = notes.joined(separator: " ") }
                 problem = "Couldn't fill the form: \((error as? ConnectorError)?.description ?? "\(error)")"
                 store.activity("circle", .warning, "Could not fill the contact form", detail: "\(error)")
             }
         }
+    }
+
+    private func currentFields() -> ContactFormFields {
+        ContactFormFields(name: name, company: d.company, emails: handlesText[.email] ?? "", phones: handlesText[.phone] ?? "", whatsapp: handlesText[.whatsapp] ?? "")
+    }
+
+    private func apply(_ f: ContactFormFields) {
+        name = f.name; d.company = f.company; handlesText[.email] = f.emails; handlesText[.phone] = f.phones; handlesText[.whatsapp] = f.whatsapp
     }
 }
