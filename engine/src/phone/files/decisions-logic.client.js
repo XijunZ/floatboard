@@ -99,3 +99,12 @@
     if (!decisionQueueSendable(queue, confirmed)) return null;
     return { account: queue.account, actions: queue.actions.slice(0, 50) };
   }
+
+  // The queue with one more action, made under `account` (the account the form or sheet was opened in). Null when there is
+  // no account, or when the queue holds another account's waiting changes (never mixed, never overwritten).
+  function decisionEnqueue(queue, action, account) {
+    if (!action || !account) return null;
+    var q = queue && Array.isArray(queue.actions) ? queue : { account: null, actions: [] };
+    if (q.actions.length && q.account !== account) return null;
+    return { account: account, actions: (q.account === account ? q.actions : []).concat([action]) };
+  }
