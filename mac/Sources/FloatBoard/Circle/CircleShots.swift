@@ -102,7 +102,7 @@ import SwiftUI
 /// Round 8 pictures (`FLOATBOARD_ROUND8SHOTS=1 FloatBoard --snapshot <dir>`, scratch database only): the Add form with a
 /// WhatsApp contact that shares no number, the person pane's tag row and its + menu, and the people list with tag chips.
 @MainActor enum Round8Shots {
-    static func run(dir: String, store: Store, ui: UIState, google: Google, round9: Bool = false) {
+    static func run(dir: String, store: Store, ui: UIState, google: Google, round9: Bool = false, round11: Bool = false) {
         guard LocalData.isScratchDatabase else { print("Round8Shots: scratch database only"); return }
         store.setModule(.circle, on: true)
         let c = CircleStore(store: store), now = Date()
@@ -137,6 +137,25 @@ import SwiftUI
                 }
                 w.close()
             }
+        }
+        if round11 {
+            // Round 11: the Bulk add sheet with a long list, Chinese names and people already in Circle (greyed).
+            _ = add("Grace Example", .network, [], [Handle(kind: .phone, value: "447700900500"), Handle(kind: .whatsapp, value: "550000000005@lid")])
+            let names = ["Grace Example", "陈伟", "Hugo Example", "李娜", "Iris Example", "Jonas Example", "王芳", "Kofi Example", "Lena Example",
+                         "张强", "Mateo Example", "Nadia Example", "刘洋", "Omar Example", "Priya Example", "Quinn Example", "赵敏", "Rosa Example"]
+            var wa: [BulkRow] = names.enumerated().map { i, n in
+                let ph = "4477009005\(String(format: "%02d", i))"
+                return BulkRow(key: "phone:" + ph, name: n, phone: ph, handles: [Handle(kind: .phone, value: ph)], messages: 240 - i * 13,
+                               last: now.addingTimeInterval(-Double(i) * 86400 * 3))
+            }
+            wa.append(BulkRow(key: "lid:550000000005@lid", name: "Grace (WhatsApp)", phone: nil, handles: [Handle(kind: .whatsapp, value: "550000000005@lid")],
+                              messages: 31, last: now))
+            wa.append(BulkRow(key: "lid:660000000006@lid", name: "Tomás Example", phone: nil, handles: [Handle(kind: .whatsapp, value: "660000000006@lid")],
+                              messages: 12, last: now.addingTimeInterval(-9 * 86400)))
+            let wc = [BulkRow(key: "wechat:李雷", name: "李雷", phone: nil, handles: [Handle(kind: .wechat, value: "李雷")], messages: 6, last: now)]
+            save(BulkAddSheet(close: {}, preloaded: [.whatsapp: wa, .wechat: wc]), "round11-bulk-add", CGSize(width: 640, height: 600))
+            save(BulkAddSheet(close: {}, preloaded: [.whatsapp: wa, .wechat: wc], startOn: .wechat), "round11-bulk-add-wechat", CGSize(width: 640, height: 600))
+            return
         }
         if round9 {
             // Round 9: the list with tier chips and the person pane, at the app's minimum width (800) and a normal one.

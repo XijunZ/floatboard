@@ -9,6 +9,7 @@ enum Snapshot {
         let ui = UIState()
         CalendarCache.connectedAccounts = nil // pictures use made-up accounts that are not signed in
         if ProcessInfo.processInfo.environment["FLOATBOARD_CIRCLESHOTS"] != nil { CircleShots.run(dir: dir, store: store, ui: ui, google: google); return }
+        if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND11SHOTS"] != nil { Round8Shots.run(dir: dir, store: store, ui: ui, google: google, round11: true); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND9SHOTS"] != nil { Round8Shots.run(dir: dir, store: store, ui: ui, google: google, round9: true); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND8SHOTS"] != nil { Round8Shots.run(dir: dir, store: store, ui: ui, google: google); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_BARTEST"] != nil {

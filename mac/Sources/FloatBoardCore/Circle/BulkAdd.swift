@@ -71,11 +71,12 @@ public struct BulkResult {
         }
     }
 
-    /// People Circle's WeChat reader saw (WeChat's notifications on this Mac): one row per chat name.
+    /// People Circle's WeChat reader saw (WeChat's notifications on this Mac): one row per chat name. `messages` counts the days
+    /// they were seen (the reader keeps one record per day and direction, not each message).
     public static func wechatRows(store: Store) -> [BulkRow] {
         do {
             return try store.db.query("""
-                SELECT handle_kind, handle, count(*), max(at),
+                SELECT handle_kind, handle, count(DISTINCT CAST(at / 86400 AS INTEGER)), max(at),
                        (SELECT x.name FROM circle_exchanges x WHERE x.handle_kind=e.handle_kind AND x.handle=e.handle AND x.name<>'' ORDER BY x.at DESC LIMIT 1)
                 FROM circle_exchanges e WHERE channel='wechat' AND ignored=0 GROUP BY handle_kind, handle
                 """) { s -> BulkRow? in
