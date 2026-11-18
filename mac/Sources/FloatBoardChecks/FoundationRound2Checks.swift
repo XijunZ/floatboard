@@ -135,3 +135,27 @@ private struct Refused: Error {}
                                release: { id in released.append(id); return true }).tick(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 5))
     check(released == [b], "claim_intent_survives_a_restart")
 }
+
+/// Round 13 (A3): a reminder past the Mac's grace with no engine that can reach a phone is shown late on this Mac, never
+/// marked as the phone's (shown nowhere).
+@MainActor func lateReminderNoPhoneChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-late-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = foundationStore(root, "late.sqlite") else { return }
+    let budget = ReminderBudget(store: store)
+    budget.save(ReminderSettings(dailyLimit: 5, quietStart: 0, quietEnd: 0))
+    let now = Date()
+    guard let a = grant(budget, 1, now) else { check(false, "late setup"); return }
+    var scheduled: [String] = []
+    let delivery = ReminderDelivery(store: store, claim: { _ in .noEngine }, schedule: { scheduled.append($0.id) }, phoneAvailable: { false })
+    _ = await delivery.tick(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 60))   // the Mac was asleep through the grace
+    check(scheduled == [a] && budget.pending().isEmpty && !budget.forPhone(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 60)).contains { $0.id == a },
+          "late_reminder_without_a_phone_is_shown_on_the_mac")
+    // With a phone that can be reached, a late one still goes to the phone (as before).
+    guard let b = grant(budget, 2, now) else { return }
+    scheduled = []
+    let withPhone = ReminderDelivery(store: store, claim: { _ in .mine }, schedule: { scheduled.append($0.id) }, phoneAvailable: { true })
+    _ = await withPhone.tick(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 60))
+    check(scheduled.isEmpty && budget.forPhone(now: now.addingTimeInterval(ReminderBudget.phoneGrace + 60)).contains { $0.id == b }, "late_reminder_with_a_phone_goes_to_the_phone")
+}

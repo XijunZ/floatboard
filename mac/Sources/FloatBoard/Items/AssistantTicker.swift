@@ -1,3 +1,4 @@
+import FloatBoardConnectors
 import FloatBoardCore
 import Foundation
 
@@ -17,7 +18,9 @@ import Foundation
     init(store: Store, ui: UIState, show: @escaping (DueReminder) -> Void, showNow: @escaping (DueReminder) async throws -> Void,
          claim: @escaping (String) async -> ReminderClaim, release: @escaping (String) async -> Bool, pushBoard: @escaping () -> Void) {
         self.store = store; self.ui = ui; self.show = show; self.pushBoard = pushBoard
-        delivery = ReminderDelivery(store: store, claim: claim, schedule: showNow, release: release)
+        // No online engine (Board only, Mac only): no phone can get a late reminder, so this Mac shows it late.
+        delivery = ReminderDelivery(store: store, claim: claim, schedule: showNow, release: release,
+                                    phoneAvailable: { store.connectors.contains { !$0.baseURL.isEmpty && $0.id != LocalMode.connectorID } })
     }
 
     func start() {

@@ -149,13 +149,15 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
     let claim: (String) async -> ReminderClaim
     let schedule: (DueReminder) async throws -> Void
     let release: (String) async -> Bool
+    /// Whether any engine can reach a phone now; when none can, a late reminder is shown on this Mac instead (never nowhere).
+    let phoneAvailable: () -> Bool
     private var inFlight = Set<String>()
     private var reported = Set<String>()
 
     /// `release` hands a claim back to the engine (true once done, or when there was nothing to hand back; false: try again).
     public init(store: Store, claim: @escaping (String) async -> ReminderClaim, schedule: @escaping (DueReminder) async throws -> Void,
-                release: @escaping (String) async -> Bool = { _ in true }) {
-        self.store = store; self.claim = claim; self.schedule = schedule; self.release = release
+                release: @escaping (String) async -> Bool = { _ in true }, phoneAvailable: @escaping () -> Bool = { true }) {
+        self.store = store; self.claim = claim; self.schedule = schedule; self.release = release; self.phoneAvailable = phoneAvailable
     }
 
     static func claimedKey(_ id: String) -> String { "reminder_claimed:\(id)" }
@@ -197,6 +199,19 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
         let budget = ReminderBudget(store: store)
         var changed = false
         for r in budget.pending() where !inFlight.contains(r.id) {
+            if ReminderBudget.phoneTakesOver(r, now: now) && !phoneAvailable() && !claimed(r.id) && !intent(r.id) {
+                // Late (the Mac was asleep or busy) and no phone can be reached: shown here, late, rather than nowhere.
+                inFlight.insert(r.id)
+                defer { inFlight.remove(r.id) }
+                let title = ShortID.parse(r.item).flatMap { store.item($0)?.title } ?? "FloatBoard"
+                do {
+                    try await schedule(DueReminder(id: r.id, cardID: 0, title: title, body: r.text, fireAt: now.addingTimeInterval(1)))
+                    budget.markDelivered(r.id, by: "mac", at: now); changed = true
+                } catch {
+                    if reported.insert(r.id).inserted { store.activity("reminders", .error, "Could not show a late reminder; will try again", detail: "\(error)", trace: r.id) }
+                }
+                continue
+            }
             if ReminderBudget.phoneTakesOver(r, now: now) {
                 let known = claimed(r.id)
                 if known || intent(r.id) {
