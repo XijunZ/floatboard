@@ -384,22 +384,24 @@ import Foundation
     /// Two live people with the same name (case and accents ignored), or one whose name is the other's alias.
     public func mergeSuggestions() -> [MergeSuggestion] {
         let dismissed = Set(((try? store.db.query("SELECT key FROM circle_dismissed") { DB.text($0, 0) }) ?? [])) // try?-ok: unreadable = none dismissed; shown again
+        // Names folded once and grouped (not every pair compared): same folded name, or a name that is someone's alias.
         let all = people.people()
-        var out: [MergeSuggestion] = []
-        for (i, a) in all.enumerated() {
-            for b in all[(i + 1)...] {
-                let reason: String?
-                if PeopleStore.key(a.name) == PeopleStore.key(b.name) { reason = "Same name" }
-                else if a.aliases.contains(where: { PeopleStore.key($0) == PeopleStore.key(b.name) })
-                            || b.aliases.contains(where: { PeopleStore.key($0) == PeopleStore.key(a.name) }) { reason = "Also known as" }
-                else { reason = nil }
-                if let reason {
-                    let s = MergeSuggestion(a: min(a.id, b.id), b: max(a.id, b.id), reason: reason)
-                    if !dismissed.contains(s.key) { out.append(s) }
-                }
-            }
+        var byName: [String: [Int64]] = [:]
+        for p in all { byName[PeopleStore.key(p.name), default: []].append(p.id) }
+        var seen = Set<String>(), out: [MergeSuggestion] = []
+        func add(_ x: Int64, _ y: Int64, _ reason: String) {
+            guard x != y else { return }
+            let s = MergeSuggestion(a: min(x, y), b: max(x, y), reason: reason)
+            guard !dismissed.contains(s.key), seen.insert(s.key).inserted else { return }
+            out.append(s)
         }
-        return out
+        for ids in byName.values where ids.count > 1 {
+            for (i, x) in ids.enumerated() { for y in ids[(i + 1)...] { add(x, y, "Same name") } }
+        }
+        for p in all {
+            for alias in p.aliases { for other in byName[PeopleStore.key(alias)] ?? [] { add(p.id, other, "Also known as") } }
+        }
+        return out.sorted { ($0.a, $0.b) < ($1.a, $1.b) }
     }
 
     /// Says no to a suggestion (a merge pair, a handle, a candidate) for good.
