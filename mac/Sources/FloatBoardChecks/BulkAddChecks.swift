@@ -109,4 +109,13 @@ import SQLite3
     let shown = BulkAdd.visible(big, messagedOnly: true, showDismissed: false, query: "")
     let took = Date().timeIntervalSince(start)
     check(big.count == 2000 && !shown.isEmpty && took < 1.0, "bulk_two_thousand_contacts_list_fast (\(String(format: "%.2f", took)) s)")
+    // Adding 300 people: one transaction each, the board re-read once at the end (round 12).
+    let three = (0..<300).map { i in BulkRow(key: "phone:4477008\(String(format: "%05d", i))", name: "Batch \(i)", phone: "4477008\(String(format: "%05d", i))",
+                                              handles: [Handle(kind: .phone, value: "4477008\(String(format: "%05d", i))")], messages: 1, last: now) }
+    let t0 = Date(), reloads0 = s.reloads
+    let r300 = BulkAdd.add(three, tier: .network, tag: TagRules.investor, store: s, now: now)
+    let took300 = Date().timeIntervalSince(t0), reloads = s.reloads - reloads0
+    check(r300.added == 300 && took300 < 2.0, "bulk_adds_300_people_quickly")
+    check(reloads == 1, "bulk_add_rereads_the_board_once (\(reloads))")
+    if took300 >= 2.0 { print("bulk 300 adds took \(String(format: "%.2f", took300)) s") }
 }
