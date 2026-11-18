@@ -431,12 +431,12 @@ public struct GoalProgress: Equatable {
             noteJot = j.shortID
         }
         let openTasks = Set(progressOwnOpenTasks(id))
-        // Goals already carried into the new period whose earlier version sat under this one, and that have no parent yet
-        // (their review came first): they move under this goal's continuation.
-        let adopt = outcome == .dropped || g.level.parentLevel == nil ? [] : GoalLevel.allCases.filter { $0.parentLevel == g.level }
+        // Goals of the new period with no parent yet whose chain of earlier versions (carried on, perhaps several times,
+        // before this review) goes back to one that sat under this goal: they move under this goal's continuation, reviewed
+        // ones too (their ancestry, not their content, is completed).
+        let adopt = outcome == .dropped ? [] : GoalLevel.allCases.filter { $0.parentLevel == g.level }
             .flatMap { goals(level: $0) }
-            .filter { c in c.status == .active && np.contains(c.period) && parent(of: c.id) == nil
-                && c.carriedFrom.flatMap { parent(of: $0)?.id } == id }
+            .filter { c in np.contains(c.period) && parent(of: c.id) == nil && chainParent(c) == id }
         var newID: Int64?
         store.perform {
             try store.db.run("UPDATE resolutions SET status=?, reviewed=?, updated=? WHERE id=?", [outcome.status.rawValue, now, now, id])
@@ -467,6 +467,17 @@ public struct GoalProgress: Equatable {
     public func rolloverPeriod(of period: GoalPeriod, now: Date) -> GoalPeriod {
         let cur = GoalPeriod.current(period.level, now: now)
         return period.next.interval.start >= cur.interval.start ? period.next : cur
+    }
+
+    /// Walking back through the goals this one carries on (`carried_from`), the parent of the first one that has a parent.
+    private func chainParent(_ g: Goal) -> Int64? {
+        var seen: Set<Int64> = [g.id], cur = g.carriedFrom
+        while let n = cur, !seen.contains(n), let prev = goal(n) {
+            if let p = parentLinks(of: n).first { return p.number }
+            seen.insert(n)
+            cur = prev.carriedFrom
+        }
+        return nil
     }
 
     /// The open tasks linked to this goal itself (not its sub-goals): what follows a kept goal into the next period.
