@@ -169,12 +169,15 @@ public struct PhoneDecisionAction: Codable, Equatable {
     }()
 
     /// The hash of the copy an engine last accepted (so an unchanged copy is not sent again).
+    /// Where the hash of the copy last sent through `connector` is kept.
+    public static func hashKey(_ connector: String) -> String { "decisions.phone_hash.\(connector)" }
+
     public static func sentHash(store: Store, connector: String) -> String? {
-        (try? store.db.query("SELECT value FROM meta WHERE key=?", ["decisions.phone_hash.\(connector)"]) { DB.text($0, 0) })?.first // try?-ok: unknown = send again
+        (try? store.db.query("SELECT value FROM meta WHERE key=?", [hashKey(connector)]) { DB.text($0, 0) })?.first // try?-ok: unknown = send again
     }
 
     public static func setSentHash(_ hash: String, store: Store, connector: String) {
-        store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", ["decisions.phone_hash.\(connector)", hash]) }
+        store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [hashKey(connector), hash]) }
     }
 }
 
@@ -183,7 +186,7 @@ public struct PhoneDecisionAction: Codable, Equatable {
 @MainActor public enum ConnectorMemory {
     public static func forget(connector id: String, store: Store) {
         store.perform {
-            try store.db.run("DELETE FROM meta WHERE key=?", ["decisions.phone_hash.\(id)"])
+            try store.db.run("DELETE FROM meta WHERE key=?", [DecisionPhone.hashKey(id)])
             try store.db.run("DELETE FROM meta WHERE key=?", [JotsSyncCore.engineKey])
         }
     }

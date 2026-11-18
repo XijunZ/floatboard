@@ -81,17 +81,14 @@ public enum CircleSync {
             c.setMeta(watchHash + ":" + id, h)
         }
         await step("apply the phone's Circle changes") {
-            let actions = try await client.circleActions()
-            guard !actions.isEmpty else { return }
-            let r = c.applyPhoneActions(actions, now: now)
-            try await client.ackCircleActions(r.applied + r.skipped.map(\.id))
+            try await PhoneInbox.take(fetch: client.circleActions, apply: { actions in
+                let r = c.applyPhoneActions(actions, now: now)
+                return r.applied + r.skipped.map(\.id)
+            }, ack: client.ackCircleActions)
         }
         await step("send Circle to the phone") {
-            let body = try CircleCopy.body(CircleCopy.phone(store: store, now: now))
-            let h = hash(body)
-            guard c.meta(copyHash + ":" + id) != h else { return }
-            try await client.putCircleCopy(body)
-            c.setMeta(copyHash + ":" + id, h)
+            try await PhoneInbox.sendIfChanged(try CircleCopy.body(CircleCopy.phone(store: store, now: now)), metaKey: copyHash + ":" + id,
+                                               store: store, client: client, send: client.putCircleCopy)
         }
         return problems
     }

@@ -24,13 +24,11 @@ public enum JotsSync {
         let core = JotsSyncCore(store: store)
         var step = "take in the phone's jots"
         do {
-            let waiting = try await client.waitingJots()
-            let acks = core.apply(waiting, now: now)
-            if !acks.isEmpty {
+            r.taken = try await PhoneInbox.take(fetch: client.waitingJots, apply: { waiting in
+                let acks = core.apply(waiting, now: now)
                 step = "confirm the phone's jots"
-                try await client.ackJots(acks)
-                r.taken = acks.count
-            }
+                return acks
+            }, ack: client.ackJots)
             JotStore(store: store).attachPendingMeetingNotes(now: now)
             step = "send jots to the phone"
             core.useEngine(client.accountFingerprint)   // another engine account: every recent jot goes again
