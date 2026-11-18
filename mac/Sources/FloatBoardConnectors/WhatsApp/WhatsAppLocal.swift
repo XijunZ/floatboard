@@ -21,7 +21,7 @@ public enum WhatsAppLocal {
     }
     static let file = "ChatStorage.sqlite"
     /// Core Data dates count seconds from 2001-01-01.
-    static let appleEpoch: TimeInterval = 978_307_200
+    public static let appleEpoch: TimeInterval = 978_307_200
     public static let maxPerChat = 30
     public static let lookback: TimeInterval = 7 * 86_400
     static let maxTranscript = 8000

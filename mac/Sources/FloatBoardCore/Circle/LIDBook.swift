@@ -15,7 +15,7 @@ public struct ResolvedContact: Equatable, Sendable {
 @MainActor public enum LIDBook {
     static let key = "circle.lid_phones"
 
-    static func all(_ store: Store) -> [String: String] {
+    public static func all(_ store: Store) -> [String: String] {
         let raw = (try? store.db.query("SELECT value FROM meta WHERE key=?", [key]) { DB.text($0, 0) })?.first ?? "{}" // try?-ok: unreadable = no numbers known yet (shown as "no number shared")
         return (try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String]) ?? [:] // try?-ok: unreadable = none known; rewritten at the next save
     }
