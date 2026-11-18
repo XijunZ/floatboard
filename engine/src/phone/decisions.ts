@@ -152,8 +152,12 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
     const raw = rb.body?.actions;
     if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_ACTIONS) return appJSON({ error: `actions must be a list of 1 to ${MAX_ACTIONS}` }, 400, s.setCookie);
     const parsed = raw.map(parseAction);
-    const bad = parsed.find((p) => typeof p === "string");
-    if (bad) return appJSON({ error: bad }, 400, s.setCookie);
+    // A malformed action refuses the batch and is named, so the phone drops only that one (round 13, J5).
+    const badAt = parsed.findIndex((p) => typeof p === "string");
+    if (badAt >= 0) {
+      const id = typeof raw[badAt]?.id === "string" ? String(raw[badAt].id).slice(0, 64) : null;
+      return appJSON({ error: parsed[badAt] as string, id }, 400, s.setCookie);
+    }
     const list = parsed as Parsed[];
     if ((await waiting(env, s.userId)) + list.length > MAX_WAITING) {
       return appJSON({ error: "Too many changes are waiting for your Mac. Open FloatBoard on the Mac and try again." }, 429, s.setCookie);

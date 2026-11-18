@@ -114,6 +114,9 @@ describe("decisions: form filling, supersedes (⚑) and tell / ask", () => {
     expect(await r.json()).toEqual({ decision: "Move the offsite to March", why: "not recorded", expected: "", confidence: null, type: "strategic", alternatives: "" });
     expect(sent[0].user).toContain("We moved the offsite to March.");
     expect((await env.DB.prepare("SELECT job FROM llm_usage WHERE user_id=?").bind(u.id).first<any>()).job).toBe("fill_form");
+    // Round 13 (J6): the note around the selection may only help with the decision line and why, never outcome or confidence.
+    expect(sent[0].system).toMatch(/surrounding note[^.]*only[^.]*decision[^.]*why/i);
+    expect(sent[0].system).toMatch(/expected outcome and confidence come only from the selected text/i);
   });
 
   it("supersedes_answers_only_ids_offered", async () => {
@@ -211,6 +214,17 @@ describe("decisions: phone copy and actions", () => {
     expect((await fill({ selection: "x" }, "https://evil.example")).status).toBe(403);
     expect((await fill({ selection: "" })).status).toBe(400);
     expect((await call("/app/api/decisions/fill", { method: "POST", headers: { Origin: BASE }, body: "{}" })).status).toBe(401);
+  });
+
+  it("a_malformed_action_is_named_so_the_phone_drops_only_that_one", async () => {
+    const u = await user("BadOne");
+    const { cookie } = await pairPhone(u.key);
+    const account = (await (await call("/app/api/decisions", { headers: { Cookie: cookie } })).json<any>()).account;
+    const good = { id: "act-good0001", decision: "D-1", action: "not_decision" };
+    const bad = { id: "act-bad00001", decision: "T-9", action: "review" };
+    const r = await call("/app/api/decisions/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify({ account, actions: [good, bad] }) });
+    expect(r.status).toBe(400);
+    expect((await r.json<any>()).id).toBe("act-bad00001");
   });
 
   it("phone_actions_and_copy_are_bound_to_the_signed_in_account", async () => {

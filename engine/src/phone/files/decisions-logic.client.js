@@ -126,3 +126,10 @@
     if (q.actions.length && q.account !== account) return null;
     return { account: account, actions: (q.account === account ? q.actions : []).concat([action]) };
   }
+
+  // A refused batch (400): drop the action the engine named; an older engine names none, then the first (as before).
+  function decisionQueueAfterRefusal(queue, id) {
+    var q = queue || [];
+    if (typeof id === "string" && q.some(function (a) { return a.id === id; })) return q.filter(function (a) { return a.id !== id; });
+    return q.slice(1);
+  }

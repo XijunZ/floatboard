@@ -70,8 +70,8 @@
       }
     } catch (e) {
       if (e instanceof SignedOut) throw e;
-      if (e && e.status === 400 && decQueue.actions.length) {   // a malformed action would block the queue: drop it
-        decQueue.actions = decQueue.actions.slice(1);
+      if (e && e.status === 400 && decQueue.actions.length) {   // a malformed action would block the queue: drop that one
+        decQueue.actions = decisionQueueAfterRefusal(decQueue.actions, e.id);
         saveDecQueue();
       }
       // 409 (another account now) and offline: held for later.
@@ -244,6 +244,8 @@
       var save = el("button", "btn", "Save decision"); save.type = "submit";
       f.appendChild(wait); f.appendChild(save);
       if (selection) sheet.appendChild(el("p", "dec-quote", "“" + String(selection).slice(0, 600) + "”"));
+      // The quote kept with the decision is at most 4,000 characters (the engine's limit); said when the selection is longer.
+      if (String(selection || "").length > 4000) sheet.appendChild(el("p", "sub", "Only the first 4,000 characters are kept as the quote."));
       sheet.appendChild(f);
       f.addEventListener("submit", function (e) {
         e.preventDefault();

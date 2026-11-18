@@ -114,4 +114,11 @@ describe("phone decisions", () => {
     const got = APP_JS.slice(APP_JS.indexOf("function gotBoard("));
     expect(got.slice(0, got.indexOf("\n  }\n"))).toContain("retryDecisionQueue();");
   });
+
+  it("a_400_drops_only_the_action_the_engine_named", () => {
+    const q = [{ id: "a1" }, { id: "a2" }, { id: "a3" }];
+    expect(L.decisionQueueAfterRefusal(q, "a2").map((a: any) => a.id)).toEqual(["a1", "a3"]);
+    expect(L.decisionQueueAfterRefusal(q, undefined).map((a: any) => a.id)).toEqual(["a2", "a3"]);   // an older engine: the first, as before
+    expect(DECISIONS_UI_JS).toMatch(/decisionQueueAfterRefusal\(decQueue\.actions, e\.id\)/);
+  });
 });
