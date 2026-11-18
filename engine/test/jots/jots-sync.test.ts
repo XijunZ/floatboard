@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
 import { BASE, call, fathomHookPath, newUser } from "../helpers";
 import { pairPhone } from "../phone-helpers";
-import { purgeJots, runJotNudges, setJotsPutRaceHook } from "../../src/jots/copies";
+import { purgeJots, runJotNudges, setJotsPhoneRaceHook, setJotsPutRaceHook } from "../../src/jots/copies";
 
 // Jots (docs/superpowers/specs/2026-11-17-jots-design.md §4): the 30-day online copy, phone captures and edits waiting for
 // the Mac (newest wins), meeting notes from Fathom, and the daily nudge on the phone.
@@ -177,6 +177,28 @@ describe("jots: phone captures and edits reach the Mac", () => {
     const texts = w.jots.flatMap((j) => [j.text, ...(j.versions ?? []).map((v: any) => v.text)]);
     expect(texts).toContain("Phone words in between");
     expect((await phoneJots(u.cookie)).jots[0].text).toBe("Mac newer");
+  });
+
+  it("a_phone_edit_racing_the_first_mac_upload_is_not_lost", async () => {
+    const u = await setup("First insert");
+    const t0 = Date.now() - 60_000;
+    // The phone edits J-1 before the engine has a copy; the Mac's first upload of J-1 lands in between (Codex round 3, finding 3).
+    let fired = false;
+    setJotsPhoneRaceHook(async () => {
+      if (fired) return;
+      fired = true;
+      await putJots(u.key, { jots: [jot(1, { text: "Mac's first upload", updated: iso(t0) })] });
+    });
+    let r: any;
+    try {
+      r = await (await phoneSend(u.cookie, [{ id: "edit-0601", op: "edit", key: "J-1", text: "Phone edit that raced", made_at: iso(t0 + 5000) }])).json<any>();
+    } finally { setJotsPhoneRaceHook(undefined); }
+    expect(fired).toBe(true);
+    expect(r.accepted).toEqual(["edit-0601"]);
+    const w = await waiting(u.key);
+    const texts = w.jots.flatMap((j) => [j.text, ...(j.versions ?? []).map((v: any) => v.text)]);
+    expect(texts).toContain("Phone edit that raced");
+    expect(texts).toContain("Mac's first upload");
   });
 
   it("an_upload_with_the_same_text_keeps_unacked_history_waiting", async () => {
