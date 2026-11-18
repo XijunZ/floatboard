@@ -11,19 +11,15 @@ FEEDBACK_URL=""
 SOURCE_DIR="$(cd .. && pwd)"
 BUILD_COMMIT="$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
 GITHUB_REPO="$(git -C "$SOURCE_DIR" remote get-url origin 2>/dev/null | sed -nE 's#.*github\.com[:/]([^/]+/[^/.]+)(\.git)?$#\1#p')"
+# The engine for Mac only mode, always built fresh from ../engine (its packages installed first when missing or out of
+# date): an install never ships an old engine.js. Without npm, or when the build fails, it stops and installs nothing.
+./scripts/prepare-engine.sh
 swift build -c release
 APP=build/FloatBoard.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/FloatBoard "$APP/Contents/MacOS/FloatBoard"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-# The engine for Mac only mode, always built fresh from ../engine: an install never ships an old engine.js (it is
-# git-ignored, so a leftover build could be days old). No Node or no engine/node_modules: stop, nothing is installed.
-command -v node >/dev/null || { echo "error: Node is needed to build the engine (Resources/engine.js). Install Node, then run 'npm ci' in engine/." >&2; exit 1; }
-[ -d ../engine/node_modules/esbuild ] || { echo "error: run 'npm ci' in engine/ first (the engine for Mac only mode is built from it)." >&2; exit 1; }
-rm -f Resources/engine.js
-(cd ../engine && node local/build.mjs >/dev/null) || { echo "error: building Resources/engine.js failed; nothing was installed." >&2; exit 1; }
-[ -s Resources/engine.js ] || { echo "error: the engine build wrote no Resources/engine.js; nothing was installed." >&2; exit 1; }
 cp Resources/engine.js "$APP/Contents/Resources/engine.js"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

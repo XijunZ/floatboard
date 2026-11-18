@@ -24,4 +24,25 @@ public enum UpdateCheck {
         default: return .unknown("this build has changes that aren't on GitHub (\(status)); update it from its folder")
         }
     }
+
+    /// The "Update now" script, run in the source folder by a login shell (`set -e`: it stops at the first failure). The engine's
+    /// packages are installed for every user (`npm ci`), since the app build bundles the engine for Mac only mode; only
+    /// someone who deploys an online engine from this Mac also updates it.
+    public static func updateScript(dir: String, deploysEngine: Bool) -> String {
+        let quoted = "'" + dir.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return """
+            set -e
+            cd \(quoted)
+            echo "== $(date) updating from $(git rev-parse --short HEAD)"
+            if [ -n "$(git status --porcelain --untracked-files=no)" ]; then echo "STOP: the source folder has changes that aren't committed"; exit 3; fi
+            git fetch --quiet origin main
+            if [ -n "$(git log --oneline origin/main..HEAD)" ]; then echo "STOP: the source folder has commits that aren't on GitHub"; exit 4; fi
+            git merge --ff-only --quiet origin/main
+            command -v npm >/dev/null || { echo "STOP: npm (Node.js) is needed to build FloatBoard; install Node.js, then try again"; exit 5; }
+            (cd engine && npm ci --silent)
+            \(deploysEngine ? "(cd engine && npm run --silent update)" : "echo 'no online engine deployed from this Mac'")
+            cd mac && ./scripts/build-app.sh
+            echo "== done $(git rev-parse --short HEAD)"
+            """
+    }
 }

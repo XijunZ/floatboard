@@ -99,10 +99,15 @@ silently swallowed: the `check-silent.sh` script enforces that.
 FloatBoard checks this repository on GitHub when it starts and once a day (Settings › Mode › Updates, or Help › Check
 for Updates…). **Update now** runs in the folder the app was built from: it pulls the new code, updates your online engine
 if this Mac deploys one (database changes first, then the new code), rebuilds the app and reopens it. It refuses to run
-when that folder has changes that aren't committed or commits that aren't on GitHub. You can let it install updates
+when that folder has changes that aren't committed or commits that aren't on GitHub, and needs Node.js with npm
+(it installs the engine's packages with `npm ci` for every setup, Board only and Mac only included). You can let it install updates
 automatically when FloatBoard starts. The log is in `~/Library/Logs/FloatBoard-update.log`.
 
 ## Build and check
+
+Prerequisites: Xcode (Swift 6) and **Node.js with npm** (the app bundles the engine for Mac only mode, built from
+`engine/`). Install the engine's packages once with `cd engine && npm ci`; `build-app.sh` installs them again by itself
+when `package-lock.json` has changed, and stops with a message when npm is missing. **Update now** runs `npm ci` too.
 
 ```
 cd mac
@@ -110,7 +115,8 @@ cd mac
 swift build -c release        # build only
 ```
 
-Checks never touch your real data. `FloatBoardChecks` refuses to run unless all three scratch paths are set:
+Checks never touch your real data. `FloatBoardChecks` refuses to run unless all three scratch paths are set, and it
+rebuilds `mac/Resources/engine.js` first (it stops if `engine/node_modules` is missing: run `npm ci` in `engine/`):
 
 ```
 cd mac
