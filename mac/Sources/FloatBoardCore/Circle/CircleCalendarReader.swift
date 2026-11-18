@@ -31,8 +31,13 @@ import Foundation
             return 0
         }
         let c = CircleStore(store: store)
-        c.record(inputs, now: now)
-        c.setChannel("calendar", asOf: now, completeFrom: earliest, cursor: "", note: Channel.calendar.limits ?? "")
+        // Recorded with its "as of" in one write: a failed write doesn't claim the meetings were read.
+        do {
+            try c.importRead(inputs, channel: "calendar", asOf: now, completeFrom: earliest, cursor: "", note: Channel.calendar.limits ?? "", now: now)
+        } catch {
+            store.activity("circle", .error, "Could not record past meetings for Circle; read again next time", detail: "\(error)")
+            return 0
+        }
         return inputs.count
     }
 }
