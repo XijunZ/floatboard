@@ -166,3 +166,17 @@ extension ConnectorClient {
         return d
     }
 }
+
+extension ConnectorClient.CircleFill {
+    /// Fills only the empty fields; returns which changed ("name", "company", "emails", "phones"), in that order.
+    public func fill(_ f: inout ContactFormFields) -> [String] {
+        var changed: [String] = []
+        let n = name.trimmingCharacters(in: .whitespaces), c = company.trimmingCharacters(in: .whitespaces)
+        if f.name.trimmingCharacters(in: .whitespaces).isEmpty, !n.isEmpty { f.name = n; changed.append("name") }
+        if f.company.trimmingCharacters(in: .whitespaces).isEmpty, !c.isEmpty { f.company = c; changed.append("company") }
+        let e = emails.filter { !$0.isEmpty }.joined(separator: ", "), p = phones.filter { !$0.isEmpty }.joined(separator: ", ")
+        if f.emails.trimmingCharacters(in: .whitespaces).isEmpty, !e.isEmpty { f.emails = e; changed.append("emails") }
+        if f.phones.trimmingCharacters(in: .whitespaces).isEmpty, !p.isEmpty { f.phones = p; changed.append("phones") }
+        return changed
+    }
+}
