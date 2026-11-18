@@ -100,7 +100,7 @@ public struct ScreenOutcome: Equatable {
         let rows: [(Int64, String, String, Date)]
         do {
             rows = try store.db.query("""
-                SELECT id, text, kind, added FROM jots WHERE deleted=0 AND ((updated>=? AND updated<=?) OR id>?) ORDER BY updated, id
+                SELECT id, text, kind, added FROM jots WHERE deleted=0 AND ((updated>=? AND updated<=?) OR change_seq>?) ORDER BY updated, id
                 """, [since, now, seenID ?? Int64.max]) { (DB.int($0, 0), DB.text($0, 1), DB.text($0, 2), DB.date($0, 3) ?? now) }
         } catch {
             store.activity("decisions", .error, "Could not read the week's jots for screening", detail: "\(error)")
@@ -212,7 +212,9 @@ public struct ScreenOutcome: Equatable {
     /// Where this run reads from: the start of the last complete run (the first time: 7 days ago).
     /// The highest jot id on the board (0 when there is none; nil when it can't be read, so nothing is recorded).
     public static func lastJotID(store: Store) -> Int64? {
-        do { return try store.db.query("SELECT coalesce(max(id), 0) FROM jots") { DB.int($0, 0) }.first } catch {
+        // The newest place in this Mac's write order (a new jot, or any jot changed after the run, comes after it). Before
+        // version 17 this was the newest id; change_seq starts as the id, so a mark saved then still holds.
+        do { return try store.db.query("SELECT coalesce(max(change_seq), 0) FROM jots") { DB.int($0, 0) }.first } catch {
             store.activity("decisions", .error, "Could not read the jots for screening", detail: "\(error)")
             return nil
         }

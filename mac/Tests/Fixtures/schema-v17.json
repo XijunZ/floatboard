@@ -79,6 +79,12 @@
   ],
   [
     "index",
+    "jots_change_seq",
+    "jots",
+    "CREATE INDEX jots_change_seq ON jots(change_seq)"
+  ],
+  [
+    "index",
     "jots_origin",
     "jots",
     "CREATE UNIQUE INDEX jots_origin ON jots(origin) WHERE origin<>''"
@@ -447,7 +453,7 @@
     "table",
     "jots",
     "jots",
-    "CREATE TABLE jots(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'jot',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n, task_id INTEGER, origin TEXT NOT NULL DEFAULT '')"
+    "CREATE TABLE jots(\n    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'jot',\n    source TEXT NOT NULL DEFAULT 'typed', added REAL NOT NULL, updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0\n, task_id INTEGER, origin TEXT NOT NULL DEFAULT '', change_seq INTEGER NOT NULL DEFAULT 0)"
   ],
   [
     "table",
@@ -532,6 +538,30 @@
     "cal_events_keep",
     "cal_events",
     "CREATE TRIGGER cal_events_keep AFTER UPDATE ON cal_events WHEN NEW.gone=0 AND EXISTS (SELECT 1 FROM cal_kept WHERE short_id=NEW.short_id) BEGIN\n    UPDATE cal_kept SET title=NEW.title, start=NEW.start, \"end\"=NEW.\"end\", all_day=NEW.all_day, video_link=NEW.video_link WHERE short_id=NEW.short_id;\nEND"
+  ],
+  [
+    "trigger",
+    "jots_seq_insert",
+    "jots",
+    "CREATE TRIGGER jots_seq_insert AFTER INSERT ON jots BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;\nEND"
+  ],
+  [
+    "trigger",
+    "jots_seq_tag_added",
+    "item_tags",
+    "CREATE TRIGGER jots_seq_tag_added AFTER INSERT ON item_tags WHEN NEW.item LIKE 'J-%' BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = CAST(substr(NEW.item, 3) AS INTEGER);\nEND"
+  ],
+  [
+    "trigger",
+    "jots_seq_tag_removed",
+    "item_tags",
+    "CREATE TRIGGER jots_seq_tag_removed AFTER DELETE ON item_tags WHEN OLD.item LIKE 'J-%' BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = CAST(substr(OLD.item, 3) AS INTEGER);\nEND"
+  ],
+  [
+    "trigger",
+    "jots_seq_update",
+    "jots",
+    "CREATE TRIGGER jots_seq_update AFTER UPDATE OF text, kind, deleted, task_id ON jots WHEN NEW.change_seq = OLD.change_seq BEGIN\n    UPDATE jots SET change_seq = (SELECT coalesce(max(change_seq), 0) + 1 FROM jots) WHERE id = NEW.id;\nEND"
   ],
   [
     "trigger",
