@@ -59,7 +59,7 @@ struct CircleTab: View {
 
     private func toolbar(due: [DueEntry], count: Int) -> some View {
         let suggestions = CircleSnapshot.current(store: store).suggestionCount
-        // The title and count never break mid-word; the controls wrap onto a second line at narrow widths (round 9).
+        // The title and count never break mid-word; the controls wrap onto a second line at narrow widths.
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("Circle").font(.system(size: 15, weight: .semibold)).fixedSize()
             Text("\(count) people").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
@@ -131,7 +131,7 @@ struct CircleTab: View {
                                     Text(p.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.tail)
                                     if dueIDs.contains(p.id) { Circle().fill(.orange).frame(width: 6, height: 6) }
                                 }
-                                TierChip(tier: p.tier)   // the tier first, outlined, then the tags (round 9)
+                                TierChip(tier: p.tier)   // the tier first, outlined, then the tags
                                 ForEach(store.itemTags(p.shortID).all, id: \.self) { t in PersonTagChip(tag: t) }
                             }
                             Text(k?.lastConversation.map { "talked \(CircleFmt.ago($0))" } ?? "no conversation seen")

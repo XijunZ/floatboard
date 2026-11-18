@@ -1,7 +1,7 @@
 import Foundation
 
 /// What the Circle tab draws from (people, clocks, details, handles, the due list, the suggestions count), worked out once
-/// per board change and at most once a minute for the clocks, instead of on every keystroke (round 13, C3).
+/// per board change and at most once a minute for the clocks, instead of on every keystroke.
 @MainActor public struct CircleSnapshot {
     public let people: [Person]
     public let clocks: [Int64: Clocks]

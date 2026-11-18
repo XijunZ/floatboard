@@ -34,7 +34,7 @@ public struct BulkResult {
     public var failed: [(name: String, why: String)] = []
 }
 
-/// "Bulk add…" (round 11): people from WhatsApp and WeChat, header data only (who, how many messages, when; never text),
+/// "Bulk add…": people from WhatsApp and WeChat, header data only (who, how many messages, when; never text),
 /// added to Circle in one transaction each. No AI anywhere in this flow; nothing new is sent to the engine.
 @MainActor public enum BulkAdd {
     /// WhatsApp chats and contacts merged into one row per person: by phone number, and a linked id joins its number (from the

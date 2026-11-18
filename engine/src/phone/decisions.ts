@@ -152,7 +152,7 @@ export async function handleDecisions(req: Request, env: Env): Promise<Response 
     const raw = rb.body?.actions;
     if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_ACTIONS) return appJSON({ error: `actions must be a list of 1 to ${MAX_ACTIONS}` }, 400, s.setCookie);
     const parsed = raw.map(parseAction);
-    // A malformed action refuses the batch and is named, so the phone drops only that one (round 13, J5).
+    // A malformed action refuses the batch and is named, so the phone drops only that one.
     const badAt = parsed.findIndex((p) => typeof p === "string");
     if (badAt >= 0) {
       const id = typeof raw[badAt]?.id === "string" ? String(raw[badAt].id).slice(0, 64) : null;

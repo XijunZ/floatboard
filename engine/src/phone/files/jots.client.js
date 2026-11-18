@@ -185,7 +185,7 @@
       if (cancelUndo) cancelUndo();
     }
 
-    // Jots: account binding (Codex round 3). Before any change is queued, the screen is bound to the account signed in now.
+    // Jots: account binding. Before any change is queued, the screen is bound to the account signed in now.
     function bound() { if (h.account() && heldBy !== h.account()) restore(); }
 
     function queueAction(a) {
@@ -290,7 +290,7 @@
     async function cleanup(text, use) {
       if (!text.trim()) return;
       var r;
-      // Jots: account binding (Codex round 3). The answer and "Use cleaned" count only for the account and session that asked:
+      // Jots: account binding. The answer and "Use cleaned" count only for the account and session that asked:
       // the app's shared session check (h.stamp / h.sameSession), as for sync.
       var stamp = h.stamp();
       var current = function () { return h.sameSession(stamp); };

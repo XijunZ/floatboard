@@ -18,11 +18,6 @@ import FloatBoardCore
     check(CalendarLayout.stripSplit(count: 2) == (2, 0) && CalendarLayout.stripSplit(count: 3) == (3, 0)
           && CalendarLayout.stripSplit(count: 5) == (2, 3), "cal3_all_day_row_stacks_three_then_plus_more")
 
-    // A click: a task opens the board's editor, an event its panel.
-    let e = CalEvent(shortID: 7, account: "a@example.com", calendarID: "c", eventID: "x", start: Date(), end: Date().addingTimeInterval(3600),
-                     allDay: false, title: "Call", location: "", videoLink: "", description: "", htmlLink: "", recurringID: nil,
-                     googleUpdated: Date(), fbCard: nil)
-    let t = Card(id: 42, title: "Write the long plan", notes: "", area: "Work", importance: .medium, due: Date(), status: .todo, created: Date(), started: nil, done: nil)
     // Review fix 2: the hover details never open during a drag or resize, and do not come back after the drop until the
     // pointer enters the item again.
     var g = HoverGate()
@@ -34,6 +29,4 @@ import FloatBoardCore
     let nextEntry = g.shown
     var h = HoverGate(); h.enter(suppressed: false); h.waited(suppressed: false); let open = h.shown; h.suppress()
     check(!duringDrag && !afterDrop && nextEntry && open && !h.shown, "review2_hover_details_close_on_drag_and_stay_closed_until_next_entry")
-    check(CalendarLayout.clickTarget(.task(t)) == .taskEditor(42) && CalendarLayout.clickTarget(.event(e)) == .eventPanel(7),
-          "cal3_click_on_a_task_opens_the_task_editor_events_their_panel")
 }

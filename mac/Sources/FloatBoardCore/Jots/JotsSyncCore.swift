@@ -162,6 +162,7 @@ public struct JotAck: Equatable {
             store.activity("jots", .error, "Could not read the jot of a phone action; it stays on the engine and is tried again", detail: "\(r.key): \(error)")
             return false
         }
+        // Legacy (phones before the Decisions queue, 17 Nov 2026): remove with the engine's "make_decision" op, not before 1 Feb 2027.
         if r.kind == "action:make_decision" {
             guard let hook = JotActions.makeDecision, let source else { return false }
             return hook(store, r.text, source)

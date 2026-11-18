@@ -45,6 +45,8 @@ const ACTION_ID = /^[A-Za-z0-9-]{8,64}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const KINDS = ["jot", "task_note", "meeting_notes"] as const;
 const SOURCES = ["typed", "phone", "meeting", "message", "claude"] as const;
+// "make_decision" is the legacy jot op (phones before the Decisions queue, 17 Nov 2026). Remove it once every phone has the
+// Decisions queue (its own /app/api/decisions/action), not before 1 Feb 2027.
 const OPS = ["add", "edit", "delete", "restore", "make_task", "make_decision"] as const;
 
 type Row = { key: string; mac_id: number | null; text_enc: string; kind: string; source: string; tags: string; added: string; updated: string;

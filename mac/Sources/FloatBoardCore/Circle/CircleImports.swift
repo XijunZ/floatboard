@@ -226,16 +226,6 @@ extension CircleStore {
         }
     }
 
-    /// Adds a suggestion as a person (with its handles, company and role).
-    public func addCandidate(_ id: Int64, tier: PersonTier, tags: ItemTags, now: Date = Date()) -> AddResult {
-        guard let c = candidates().first(where: { $0.id == id }) else { return AddResult(person: nil, problem: "That suggestion is gone.") }
-        var d = CircleDetails(); d.company = c.company; d.role = c.role
-        d.howKnown = c.source == "linkedin" ? "LinkedIn" : ""
-        let r = add(name: c.name, tier: tier, tags: tags, details: d, handles: c.handles, source: .typed, now: now)
-        if r.person != nil { store.perform { try store.db.run("UPDATE circle_candidates SET state='added' WHERE id=?", [id]) } }
-        return r
-    }
-
     /// A suggestion added through the form (the person was made there).
     public func markCandidateAdded(_ id: Int64) {
         store.perform { try store.db.run("UPDATE circle_candidates SET state='added' WHERE id=?", [id]) }

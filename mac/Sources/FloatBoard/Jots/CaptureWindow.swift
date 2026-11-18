@@ -16,7 +16,7 @@ import SwiftUI
         self.store = store; self.ui = ui
         super.init()
         Self.shared = self
-        // Quitting keeps what was being written (round 13, J3).
+        // Quitting keeps what was being written.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.keepDraft() }
         }
@@ -116,7 +116,7 @@ struct CaptureView: View {
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             CaptureTextView(text: $model.text, focus: model.focus)
-                // The draft is kept as it is typed (half a second after typing stops), not only on Esc or close (round 13, J3).
+                // The draft is kept as it is typed (half a second after typing stops), not only on Esc or close.
                 .task(id: model.text) {
                     try? await Task.sleep(nanoseconds: 500_000_000) // try?-ok: cancelled when typing continues; the next pause keeps it
                     if !Task.isCancelled { model.keepDraft() }

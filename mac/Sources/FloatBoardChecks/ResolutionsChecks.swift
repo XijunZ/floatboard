@@ -303,8 +303,8 @@ private func makeV12Schema(_ url: URL) -> Bool {
     guard let q2 = make(r2, .quarter, "2026-Q4", "Only") else { return }
     _ = r2.review(q2.id, outcome: .dropped, note: "", newTitle: nil, now: day(2026, 12, 20))
     check(ResolutionNudges.due(store: store2, now: day(2026, 12, 21)).isEmpty, "reviewed_period_needs_no_nudge")
-    check(ResolutionNudges.openReview(store: store2, now: day(2026, 12, 21)) == nil
-          && ResolutionNudges.openReview(store: store, now: day(2026, 12, 21))?.key == "2026-Q4", "open_review_banner")
+    check(ResolutionNudges.openReviews(store: store2, now: day(2026, 12, 21)).isEmpty
+          && ResolutionNudges.openReviews(store: store, now: day(2026, 12, 21)).first?.key == "2026-Q4", "open_review_banner")
     store.setModule(.resolutions, on: false)
     check(ResolutionNudges.due(store: store, now: day(2027, 3, 28)).isEmpty, "no_nudge_while_area_off")
     _ = q

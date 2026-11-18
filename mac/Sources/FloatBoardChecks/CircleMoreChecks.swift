@@ -57,7 +57,10 @@ private let noTags = ItemTags(primary: nil, others: [])
           "linkedin_monthly_nudge")
     // Adding a suggestion makes the person with their handles and job; dismissing keeps it away.
     guard let cand = c.candidates().first else { check(false, "candidate"); return }
-    let added = c.addCandidate(cand.id, tier: .network, tags: noTags).person
+    // The form path: the person is made from the suggestion's details, then the suggestion is marked added.
+    var cd = CircleDetails(); cd.company = cand.company; cd.role = cand.role
+    let added = c.add(name: cand.name, tier: .network, tags: noTags, details: cd, handles: cand.handles, source: .typed).person
+    if added != nil { c.markCandidateAdded(cand.id) }
     check(added?.name == "Cara Example" && c.details(added!.id).company == "Northwind" && c.handles(added!.id).first?.kind == .linkedin
           && c.candidates().isEmpty, "suggestion_added_as_person")
 }
@@ -111,8 +114,8 @@ private let noTags = ItemTags(primary: nil, others: [])
         EngineUpdate(seq: 5, person: inv.shortID.text, kind: "news_firm", key: "news:c", title: "Acme Capital closes fund", detail: "Wire",
                      url: "https://example.com/c", at: iso(circleDay(6)), match: "possible", born: nil, officer: nil),
     ]
-    check(c.applyEngineUpdates(items, now: circleDay(7)) == 5, "engine_updates_stored")
-    check(c.applyEngineUpdates(items, now: circleDay(7)) == 0, "engine_updates_stored_once")
+    check((try? c.applyEngineUpdates(items, now: circleDay(7))) == 5, "engine_updates_stored") // try?-ok: nil fails the check
+    check((try? c.applyEngineUpdates(items, now: circleDay(7))) == 0, "engine_updates_stored_once") // try?-ok: nil fails the check
     let cands = c.officerCandidates(inv.id)
     check(cands.map(\.officerID) == ["OFF1", "OFF2"] && cands.first?.bornMatches == true && c.details(inv.id).officerID.isEmpty,
           "officer_candidates_shown_not_linked")
@@ -129,7 +132,8 @@ private let noTags = ItemTags(primary: nil, others: [])
     c.setNewsMuted(inv.id, true)
     check(c.updates(inv.id).isEmpty && CircleCopy.watchList(store: s).first?.news == false, "news_muted_per_person")
     // Companies House directorships: kept and shown separately from news.
-    _ = c.applyEngineUpdates([EngineUpdate(seq: 6, person: inv.shortID.text, kind: "appointment", key: "ch:OFF1:123:a", title: "Director, Beta Ltd",
+    _ = try? c.applyEngineUpdates([EngineUpdate(seq: 6, // try?-ok: the checks below fail when it wasn't stored
+                                    person: inv.shortID.text, kind: "appointment", key: "ch:OFF1:123:a", title: "Director, Beta Ltd",
                                            detail: "Appointed 1 Nov 2026", url: "https://find-and-update.company-information.service.gov.uk/company/123",
                                            at: iso(circleDay(1)), match: "", born: nil, officer: nil)], now: circleDay(8))
     check(c.updates(inv.id).map(\.kind) == [.appointment], "appointments_shown_when_news_muted")

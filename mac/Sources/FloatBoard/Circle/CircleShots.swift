@@ -74,7 +74,7 @@ import SwiftUI
             c.record([ExchangeInput(channel: .gmail, direction: .incoming, at: now - 40 * day, handle: e, name: "Ivy Example", ref: "me@example.com"),
                       ExchangeInput(channel: .gmail, direction: .outgoing, at: now - 38 * day, handle: e, ref: "me@example.com"),
                       ExchangeInput(channel: .whatsapp, direction: .incoming, at: now - 5 * day, handle: w, name: "Ivy")])
-            c.applyEngineUpdates([
+            _ = try? c.applyEngineUpdates([ // try?-ok: snapshot fixtures; a failure shows as a missing row in the shot
                 EngineUpdate(seq: 1, person: ivy.shortID.text, kind: "news_person", key: "s:n1", title: "Ivy Example joins the board of Beta Payments",
                              detail: "The Paper", url: "https://example.com/n1", at: ISO8601DateFormatter().string(from: now - 3 * day), match: "possible", born: nil, officer: nil),
                 EngineUpdate(seq: 2, person: ivy.shortID.text, kind: "news_person", key: "s:n2", title: "Ivy Example wins village bake-off", detail: "Village News",

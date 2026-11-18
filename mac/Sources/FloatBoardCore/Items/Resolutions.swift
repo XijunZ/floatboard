@@ -651,8 +651,6 @@ public enum ResolutionNudges {
         return window + overdue.sorted { ($0.interval.start, $0.level == .quarter ? 0 : 1) < ($1.interval.start, $1.level == .quarter ? 0 : 1) }
     }
 
-    /// The first open review (the Resolutions tab's banner).
-    @MainActor public static func openReview(store: Store, now: Date) -> GoalPeriod? { openReviews(store: store, now: now).first }
 
     /// Nudges to give now: open reviews not nudged for their period yet, outside quiet hours.
     @MainActor public static func due(store: Store, now: Date) -> [Due] {
