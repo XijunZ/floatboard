@@ -20,11 +20,7 @@ import SQLite3
 }
 
 @MainActor private func integrationStore(_ root: URL, _ name: String) -> Store? {
-    do {
-        let s = Store(db: try DB(url: root.appendingPathComponent(name)))
-        for m in Module.allCases { s.setModule(m, on: true) }
-        return s
-    } catch { check(false, "integration setup \(name): \(error)"); return nil }
+    checkStore(root, name, modules: Module.allCases)
 }
 
 @MainActor private func integrationLinkChecks(_ root: URL) {
@@ -562,8 +558,7 @@ func integrationRebindingLiveChecks() async {
 /// Round 13 (J2): a second review answer from the phone with different words is kept as another review jot; the same words
 /// again (a repeat) add nothing.
 @MainActor func secondReviewChecks() {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-review2-\(UUID().uuidString)")
-    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    let root = checkFolder("fb-review2")
     defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
     guard let s = integrationStore(root, "review2.sqlite") else { return }
     DecisionsArea.registerCore()
@@ -578,8 +573,7 @@ func integrationRebindingLiveChecks() async {
 
 /// Round 13 (minor): a screened version whose decision couldn't be saved is not marked screened (it is read again).
 @MainActor func screeningRecordFailureChecks() {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-screenfail-\(UUID().uuidString)")
-    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    let root = checkFolder("fb-screenfail")
     defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
     guard let s = integrationStore(root, "screenfail.sqlite") else { return }
     DecisionsArea.registerCore()

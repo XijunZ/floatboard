@@ -31,10 +31,7 @@ private func day(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 12) -> Date {
 private let nov17 = day(2026, 11, 17)
 
 @MainActor private func goalsStore(_ root: URL, _ name: String) -> Store? {
-    guard let s = foundationStore(root, name) else { return nil }
-    s.setModule(.resolutions, on: true)
-    s.setModule(.jots, on: true)
-    return s
+    checkStore(root, name, modules: [.resolutions, .jots])
 }
 
 @MainActor private func make(_ r: ResolutionStore, _ level: GoalLevel, _ key: String, _ title: String, parent: Int64? = nil) -> Goal? {

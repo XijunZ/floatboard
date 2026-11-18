@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { ensureFathomHook } from "../src/routes/sources";
+import { encrypt } from "../src/lib/crypto";
 
 export const BASE = "https://engine.test";
 
@@ -11,14 +12,20 @@ export function call(path: string, init: RequestInit & { key?: string } = {}): P
   return (exports as any).default.fetch(new Request(BASE + path, { ...init, headers }));
 }
 
-/** Create a user through the admin endpoint and return their key. */
-export async function newUser(name: string): Promise<{ id: string; key: string }> {
+/** Create a user through the admin endpoint and return their key. Options: a stored Claude key (`claudeKey`) and an ntfy
+ *  topic (`ntfyTopic`), the two set-ups most tests repeat. */
+export async function newUser(name: string, opts: { claudeKey?: string; ntfyTopic?: string } = {}): Promise<{ id: string; key: string }> {
   const r = await call("/admin/users", {
     method: "POST",
     headers: { "X-Admin-Key": "admin-test-key" },
     body: JSON.stringify({ name }),
   });
-  return r.json();
+  const u = await r.json<{ id: string; key: string }>();
+  if (opts.claudeKey !== undefined) {
+    await env.DB.prepare("UPDATE users SET anthropic_key_enc=? WHERE id=?").bind(await encrypt(env as any, opts.claudeKey), u.id).run();
+  }
+  if (opts.ntfyTopic !== undefined) await env.DB.prepare("UPDATE users SET ntfy_topic=? WHERE id=?").bind(opts.ntfyTopic, u.id).run();
+  return u;
 }
 
 /** The user's private Fathom webhook path (created on first use). */
