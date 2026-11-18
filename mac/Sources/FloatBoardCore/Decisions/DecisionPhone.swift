@@ -177,3 +177,14 @@ public struct PhoneDecisionAction: Codable, Equatable {
         store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", ["decisions.phone_hash.\(connector)", hash]) }
     }
 }
+
+/// What this Mac remembers having sent through a connector (round 13, J4): forgotten when the connector is added again or
+/// moved to another engine, so the new engine gets everything.
+@MainActor public enum ConnectorMemory {
+    public static func forget(connector id: String, store: Store) {
+        store.perform {
+            try store.db.run("DELETE FROM meta WHERE key=?", ["decisions.phone_hash.\(id)"])
+            try store.db.run("DELETE FROM meta WHERE key=?", [JotsSyncCore.engineKey])
+        }
+    }
+}

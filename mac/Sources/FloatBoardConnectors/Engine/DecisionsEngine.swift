@@ -199,7 +199,7 @@ extension ConnectorClient {
             let enc = JSONEncoder()
             enc.outputFormatting = [.sortedKeys]   // a stable hash: key order is otherwise not guaranteed
             let data = try enc.encode(copy)
-            let hash = SHA256.hash(data: data + Data(client.engineAddress.utf8)).map { String(format: "%02x", $0) }.joined()
+            let hash = SHA256.hash(data: data + Data(client.accountFingerprint.utf8)).map { String(format: "%02x", $0) }.joined()
             if hash != DecisionPhone.sentHash(store: store, connector: id) {
                 try await client.putDecisions(copy)
                 DecisionPhone.setSentHash(hash, store: store, connector: id)
