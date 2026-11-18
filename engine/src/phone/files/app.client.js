@@ -116,6 +116,7 @@
     if (!r.ok) {
       var err = new Error((data && typeof data.error === "string" && data.error) || "Something went wrong. Please try again.");
       err.status = r.status;
+      if (data && typeof data.id === "string") err.id = data.id;   // the one action a refused batch names (Decisions)
       throw err;
     }
     return data || {};

@@ -3,7 +3,7 @@ import FloatBoardCore
 import SwiftUI
 
 /// "Make decision" on selected text (features §4 D2): a 4-field form (decision, why, expected outcome, confidence), with type
-/// and alternatives below. It opens filled in by code from the selection; Claude (Haiku, from the selected text only) then
+/// and alternatives below. It opens filled in by code from the selection; Claude (Haiku: the selected text, and the note around it only for the decision line and why) then
 /// fills the fields you have not touched. Save records it, linked to where the text came from.
 struct MakeDecisionForm: View {
     let request: MakeDecisionRequest
@@ -93,7 +93,7 @@ struct MakeDecisionForm: View {
             if !touched.contains("confidence") { confidence = f.confidence }
             if !touched.contains("type") { type = f.type }
             if !touched.contains("alternatives") { alternatives = f.alternatives }
-            note = "Filled in by Claude from the selected text only: check before saving."
+            note = "Filled in by Claude from the selected text (the note around it only for the decision and why): check before saving."
         } catch {
             note = "Claude couldn't fill this in; filled in from the selection."
             store.activity("decisions", .warning, "Couldn't fill the decision form", detail: "\(error)")
