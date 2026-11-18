@@ -158,3 +158,74 @@ describe("jots on the phone: page and manifest", () => {
     expect(m.share_target).toEqual({ action: "/app/", method: "GET", params: { title: "share_title", text: "share_text", url: "share_url" } });
   });
 });
+
+describe("jots on the phone: the draft and the undo bar belong to one account (Claude review, round 12)", () => {
+  function page(account: () => string | null) {
+    const stored: Record<string, any> = {};
+    const els: Record<string, any> = {};
+    const el = (id: string) => (els[id] ??= { id, value: "", hidden: true, textContent: "", listeners: {} as Record<string, Function[]>,
+      addEventListener(t: string, f: Function) { (this.listeners[t] ??= []).push(f); },
+      removeEventListener(t: string, f: Function) { this.listeners[t] = (this.listeners[t] ?? []).filter((x: Function) => x !== f); },
+      appendChild() {}, replaceChildren() {}, focus() {} });
+    const h = { $: el, el: () => ({ appendChild() {}, addEventListener() {} }), toast: () => {}, newId: () => "id-" + Math.random().toString(36).slice(2, 10),
+      offline: () => true, SignedOut: class extends Error {}, store: (k: string, v: any) => { if (v == null) delete stored[k]; else stored[k] = v; },
+      load: (k: string) => stored[k] ?? null, account, modules: () => ({ jots: true }), zone: () => "Europe/London", openSheet: () => {}, closeSheet: () => {},
+      stamp: () => ({ gen: 0, account: account() }), sameSession: (s: any) => !!s.account && s.account === account(),
+      api: () => new Promise(() => {}) };
+    return { h, stored, el };
+  }
+
+  it("a_draft_typed_under_one_account_is_never_shown_to_another", () => {
+    let account: string | null = "A";
+    const p = page(() => account);
+    const screen = L.JotsScreen(p.h);
+    screen.restore();
+    screen.wire();
+    const box = p.el("jot-text");
+    box.value = "A's private thought";
+    box.listeners.input.forEach((f: Function) => f());
+    expect(p.stored["floatboard.jotdraft"]).toEqual({ account: "A", text: "A's private thought" });
+    // Signed out, then B signs in on the same phone.
+    screen.drop();
+    expect(box.value).toBe("");
+    account = "B";
+    screen.restore();
+    expect(box.value).toBe("");
+    expect(JSON.stringify(p.stored)).not.toContain("A's private thought");
+  });
+
+  it("a_draft_comes_back_for_its_own_account_only", () => {
+    const p = page(() => "A");
+    p.stored["floatboard.jotdraft"] = { account: "A", text: "half a thought" };
+    const screen = L.JotsScreen(p.h);
+    screen.wire();
+    screen.restore();
+    expect(p.el("jot-text").value).toBe("half a thought");
+    const q = page(() => "B");
+    q.stored["floatboard.jotdraft"] = { account: "A", text: "half a thought" };
+    const other = L.JotsScreen(q.h);
+    other.wire();
+    other.restore();
+    expect(q.el("jot-text").value).toBe("");
+    const r = page(() => "A");
+    r.stored["floatboard.jotdraft"] = "an old draft with no account";   // from before this fix: never shown
+    const old = L.JotsScreen(r.h);
+    old.wire();
+    old.restore();
+    expect(r.el("jot-text").value).toBe("");
+  });
+
+  it("the_delete_undo_bar_is_dropped_on_an_account_switch", () => {
+    let account: string | null = "A";
+    const p = page(() => account);
+    const screen = L.JotsScreen(p.h);
+    screen.restore();
+    screen.remove({ key: "J-1", text: "x", kind: "jot", tags: [], added: new Date().toISOString() });
+    expect(p.el("undo").hidden).toBe(false);
+    expect(p.el("undo-btn").listeners.click?.length).toBe(1);
+    screen.drop();
+    account = "B";
+    expect(p.el("undo").hidden).toBe(true);
+    expect(p.el("undo-btn").listeners.click?.length ?? 0).toBe(0);
+  });
+});
