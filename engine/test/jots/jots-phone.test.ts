@@ -178,6 +178,32 @@ describe("jots on the phone: the draft and the undo bar belong to one account (C
     return { h, stored, el };
   }
 
+  it("a_save_the_phone_cannot_keep_is_not_reported_as_saved_and_keeps_the_text", () => {
+    const p = page(() => "A");
+    let full = false;
+    const toasts: string[] = [];
+    (p.h as any).toast = (t: string) => toasts.push(t);
+    (p.h as any).storeDurable = (k: string, v: any) => { if (full) return false; p.h.store(k, v); return true; };
+    const screen = L.JotsScreen(p.h);
+    screen.restore();
+    screen.wire();
+    const box = p.el("jot-text");
+    box.value = "a thought that must not vanish";
+    box.listeners.input.forEach((f: Function) => f());
+    full = true;   // storage full: the queue can't be kept
+    p.el("jot-save").listeners.click.forEach((f: Function) => f());
+    expect(box.value).toBe("a thought that must not vanish");
+    expect(p.stored["floatboard.jotdraft"]?.text).toBe("a thought that must not vanish");
+    expect(toasts).not.toContain("Saved");
+    expect(p.stored["floatboard.jotqueue"]).toBeUndefined();
+    expect(screen.add("shared text")).toBeNull();
+    full = false;
+    p.el("jot-save").listeners.click.forEach((f: Function) => f());
+    expect(box.value).toBe("");
+    expect(toasts).toContain("Saved");
+    expect(p.stored["floatboard.jotqueue"].actions.map((a: any) => a.text)).toEqual(["a thought that must not vanish"]);
+  });
+
   it("a_draft_typed_under_one_account_is_never_shown_to_another", () => {
     let account: string | null = "A";
     const p = page(() => account);
