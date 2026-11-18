@@ -30,6 +30,7 @@ public enum Handles {
         guard !t.isEmpty else { return nil }
         switch kind {
         case .phone:
+            if t.contains("@") { return nil }   // a WhatsApp id ("<digits>@lid", a chat id) is never a phone number
             var d = String(t.filter(\.isNumber))
             if t.hasPrefix("+") { /* already international */ }
             else if d.hasPrefix("00") { d.removeFirst(2) }
@@ -52,6 +53,12 @@ public enum Handles {
     }
 
     /// A WhatsApp chat id as a handle: its phone number when it has one, else the id itself.
+    /// True for a WhatsApp linked id ("<digits>@lid"): the contact chose not to share a number.
+    public static func isLinkedID(_ h: Handle) -> Bool { h.kind == .whatsapp && h.value.hasSuffix("@lid") }
+
+    /// How a handle is shown to the owner: a linked id in words (its digits are not a phone number), the rest as stored.
+    public static func display(_ h: Handle) -> String { isLinkedID(h) ? "WhatsApp contact (no number shared)" : h.value }
+
     public static func fromWhatsApp(_ jid: String) -> Handle? {
         let j = jid.lowercased()
         if j.hasSuffix("@s.whatsapp.net") {
