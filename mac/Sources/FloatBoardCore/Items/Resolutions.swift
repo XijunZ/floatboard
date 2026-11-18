@@ -281,9 +281,8 @@ public struct GoalProgress: Equatable {
         guard c.status == .active else { return "\(c.shortID.text) was reviewed and stays as it was." }
         if let parent, let r = parentRefusal(level: c.level, period: c.period, child: child, parent: parent) { return r.message }
         store.perform {
-            for old in parentLinks(of: child) where old.number != parent {
-                try deleteLink(c.shortID, old)
-            }
+            // Every parent link this goal has (visible or hidden by a delete), not just the newest: no stale parent can come back.
+            try Self.deleteParentLinksRow(store, child: c.shortID, except: parent.map { ShortID(kind: .resolution, number: $0) })
             if let parent {
                 try store.linkRow(c.shortID, ShortID(kind: .resolution, number: parent), kind: .serves, madeBy: .manual, actor: .user, now: now)
             }
@@ -514,6 +513,21 @@ public struct GoalProgress: Equatable {
         return try store.db.run("""
             INSERT INTO resolutions(level, period, title, notes, status, carried_from, position, source, added, updated) VALUES(?,?,?,?,?,?,?,?,?,?)
             """, [level.rawValue, period.key, title, notes, GoalStatus.active.rawValue, carriedFrom, pos, source.rawValue, now, now])
+    }
+
+    /// Deletes every `serves` link from goal `child` (as subject) to another goal, except the one to `except`. One parent per
+    /// goal; used by setParent and by Undo of a ✕ that brings a parent back (inside the caller's transaction).
+    static func deleteParentLinksRow(_ store: Store, child: ShortID, except: ShortID?) throws {
+        let c = String(child.number)
+        let rows = try store.db.query("""
+            SELECT from_type, from_id, to_type, to_id FROM links WHERE kind='serves' AND subject=? AND from_type='R' AND to_type='R'
+            AND (from_id=? OR to_id=?)
+            """, [child.text, c, c]) { (DB.text($0, 0), DB.text($0, 1), DB.text($0, 2), DB.text($0, 3)) }
+        for r in rows {
+            let other = r.1 == c ? r.3 : r.1
+            if let except, other == String(except.number) { continue }
+            try store.db.run("DELETE FROM links WHERE from_type=? AND from_id=? AND to_type=? AND to_id=?", [r.0, r.1, r.2, r.3])
+        }
     }
 
     private func deleteLink(_ a: ShortID, _ b: ShortID) throws {
