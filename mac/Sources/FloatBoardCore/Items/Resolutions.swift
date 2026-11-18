@@ -213,9 +213,22 @@ public struct GoalProgress: Equatable {
             guard try store.db.query("SELECT deleted FROM resolutions WHERE id=?", [id], { DB.int($0, 0) }).first == 1 else { return }
             try store.db.run("UPDATE resolutions SET deleted=0, updated=? WHERE id=?", [now, id])
             try store.unhideLinks(of: ShortID(kind: .resolution, number: id))
+            // A goal has one parent. A child put under another goal while this one was deleted keeps that later choice:
+            // the restored link to this goal goes. Likewise this goal keeps only its newest parent link.
+            let me = ShortID(kind: .resolution, number: id)
+            for l in store.itemLinks(of: me) where l.other.kind == .resolution && l.kind == .serves {
+                let child = l.isSubject ? me : l.other
+                let all = store.itemLinks(of: child).filter { $0.other.kind == .resolution && $0.kind == .serves && $0.isSubject }
+                guard all.count > 1 else { continue }
+                let keep = l.isSubject ? newest(all.map { ($0.other, $0.created) }) : newest(all.filter { $0.other != me }.map { ($0.other, $0.created) })
+                for p in all where p.other != keep { try deleteLink(child, p.other) }
+            }
         }
         changed()
     }
+
+    /// The most recently made of these links' other ends (a later link is a later choice).
+    private func newest(_ links: [(ShortID, Date)]) -> ShortID? { links.max { $0.1 < $1.1 }?.0 }
 
     /// Any goal by id, deleted ones too.
     public func goal(_ id: Int64) -> Goal? { read("WHERE id=?", [id]).first }
@@ -287,14 +300,16 @@ public struct GoalProgress: Equatable {
     /// The live goals sitting under this one, by period and order.
     public func children(of id: Int64) -> [Goal] {
         store.itemLinks(of: ShortID(kind: .resolution, number: id))
-            .filter { $0.other.kind == .resolution && $0.kind == .serves && !$0.isSubject }
+            .filter { $0.other.kind == .resolution && $0.kind == .serves && !$0.isSubject && parentLinks(of: $0.other.number).first?.number == id }
             .compactMap { goal($0.other.number) }.filter { !$0.deleted }
             .sorted { ($0.period.key, $0.position, $0.id) < ($1.period.key, $1.position, $1.id) }
     }
 
+    /// The goal's parent link (the newest one, should more than one ever exist, e.g. a link put back by Undo on its chip).
     private func parentLinks(of id: Int64) -> [ShortID] {
-        store.itemLinks(of: ShortID(kind: .resolution, number: id))
-            .filter { $0.other.kind == .resolution && $0.kind == .serves && $0.isSubject }.map(\.other)
+        let all = store.itemLinks(of: ShortID(kind: .resolution, number: id))
+            .filter { $0.other.kind == .resolution && $0.kind == .serves && $0.isSubject }
+        return newest(all.map { ($0.other, $0.created) }).map { [$0] } ?? []
     }
 
     private func parentRefusal(level: GoalLevel, period: GoalPeriod, child: Int64?, parent: Int64) -> GoalRefusal? {
