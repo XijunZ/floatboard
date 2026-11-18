@@ -97,17 +97,43 @@ public struct JotAck: Equatable {
                 continue
             }
             // Looked up with errors kept apart from "not here": a read that fails leaves the row waiting (never acked as gone).
-            let found: Int64?, known: Jot?
+            var found: Int64?, known: Jot?
             do {
                 found = try r.macID ?? js.jotIDOrThrow(origin: r.key)
                 known = try found.flatMap { try js.jotOrThrow($0) }
+                // A jot this Mac no longer has (an older backup was restored): one recovered earlier is found by its key.
+                if r.macID != nil, known == nil, let again = try js.jotIDOrThrow(origin: r.key) {
+                    found = again; known = try js.jotOrThrow(again)
+                }
             } catch {
                 store.activity("jots", .error, "Could not read a jot for a change from the phone; it stays on the engine and is tried again",
                                detail: "\(r.key): \(error)")
                 continue
             }
             if let id = found {
-                guard let j = known else { acks.append(JotAck(key: r.key, rev: r.rev, macID: id)); continue }
+                guard let j = known else {
+                    // Missing here: nothing with words is ever acked unsaved. It is recovered (text, earlier texts, deletion) in one
+                    // transaction under its key, then acked with the recovered jot's number; a failure leaves it waiting.
+                    guard !r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        acks.append(JotAck(key: r.key, rev: r.rev, macID: id)); continue
+                    }
+                    do {
+                        let n = try store.performThrowing { () throws -> Int64 in
+                            let n = try js.addRow(r.text, kind: JotKind(rawValue: r.kind) ?? .jot, source: ItemSource(rawValue: r.source) ?? .phone,
+                                                  origin: r.key, taskID: nil, tags: r.tags, now: r.added)
+                            if r.deleted || r.updated > r.added { try applyPhoneRow(n, r) }
+                            try js.keepInHistoryRow(n, r.versions)
+                            return n
+                        }
+                        store.activity("jots", .warning, "Recovered a jot this Mac no longer had (an older backup?) from the phone's copy",
+                                       detail: "\(ShortID(kind: .jot, number: id).text) → \(ShortID(kind: .jot, number: n).text)")
+                        acks.append(JotAck(key: r.key, rev: r.rev, macID: n))
+                    } catch {
+                        store.activity("jots", .error, "A jot from the phone is missing on this Mac and could not be recovered; it stays on the engine and is tried again",
+                                       detail: "\(r.key): \(error)")
+                    }
+                    continue
+                }
                 // History, text and deletion in ONE transaction that throws; acked only after it commits. A failure (in Activity)
                 // leaves the row waiting on the engine, which keeps its copies.
                 let newer = r.updated > j.updated

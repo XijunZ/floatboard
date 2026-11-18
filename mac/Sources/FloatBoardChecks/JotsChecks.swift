@@ -700,3 +700,23 @@ extension ISO8601DateFormatter {
           "a_tag_change_never_sends_an_old_jot_to_screening")
     check(js.changed(afterSeq: filesMark).map(\.id) == [old.id], "a_tag_change_still_counts_for_the_daily_files")
 }
+
+/// Round 18 (2): a phone edit of a jot this Mac no longer has (an older backup was restored) is never acked unsaved: the
+/// jot is recovered with its text and earlier texts, once, and the ack names the recovered jot.
+@MainActor func missingJotRecoveryChecks() {
+    let root = checkFolder("fb-recover")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = checkStore(root, "rec.sqlite", modules: [.jots]) else { return }
+    let js = JotStore(store: store), core = JotsSyncCore(store: store), t0 = Date().addingTimeInterval(-7200)
+    guard let j = js.create(text: "Original words", now: t0) else { check(false, "rec setup"); return }
+    store.performForTest("DELETE FROM jots WHERE id=\(j.id)")   // as after restoring a backup from before it
+    let edit = EngineJot(key: "J-\(j.id)", macID: j.id, text: "Edited on the phone", kind: "jot", source: "typed", added: t0, updated: t0.addingTimeInterval(600),
+                         rev: 3, versions: [EarlierText(text: "Original words", at: t0)])
+    let acks = core.apply([edit])
+    let back = acks.first.flatMap { $0.macID }.flatMap { js.jot($0) }
+    check(acks.count == 1 && back?.text == "Edited on the phone" && js.history(back?.id ?? 0).map(\.text).contains("Original words"),
+          "a_phone_edit_of_a_missing_jot_is_recovered_with_its_history_before_the_ack")
+    let again = core.apply([edit])
+    let copies = (try? store.db.query("SELECT count(*) FROM jots WHERE text='Edited on the phone'") { DB.int($0, 0) })?.first // try?-ok: nil fails the check
+    check(again.count == 1 && copies == 1, "a_recovered_jot_is_recovered_once")
+}
