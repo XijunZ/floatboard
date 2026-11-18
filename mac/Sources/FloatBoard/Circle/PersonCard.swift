@@ -56,8 +56,19 @@ struct PersonCard: View {
                 Button { confirmDelete = true } label: { Image(systemName: "trash") }.buttonStyle(.borderless).help("Delete")
             }
             HStack(spacing: 6) {
-                Text(p.tier.title).font(.system(size: 11, weight: .medium)).padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                // The tier: click to switch it here (a tick on the current one), no selecting first.
+                Menu {
+                    ForEach(PersonTier.allCases, id: \.self) { t in
+                        Button { if t != p.tier { tagProblem = CircleStore(store: store).setTier([p.id], t).first } } label: {
+                            if t == p.tier { Label(t.title, systemImage: "checkmark") } else { Text(t.title) }
+                        }
+                    }
+                } label: {
+                    Text(p.tier.title).font(.system(size: 11, weight: .medium)).padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("Change tier")
                 // The person's tags right here (owner, round 8): ✕ takes one off, + adds one to this person, no selecting first.
                 ForEach(tags, id: \.self) { t in
                     PersonTagChip(tag: t, size: 11) { tagProblem = PeopleTags.removeFrom(store: store, person: p.id, t) }
