@@ -97,9 +97,14 @@ public struct JotAck: Equatable {
                 guard let j = js.jot(id) else { acks.append(JotAck(key: r.key, rev: r.rev, macID: id)); continue }
                 js.keepInHistory(id, r.versions + (r.updated > j.updated ? [] : [EarlierText(text: r.text, at: r.updated)]))
                 if r.updated > j.updated {
-                    if !r.deleted && j.deleted { js.undoDelete(id, now: r.updated) }
-                    if r.text != j.text && !r.deleted { js.update(id, text: r.text, now: r.updated) }
-                    if r.deleted && !j.deleted { js.delete(id, now: r.updated) }
+                    // The phone's text is kept even when its last step was a delete (edit then delete before this Mac synced):
+                    // the jot takes the text first (its old text goes to the history), then the delete.
+                    let hasText = !r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if j.deleted && (!r.deleted || (hasText && r.text != j.text)) { js.undoDelete(id, now: r.updated) }
+                    if hasText && r.text != j.text { js.update(id, text: r.text, now: r.updated) }
+                    if r.deleted { js.delete(id, now: r.updated) }
+                    // Acked only once it is saved here; otherwise it stays waiting on the engine (the failure is in Activity).
+                    guard let after = js.jot(id), after.deleted == r.deleted, !hasText || after.text == r.text else { continue }
                     store.activity("jots", .info, "Took in a change from the phone", detail: j.shortID.text)
                 } else {
                     resend(id)   // this Mac's version is newer: the engine's copy gets it again

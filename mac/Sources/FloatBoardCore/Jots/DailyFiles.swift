@@ -56,6 +56,14 @@ public struct DailyFilesSettings: Codable, Equatable {
         return out
     }
 
+    /// True when FloatBoard wrote this file (its first line is the marker).
+    static func isOurs(_ file: URL) -> Bool {
+        guard let h = try? FileHandle(forReadingFrom: file) else { return false } // try?-ok: unreadable = not known to be ours, so never replaced
+        defer { try? h.close() } // try?-ok: closing a file only read
+        let head = (try? h.read(upToCount: marker.utf8.count)) ?? nil // try?-ok: unreadable = not ours
+        return head.map { String(decoding: $0, as: UTF8.self) == marker } ?? false
+    }
+
     /// Rewrites the files of every day whose jots changed since the last pass (all days at the first pass). Returns the
     /// days written or removed. Problems go to Activity; the pass is not marked done then, so it is tried again.
     @discardableResult
@@ -71,8 +79,21 @@ public struct DailyFilesSettings: Codable, Equatable {
         do {
             try FileManager.default.createDirectory(at: s.url, withIntermediateDirectories: true)
             for (key, any) in days.sorted(by: { $0.key < $1.key }) {
-                let file = s.url.appendingPathComponent(key + ".md")
+                var file = s.url.appendingPathComponent(key + ".md")
                 if let text = render(day: any) {
+                    // A day file FloatBoard did not write (no marker on its first line) is never replaced: the jots go beside it.
+                    if FileManager.default.fileExists(atPath: file.path), !Self.isOurs(file) {
+                        let beside = s.url.appendingPathComponent(key + " (FloatBoard).md")
+                        if !FileManager.default.fileExists(atPath: beside.path) {   // said once, when the jots first go beside it
+                            store.activity("jots", .warning, "\(key).md in the daily files folder was not written by FloatBoard; it was left as it is",
+                                           detail: "That day's jots are in \(beside.lastPathComponent) instead.")
+                        }
+                        guard !FileManager.default.fileExists(atPath: beside.path) || Self.isOurs(beside) else {
+                            store.activity("jots", .warning, "Could not write that day's jots: \(key).md and \(beside.lastPathComponent) were not written by FloatBoard")
+                            continue
+                        }
+                        file = beside
+                    }
                     let tmp = s.url.appendingPathComponent(".\(key).md.tmp")
                     try Data(text.utf8).write(to: tmp, options: .atomic)
                     if FileManager.default.fileExists(atPath: file.path) {
@@ -81,9 +102,12 @@ public struct DailyFilesSettings: Codable, Equatable {
                         try FileManager.default.moveItem(at: tmp, to: file)
                     }
                     done.append(key)
-                } else if let existing = try? String(contentsOf: file, encoding: .utf8), existing.hasPrefix(Self.marker) { // try?-ok: no file (or unreadable) = nothing of ours to remove
-                    try FileManager.default.removeItem(at: file)
-                    done.append(key)
+                } else {
+                    // No jots left that day: only files FloatBoard wrote go (the day file, or the one beside a file of the owner's).
+                    for f in [file, s.url.appendingPathComponent(key + " (FloatBoard).md")] where FileManager.default.fileExists(atPath: f.path) && Self.isOurs(f) {
+                        try FileManager.default.removeItem(at: f)
+                        if !done.contains(key) { done.append(key) }
+                    }
                 }
             }
             store.perform { try store.db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [Self.passKey, String(now.timeIntervalSince1970)]) }

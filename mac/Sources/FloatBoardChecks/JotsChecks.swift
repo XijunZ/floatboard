@@ -311,6 +311,13 @@ private func meetingMatchChecks() {
     if let x = js.list(JotQuery(text: "x")).first?.jot { js.delete(x.id, now: day2.addingTimeInterval(86400 + 60)) }
     files.refresh(now: day2.addingTimeInterval(86400 + 120))
     check((try? String(contentsOf: mine, encoding: .utf8)) == "my own notes", "a_file_floatboard_did_not_write_is_kept") // try?-ok: nil fails the check
+    // Codex round 2, finding 5: a day file FloatBoard did not write is never replaced; the jots go beside it and Activity says so.
+    js.add("Jot on a day with a handwritten note", now: day2.addingTimeInterval(86400 + 300))
+    files.refresh(now: day2.addingTimeInterval(86400 + 360))
+    let beside = folder.appendingPathComponent("2026-11-18 (FloatBoard).md")
+    check((try? String(contentsOf: mine, encoding: .utf8)) == "my own notes" // try?-ok: nil fails the check
+          && ((try? String(contentsOf: beside, encoding: .utf8)) ?? "").contains("Jot on a day with a handwritten note") // try?-ok: empty fails the check
+          && store.recentActivity(limit: 20).contains { $0.message.contains("2026-11-18.md") }, "a_file_floatboard_did_not_write_is_never_replaced")
 }
 
 // MARK: J11 nudge
@@ -474,6 +481,15 @@ private func dueMentionChecks() {
     check(js.history(kept.id).map(\.text) == ["Older phone words"] && js.jot(kept.id)?.text == "Kept text on the Mac", "engine_kept_texts_go_to_the_jot_history")
     check(engine.waiting.isEmpty && Set(engine.acked.compactMap { $0["key"] as? String }) == ["J-\(kept.id)", "phone:gone-1", "phone:gone-2"]
           && js.jot(origin: "phone:gone-2")?.text == "Edit of a lost capture", "changes_to_unknown_jots_are_taken_not_left_waiting")
+    // Codex round 2, finding 3: edited then deleted on the phone before this Mac synced: the latest text is kept.
+    guard let ed = js.add("Text before the phone edit", now: t0) else { return }
+    engine.waiting = [["key": "J-\(ed.id)", "mac_id": ed.id, "text": "Latest phone text", "kind": "jot", "source": "typed", "tags": [],
+                       "added": iso(t0), "updated": iso(Date()), "deleted": true, "rev": 7,
+                       "versions": [["text": "Text before the phone edit", "at": iso(t0)]]]]
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    let edited = js.jot(ed.id)
+    check(edited?.deleted == true && edited?.text == "Latest phone text" && js.history(ed.id).map(\.text).contains("Text before the phone edit")
+          && engine.waiting.isEmpty, "phone_edit_then_delete_keeps_the_latest_text")
     // Tags: asked once, in one call; a 409 (no Claude key) stops asking on that engine.
     let tagStore = jotsStore(root, "synctags.sqlite")!
     tagStore.setModule(.jots, on: true)
