@@ -358,7 +358,7 @@
         var mk = h.el("button", "btn act", "Make task");
         mk.addEventListener("click", function () {
           var text = selectionOr(j);
-          if (!queueAction({ op: "make_task", key: j.key, text: text.slice(0, 2000) })) return;
+          if (!queueAction({ op: "make_task", key: j.key, jot_added: j.added, text: text.slice(0, 2000) })) return;
           h.closeSheet();
           h.toast("Task \"" + selectionTitle(text) + "\" goes to your Mac.");
         });
@@ -378,7 +378,7 @@
         var cl = h.el("button", "btn act", "Clean up");
         cl.addEventListener("click", function () {
           cleanup(j.text, function (cleaned) {
-            if (queueAction({ op: "edit", key: j.key, text: cleaned })) h.toast("Cleaned. Your text is in its history.");
+            if (queueAction({ op: "edit", key: j.key, jot_added: j.added, text: cleaned })) h.toast("Cleaned. Your text is in its history.");
           });
         });
         sheet.appendChild(cl);
@@ -399,7 +399,7 @@
         ok.addEventListener("click", function () {
           var t = box.value.trim();
           if (!t || t === j.text) { h.closeSheet(); return; }
-          if (tooLong(t) || !queueAction({ op: "edit", key: j.key, text: t })) return;   // the sheet and its text stay
+          if (tooLong(t) || !queueAction({ op: "edit", key: j.key, jot_added: j.added, text: t })) return;   // the sheet and its text stay
           h.closeSheet();
           h.toast("Saved");
         });
@@ -409,7 +409,7 @@
     }
 
     function remove(j) {
-      var a = queueAction({ op: "delete", key: j.key });
+      var a = queueAction({ op: "delete", key: j.key, jot_added: j.added });
       if (!a) return;
       h.closeSheet();
       try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { /* no vibration */ }
@@ -422,7 +422,7 @@
         cancel();
         var cur = queue.filter(function (x) { return x.id === a.id; })[0] || a;
         var step = undoJotDelete(queue, jotAttempted(cur) || syncing ? Object.assign({}, cur, { attempted: true }) : cur);
-        if (step.restore) queueAction({ op: "restore", key: j.key });
+        if (step.restore) queueAction({ op: "restore", key: j.key, jot_added: j.added });
         else { queue = step.queue; saveQueue(); render(); }
       };
       var cancel = function () { btn.removeEventListener("click", undo, true); bar.hidden = true; clearTimeout(undoTimer); cancelUndo = null; };
