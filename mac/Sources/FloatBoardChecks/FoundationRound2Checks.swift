@@ -229,7 +229,8 @@ private struct Refused: Error {}
     struct Refused: Error {}
     let d = ReminderDelivery(store: store, claim: { _ in .mine }, schedule: { r in if fail { throw Refused() }; shown.append(r.id) },
                              release: { rid in released.append(rid); return true }, phoneAvailable: { false })
-    _ = await d.tick(now: now)                                   // claimed here; macOS refused to show it
+    _ = await d.tick(now: now.addingTimeInterval(1))             // claimed here; macOS refused to show it (a second after its time:
+                                                                 // the stored time can round a hair later than `now`)
     fail = false
     let later = now.addingTimeInterval(ReminderBudget.phoneGrace + 60)
     _ = await d.tick(now: later)                                 // the phone's turn: handed back
