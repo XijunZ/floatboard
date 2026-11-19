@@ -219,8 +219,8 @@
       sheet.appendChild(text);
       sheet.appendChild(open);
       sheet.appendChild(el("p", "hint", "Written by Claude; never sent by itself. Check it before you send."));
-      api("/app/api/circle/draft", { method: "POST", body: { person: p.id } }).then(function (r) {
-        if (!sameSession(asked)) return;   // signed out or another account meanwhile: the draft is dropped
+      api("/app/api/circle/draft", { method: "POST", body: { person: p.id, account: asked.account } }).then(function (r) {
+        if (!sameSession(asked, r.account)) return;   // signed out or another account meanwhile (even in another tab): dropped
         text.value = r.draft || "";
         text.hidden = false; open.hidden = false;
         status.textContent = "Edit it, then open it in the app to send.";

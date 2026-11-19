@@ -145,3 +145,10 @@ describe("circle on the phone: tiers", () => {
   });
 });
 
+describe("circle on the phone: drafts are bound to the account", () => {
+  it("the_draft_request_names_the_account_and_the_answer_is_checked", () => {
+    expect(CIRCLE_JS).toMatch(/\/app\/api\/circle\/draft", \{ method: "POST", body: \{ person: p\.id, account: asked\.account \}/);
+    expect(CIRCLE_JS).toMatch(/if \(!sameSession\(asked, r\.account\)\) return;/);
+  });
+});
+
