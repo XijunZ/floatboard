@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
 import { BASE, call, fathomHookPath, newUser } from "../helpers";
 import { pairPhone } from "../phone-helpers";
-import { purgeJots, runJotNudges, setJotsPhoneRaceHook, setJotsPutRaceHook } from "../../src/jots/copies";
+import { purgeJots, runJotNudges, setJotsPhoneRaceHook, setJotsPutRaceHook, setJotsRecoverRaceHook } from "../../src/jots/copies";
 
 // Jots (docs/superpowers/specs/2026-11-17-jots-design.md §4): the 30-day online copy, phone captures and edits waiting for
 // the Mac (newest wins), meeting notes from Fathom, and the daily nudge on the phone.
@@ -446,6 +446,75 @@ describe("jots: reused numbers, phone actions and recovered copies", () => {
     expect((await phoneJots(u.cookie)).jots.find((j: any) => j.key === "J-7")?.text).toBe("A2");
     await phoneSend(u.cookie, [{ id: "del-q0005", op: "delete", key: "J-7", jot_added: a, made_at: iso(Date.now() - 10_000) }]);
     expect(await row(u.id, "J-7")).toMatchObject({ deleted: 1 });
+  });
+});
+
+// Round 21 (Codex 7).
+describe("jots: capture identity, concurrent recoveries, retries", () => {
+  const rowOf = (uid: string, key: string) => env.DB.prepare("SELECT key, text_enc, deleted, waiting, added, rev FROM jot_copies WHERE user_id=? AND key=?").bind(uid, key).first<any>();
+
+  for (const skewMs of [5 * 60_000, -5 * 60_000, 100]) {
+    it(`a_queued_capture_is_edited_and_deleted_whatever_the_clock_skew_${skewMs}`, async () => {
+      const u = await setup("Skew " + skewMs);
+      const made = iso(Date.now() - 30_000);
+      const sentAt = iso(Date.now() + skewMs);   // the phone's clock is off by skewMs: the engine corrects the times it was given
+      // The capture, then an edit and a delete made on the phone before it ever synced (each naming the capture's own time).
+      await phoneSend(u.cookie, [{ id: "cap-sk001", op: "add", text: "First words", made_at: made }], sentAt);
+      await phoneSend(u.cookie, [{ id: "edt-sk001", op: "edit", key: "phone:cap-sk001", jot_added: made, text: "Second words", made_at: iso(Date.now() - 20_000) }], sentAt);
+      let all = (await env.DB.prepare("SELECT key FROM jot_copies WHERE user_id=?").bind(u.id).all<any>()).results.map((r: any) => r.key);
+      expect(all).toEqual(["phone:cap-sk001"]);   // no duplicate
+      expect((await waiting(u.key)).jots[0].text).toBe("Second words");
+      const r = await (await phoneSend(u.cookie, [{ id: "del-sk001", op: "delete", key: "phone:cap-sk001", jot_added: made, made_at: iso(Date.now() - 10_000) }], sentAt)).json<any>();
+      expect(r.accepted).toContain("del-sk001");
+      expect((await rowOf(u.id, "phone:cap-sk001")).deleted).toBe(1);
+    });
+  }
+
+  it("an_old_phone_change_to_a_capture_without_identity_still_applies", async () => {
+    const u = await setup("Legacy capture");
+    const made = iso(Date.now() - 30_000);
+    await phoneSend(u.cookie, [{ id: "cap-lg001", op: "add", text: "Words", made_at: made }], iso(Date.now() + 10 * 60_000));
+    const r = await (await phoneSend(u.cookie, [{ id: "del-lg001", op: "delete", key: "phone:cap-lg001", made_at: iso(Date.now() - 20 * 60_000) }],
+      iso(Date.now() - 20 * 60_000 + 30_000))).json<any>();
+    expect(r.accepted).toContain("del-lg001");
+    expect((await rowOf(u.id, "phone:cap-lg001")).deleted).toBe(1);
+  });
+
+  it("two_stale_edits_racing_for_the_same_recovery_both_survive", async () => {
+    const u = await setup("Race recover");
+    const a = iso(Date.now() - 3 * DAY), b = iso(Date.now() - 60_000);
+    await putJots(u.key, { jots: [jot(7, { text: "B", added: b, updated: b })] });
+    // The second edit lands while the first is between its read and its write: both find no recovery copy.
+    let once = false;
+    setJotsRecoverRaceHook(async () => {
+      if (once) return; once = true;
+      await phoneSend(u.cookie, [{ id: "edt-rc002", op: "edit", key: "J-7", jot_added: a, text: "second edit", made_at: iso(Date.now() - 20_000) }]);
+    });
+    try {
+      const r = await (await phoneSend(u.cookie, [{ id: "edt-rc001", op: "edit", key: "J-7", jot_added: a, text: "first edit", made_at: iso(Date.now() - 30_000) }])).json<any>();
+      expect(r.accepted).toContain("edt-rc001");
+    } finally { setJotsRecoverRaceHook(undefined); }
+    const w = (await waiting(u.key)).jots.find((j: any) => j.key === `J-7~${Date.parse(a)}`);
+    const texts = [w?.text, ...(w?.versions ?? []).map((v: any) => v.text)];
+    expect(texts).toContain("first edit");
+    expect(texts).toContain("second edit");
+  });
+
+  it("a_delete_retried_after_the_key_changed_hands_never_deletes_the_replacement", async () => {
+    const u = await setup("Retry identity");
+    const a = iso(Date.now() - 3 * DAY), b = iso(Date.now() - 60_000);
+    await putJots(u.key, { jots: [jot(7, { text: "A", added: a, updated: a })] });
+    // While the phone's delete of A is between its read and its write, the restored Mac uploads its new 7 (B): A moves apart.
+    let once = false;
+    setJotsPhoneRaceHook(async () => {
+      if (once) return; once = true;
+      await putJots(u.key, { jots: [jot(7, { text: "B", added: b, updated: b })] });
+    });
+    try {
+      await phoneSend(u.cookie, [{ id: "del-rt001", op: "delete", key: "J-7", jot_added: a, made_at: iso(Date.now() - 10_000) }]);
+    } finally { setJotsPhoneRaceHook(undefined); }
+    expect((await rowOf(u.id, "J-7")).deleted).toBe(0);                                     // the replacement is untouched
+    expect((await rowOf(u.id, `J-7~${Date.parse(a)}`))?.deleted).toBe(1);                   // the delete reached A
   });
 });
 

@@ -106,6 +106,9 @@ export function setJotsPutRaceHook(f: (() => Promise<void>) | undefined) { putRa
 let phoneRaceHook: (() => Promise<void>) | undefined;
 /** Tests only: runs between a phone change's read of the copy and its write (a Mac upload landing in between). */
 export function setJotsPhoneRaceHook(f: (() => Promise<void>) | undefined) { phoneRaceHook = f; }
+let recoverRaceHook: (() => Promise<void>) | undefined;
+/** Tests only: runs between a stale edit's look for its recovery copy and its insert (another stale edit landing in between). */
+export function setJotsRecoverRaceHook(f: (() => Promise<void>) | undefined) { recoverRaceHook = f; }
 
 const PUT_TRIES = 6;
 /**
@@ -115,8 +118,8 @@ const PUT_TRIES = 6;
  */
 function moveApartStmts(env: Env, userId: string, have: { key: string; added: string; rev: number }, clearNumber: boolean): { apart: string; stmts: D1PreparedStatement[] } {
   const apart = /^J-\d+$/.test(have.key) ? `${have.key}~${Date.parse(have.added)}` : have.key;
-  const stmts = [env.DB.prepare(`UPDATE jot_copies SET key=?, ${clearNumber ? "mac_id=NULL, waiting=1, " : ""}rev=rev WHERE user_id=? AND key=? AND rev=?`)
-    .bind(apart, userId, have.key, have.rev)];
+  const stmts = [env.DB.prepare(`UPDATE jot_copies SET key=?, ${clearNumber ? "mac_id=NULL, waiting=1, " : ""}rev=rev WHERE user_id=? AND key=? AND rev=? AND added=?`)
+    .bind(apart, userId, have.key, have.rev, have.added)];
   if (apart !== have.key) {
     stmts.push(env.DB.prepare("UPDATE jot_copy_versions SET key=? WHERE user_id=? AND key=? AND changes() > 0").bind(apart, userId, have.key));
     stmts.push(env.DB.prepare("UPDATE jot_copies SET ref=? WHERE user_id=? AND ref=? AND kind LIKE 'action:%'").bind(apart, userId, have.key));
@@ -154,7 +157,7 @@ async function putOne(env: Env, userId: string, j: MacJot, now: string): Promise
         .first<{ key: string; mac_id: number | null; added: string; rev: number }>();
       if (occ) {
         if (occ.mac_id === null && sameAdded(occ.added, j.added)) {
-          await env.DB.prepare("UPDATE jot_copies SET mac_id=? WHERE user_id=? AND key=? AND rev=? AND mac_id IS NULL").bind(j.id, userId, occ.key, occ.rev).run();
+          await env.DB.prepare("UPDATE jot_copies SET mac_id=? WHERE user_id=? AND key=? AND rev=? AND added=? AND mac_id IS NULL").bind(j.id, userId, occ.key, occ.rev, occ.added).run();
         } else {
           try { await env.DB.batch(moveApartStmts(env, userId, occ, false).stmts); } catch { /* read again */ }
         }
@@ -168,7 +171,7 @@ async function putOne(env: Env, userId: string, j: MacJot, now: string): Promise
     }
     if (have.waiting && Date.parse(have.updated) > Date.parse(j.updated)) {
       // A newer phone change waits for the Mac: keep its text; the tags are the Mac's (the phone does not edit them).
-      const r = await env.DB.prepare("UPDATE jot_copies SET tags=? WHERE user_id=? AND key=? AND rev=?").bind(JSON.stringify(j.tags), userId, have.key, have.rev).run();
+      const r = await env.DB.prepare("UPDATE jot_copies SET tags=? WHERE user_id=? AND key=? AND rev=? AND added=?").bind(JSON.stringify(j.tags), userId, have.key, have.rev, have.added).run();
       if (r.meta.changes) return true;
       continue;
     }
@@ -177,11 +180,11 @@ async function putOne(env: Env, userId: string, j: MacJot, now: string): Promise
     const stmts = [];
     if (replaces) {
       stmts.push(env.DB.prepare(`INSERT INTO jot_copy_versions(user_id,key,rev,text_enc,at) SELECT user_id, key, rev+1, text_enc, updated FROM jot_copies
-          WHERE user_id=? AND key=? AND rev=?`).bind(userId, have.key, have.rev));
+          WHERE user_id=? AND key=? AND rev=? AND added=?`).bind(userId, have.key, have.rev, have.added));
     }
     stmts.push(env.DB.prepare(`UPDATE jot_copies SET text_enc=?, kind=?, source=?, tags=?, added=?, updated=?, deleted=?, mac_saved_at=?, rev=rev+?,
-        waiting=CASE WHEN ${hasVersions} THEN 1 ELSE 0 END WHERE user_id=? AND key=? AND rev=?`)
-      .bind(enc, j.kind, j.source, JSON.stringify(j.tags), j.added, j.updated, j.deleted ? 1 : 0, now, replaces ? 1 : 0, userId, have.key, have.rev));
+        waiting=CASE WHEN ${hasVersions} THEN 1 ELSE 0 END WHERE user_id=? AND key=? AND rev=? AND added=?`)
+      .bind(enc, j.kind, j.source, JSON.stringify(j.tags), j.added, j.updated, j.deleted ? 1 : 0, now, replaces ? 1 : 0, userId, have.key, have.rev, have.added));
     const res = await env.DB.batch(stmts);
     if (res[res.length - 1].meta.changes) return true;
   }
@@ -331,28 +334,42 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
   // `<key>~<added ms>` is used instead, an edit with nowhere to go is kept as a jot of its own, and a delete or restore
   // with nowhere to go is dropped.
   const jotAdded = isISO(a.jot_added) ? iso(Date.parse(a.jot_added)) : null;
-  const isTarget = (r: { added: string }) => jotAdded ? sameAdded(r.added, jotAdded) : Date.parse(r.added) <= Date.parse(made) + 60_000;
-  const apartKey = jotAdded ? `${a.key}~${Date.parse(jotAdded)}` : null;
-  if (row && !isTarget(row)) {
-    const apart = apartKey ? await env.DB.prepare("SELECT key, updated, added, deleted, rev, text_enc FROM jot_copies WHERE user_id=? AND key=?")
-      .bind(userId, apartKey).first<{ key: string; updated: string; added: string; deleted: number; rev: number; text_enc: string }>() : null;
-    if (apart) row = apart;
-    else if (a.op === "edit") {
-      const key = apartKey ?? `${a.key}~${Date.parse(made)}`;
-      await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,mac_id,text_enc,kind,source,tags,added,updated,deleted,waiting,rev)
-          VALUES(?,?,NULL,?,'jot','phone','[]',?,?,0,1,1)`).bind(userId, key, await encrypt(env, text), jotAdded ?? made, made), seenIfChanged]);
-      return "ok";
-    } else if (a.op === "make_task" || a.op === "make_decision") {
-      row = null;   // linked to nothing rather than to another jot
-    } else {
-      await seen.run();
-      return drop("this jot changed on your Mac; nothing was changed");
+  // Only a Mac number (`J-n`) can be reused (after the Mac restored a backup). A capture's key (`phone:<its id>`) names
+  // that capture for life, whatever added time the engine gave it after correcting the phone's clock (round 21).
+  const byNumber = /^J-\d+$/.test(a.key);
+  const isTarget = (r: { added: string }) => !byNumber || (jotAdded ? sameAdded(r.added, jotAdded) : Date.parse(r.added) <= Date.parse(made) + 60_000);
+  const apartKey = byNumber && jotAdded ? `${a.key}~${Date.parse(jotAdded)}` : null;
+  const recoveryKey = apartKey ?? `${a.key}~${Date.parse(made)}`;
+  type Row = { key: string; updated: string; added: string; deleted: number; rev: number; text_enc: string };
+  const readKey = (k: string) => env.DB.prepare("SELECT key, updated, added, deleted, rev, text_enc FROM jot_copies WHERE user_id=? AND key=?").bind(userId, k).first<Row>();
+  // The copy isn't the jot the phone acted on: the copy set apart for it if there is one; else an edit is kept as a jot of
+  // its own (made here, or found when another change made it meanwhile, then applied with history); a delete or restore
+  // with nowhere to go is dropped; Make task links to nothing.
+  let staleRef: string | null = null;
+  const redirect = async (): Promise<{ row: Row | null } | { done: "ok" | Dropped }> => {
+    const apart = apartKey ? await readKey(apartKey) : null;
+    if (apart) return { row: apart };
+    if (a.op === "edit") {
+      if (recoverRaceHook) await recoverRaceHook();
+      const [ins] = await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,mac_id,text_enc,kind,source,tags,added,updated,deleted,waiting,rev)
+          VALUES(?,?,NULL,?,'jot','phone','[]',?,?,0,1,1)`).bind(userId, recoveryKey, await encrypt(env, text), jotAdded ?? made, made), seenIfChanged]);
+      if (ins.meta.changes) return { done: "ok" };
+      const found = await readKey(recoveryKey);
+      return found ? { row: found } : { done: drop("busy") };
     }
+    if (a.op === "make_task" || a.op === "make_decision") { staleRef = recoveryKey; return { row: null }; }
+    await seen.run();
+    return { done: drop("this jot changed on your Mac; nothing was changed") };
+  };
+  if (row && !isTarget(row)) {
+    const r = await redirect();
+    if ("done" in r) return r.done;
+    row = r.row;
   }
   if (a.op === "make_task" || a.op === "make_decision") {
     await env.DB.batch([env.DB.prepare(`INSERT OR IGNORE INTO jot_copies(user_id,key,text_enc,kind,source,tags,added,updated,waiting,rev,ref)
         VALUES(?,?,?,?,'phone','[]',?,?,1,1,?)`).bind(userId, `action:${id}`, await encrypt(env, text), `action:${a.op}`, made, made,
-        row?.key ?? apartKey ?? a.key), seen]);
+        row?.key ?? staleRef ?? a.key), seen]);
     return "ok";
   }
   if (!row) {
@@ -369,9 +386,16 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
   }
   for (let attempt = 0; attempt < PUT_TRIES; attempt++) {
     if (attempt > 0) {
-      row = await env.DB.prepare("SELECT key, updated, added, deleted, rev, text_enc FROM jot_copies WHERE user_id=? AND key=?").bind(userId, row.key)
-        .first<{ key: string; updated: string; added: string; deleted: number; rev: number; text_enc: string }>();
+      row = await readKey(row.key);
       if (!row) return drop("busy");
+    }
+    // Every copy read (the first, or after a write lost a race) is checked to be the jot acted on: a key can change hands
+    // in between (the Mac's upload sets the old copy apart). The writes below also name its added time.
+    if (!isTarget(row)) {
+      const r = await redirect();
+      if ("done" in r) return r.done;
+      if (!r.row) return drop("busy");
+      row = r.row;
     }
     const older = Date.parse(made) < Date.parse(row.updated);
     if (a.op !== "edit" && older) { await seen.run(); return { id, reason: "superseded", kept: true }; }   // the text stays; the Mac's newer version wins
@@ -380,18 +404,18 @@ async function applyPhone(env: Env, userId: string, a: any, skew: number | null,
       // Newest wins with history: the text being replaced (or this older edit) is kept until the Mac has saved it. Checked against
       // the version read, so a Mac upload in between is never overwritten.
       if (older) {
-        stmts.push(env.DB.prepare("INSERT INTO jot_copy_versions(user_id,key,rev,text_enc,at) SELECT user_id, key, rev+1, ?, ? FROM jot_copies WHERE user_id=? AND key=? AND rev=?")
-          .bind(await encrypt(env, text), made, userId, row.key, row.rev));
-        stmts.push(env.DB.prepare("UPDATE jot_copies SET waiting=1, rev=rev+1 WHERE user_id=? AND key=? AND rev=?").bind(userId, row.key, row.rev));
+        stmts.push(env.DB.prepare("INSERT INTO jot_copy_versions(user_id,key,rev,text_enc,at) SELECT user_id, key, rev+1, ?, ? FROM jot_copies WHERE user_id=? AND key=? AND rev=? AND added=?")
+          .bind(await encrypt(env, text), made, userId, row.key, row.rev, row.added));
+        stmts.push(env.DB.prepare("UPDATE jot_copies SET waiting=1, rev=rev+1 WHERE user_id=? AND key=? AND rev=? AND added=?").bind(userId, row.key, row.rev, row.added));
       } else {
-        stmts.push(env.DB.prepare("INSERT INTO jot_copy_versions(user_id,key,rev,text_enc,at) SELECT user_id, key, rev+1, text_enc, updated FROM jot_copies WHERE user_id=? AND key=? AND rev=?")
-          .bind(userId, row.key, row.rev));
-        stmts.push(env.DB.prepare("UPDATE jot_copies SET text_enc=?, updated=?, waiting=1, rev=rev+1 WHERE user_id=? AND key=? AND rev=?")
-          .bind(await encrypt(env, text), made, userId, row.key, row.rev));
+        stmts.push(env.DB.prepare("INSERT INTO jot_copy_versions(user_id,key,rev,text_enc,at) SELECT user_id, key, rev+1, text_enc, updated FROM jot_copies WHERE user_id=? AND key=? AND rev=? AND added=?")
+          .bind(userId, row.key, row.rev, row.added));
+        stmts.push(env.DB.prepare("UPDATE jot_copies SET text_enc=?, updated=?, waiting=1, rev=rev+1 WHERE user_id=? AND key=? AND rev=? AND added=?")
+          .bind(await encrypt(env, text), made, userId, row.key, row.rev, row.added));
       }
     } else {
-      stmts.push(env.DB.prepare("UPDATE jot_copies SET deleted=?, updated=?, waiting=1, rev=rev+1 WHERE user_id=? AND key=? AND rev=?")
-        .bind(a.op === "delete" ? 1 : 0, made, userId, row.key, row.rev));
+      stmts.push(env.DB.prepare("UPDATE jot_copies SET deleted=?, updated=?, waiting=1, rev=rev+1 WHERE user_id=? AND key=? AND rev=? AND added=?")
+        .bind(a.op === "delete" ? 1 : 0, made, userId, row.key, row.rev, row.added));
     }
     stmts.push(seenIfChanged);
     const res = await env.DB.batch(stmts);
