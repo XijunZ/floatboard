@@ -73,6 +73,20 @@ describe("foundation: tags and modules in the board copy", () => {
     expect(a[0]).toMatchObject({ client_id: "ptag-0001", card_id: 1, action: "set_tags", tags: ["Personal", "Work"] });
   });
 
+  // Round 20 (6): the phone's own queue path (tagsAction, then takeBatch as the app sends it) reaches the Mac with its tags.
+  it("a_queued_tag_change_is_sent_with_its_tags_and_reaches_the_mac", async () => {
+    const u = await setup("Queued tags");
+    const now = Date.now();
+    await put(u.key, { sent_at: iso(now), cards: [card(1, { tags: ["Work"], tags_at: iso(now - 60_000) })] });
+    const S: any = new Function(SYNC_JS + "\nreturn {" + SYNC_EXPORTS.join(",") + "};")();
+    const a = S.tagsAction({ id: 1 }, "Personal", ["Work"], "ptag-q001", iso(now));
+    const batch = S.takeBatch([a], iso(now));
+    expect(batch.actions[0].tags).toEqual(["Personal", "Work"]);
+    const body = await (await send(u.cookie, batch)).json<any>();
+    expect(body.accepted).toEqual(["ptag-q001"]);
+    expect((await macActions(u.key)).actions[0]).toMatchObject({ client_id: "ptag-q001", action: "set_tags", tags: ["Personal", "Work"] });
+  });
+
   it("phone_set_tags_older_than_the_macs_change_loses_and_bad_ones_are_dropped", async () => {
     const u = await setup("Old tags");
     const now = Date.now();
