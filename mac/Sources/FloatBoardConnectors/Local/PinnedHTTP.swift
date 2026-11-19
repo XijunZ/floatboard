@@ -107,8 +107,10 @@ public enum PinnedHTTP {
         if value("transfer-encoding")?.lowercased().contains("chunked") == true {
             body = try dechunk(body)
             headers = headers.filter { $0.key.lowercased() != "transfer-encoding" }
-        } else if let n = value("content-length").flatMap(Int.init), n <= body.count {
-            body = body.prefix(n)
+        } else if let n = value("content-length").flatMap({ Int($0.trimmingCharacters(in: .whitespaces)) }) {
+            // A negative length is a broken answer; one longer than what came is cut to what came (never a trap).
+            guard n >= 0 else { throw Failed(description: "bad length") }
+            if n <= body.count { body = body.prefix(n) }
         }
         return (status, headers, body)
     }
@@ -119,10 +121,15 @@ public enum PinnedHTTP {
         while i < data.endIndex {
             guard let lineEnd = data.range(of: crlf, in: i..<data.endIndex) else { throw Failed(description: "bad chunk") }
             let sizeText = String(decoding: data[i..<lineEnd.lowerBound], as: UTF8.self).split(separator: ";").first.map(String.init) ?? ""
-            guard let size = Int(sizeText.trimmingCharacters(in: .whitespaces), radix: 16) else { throw Failed(description: "bad chunk size") }
+            // Sizes are bounded before any arithmetic: negative, too large for the answer, or not a number is refused.
+            let hex = sizeText.trimmingCharacters(in: .whitespaces)
+            guard !hex.isEmpty, hex.count <= 16, hex.allSatisfy(\.isHexDigit), let size = Int(hex, radix: 16), size >= 0, size <= maxBytes else {
+                throw Failed(description: "bad chunk size")
+            }
             if size == 0 { return out }
-            let start = lineEnd.upperBound, end = start + size
-            guard end <= data.endIndex else { throw Failed(description: "short chunk") }
+            let start = lineEnd.upperBound
+            guard data.endIndex - start >= size else { throw Failed(description: "short chunk") }
+            let end = start + size
             out.append(data[start..<end])
             i = min(end + 2, data.endIndex)
         }
