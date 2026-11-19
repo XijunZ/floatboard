@@ -516,6 +516,29 @@ func integrationRebindingLiveChecks() async {
         return r == nil || r!.2.count <= 3
     }
     check(survived.allSatisfy { $0 }, "pinned_get_survives_bad_sizes")
+    // Round 20 (2): a server that accepts and then never answers is given up on at the timeout (the connection is cancelled),
+    // so the engine's run finishes and the next one can start.
+    let stallPort = Int.random(in: 40001...50000)
+    let staller = Process()
+    staller.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+    staller.arguments = ["-c", "import socket,time\ns=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('127.0.0.1',\(stallPort)));s.listen(5)\nwhile True:\n c,_=s.accept();time.sleep(120)"]
+    staller.standardOutput = FileHandle.nullDevice; staller.standardError = FileHandle.nullDevice
+    if (try? staller.run()) != nil { // try?-ok: no python3 skips this part
+        defer { staller.terminate() }
+        try? await Task.sleep(nanoseconds: 500_000_000) // try?-ok: only waits for the server to listen
+        let started = Date()
+        let finished = await withTaskGroup(of: Bool.self) { g -> Bool in
+            g.addTask {
+                do { _ = try await PinnedHTTP.get(URLRequest(url: URL(string: "http://localhost:\(stallPort)/feed")!), ip: "127.0.0.1", timeout: 1) } catch {}
+                return true
+            }
+            g.addTask { try? await Task.sleep(nanoseconds: 8_000_000_000); return false } // try?-ok: the watchdog
+            let first = await g.next() ?? false
+            g.cancelAll()
+            return first
+        }
+        check(finished && Date().timeIntervalSince(started) < 5, "pinned_get_gives_up_on_a_stalled_server_at_the_timeout")
+    }
 }
 
 /// Round 13 (A4): Search everything keeps each person's and each event's search text until the board changes, instead of

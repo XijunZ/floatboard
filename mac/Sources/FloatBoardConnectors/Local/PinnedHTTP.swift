@@ -30,16 +30,22 @@ public enum PinnedHTTP {
         guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { throw Failed(description: "bad port") }
         let conn = NWConnection(host: NWEndpoint.Host(ip), port: nwPort, using: params)
         defer { conn.cancel() }
-        let raw = try await withThrowingTaskGroup(of: Data.self) { group -> Data in
-            group.addTask { try await exchange(conn, request: requestBytes(req, url: url, host: host, port: port, tls: tls)) }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                throw Failed(description: "timed out")
+        // The timeout cancels the connection itself: a server that accepts and never answers leaves the read waiting on the
+        // connection, which only its cancel ends (a task cancel alone doesn't reach it). The caller's cancel does the same.
+        let bytes = requestBytes(req, url: url, host: host, port: port, tls: tls)
+        let raw = try await withTaskCancellationHandler {
+            try await withThrowingTaskGroup(of: Data.self) { group -> Data in
+                group.addTask { try await exchange(conn, request: bytes) }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    conn.cancel()
+                    throw Failed(description: "timed out")
+                }
+                defer { group.cancelAll(); conn.cancel() }
+                guard let first = try await group.next() else { throw Failed(description: "no answer") }
+                return first
             }
-            let first = try await group.next()!
-            group.cancelAll()
-            return first
-        }
+        } onCancel: { conn.cancel() }
         let (status, headers, body) = try parse(raw)
         guard let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers) else {
             throw Failed(description: "bad answer")
