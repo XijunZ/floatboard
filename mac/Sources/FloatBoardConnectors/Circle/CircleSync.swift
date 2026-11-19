@@ -27,6 +27,13 @@ public enum CircleSync {
         guard store.isOn(.circle) else { return [] }
         let c = CircleStore(store: store)
         var problems: [String] = []
+        // The cursors belong to the engine account they were read from: another engine or key starts from the beginning
+        // (its numbers are its own; a lower one would otherwise be skipped for good).
+        let fpKey = "circle_engine_account:" + id
+        if c.meta(fpKey) != client.accountFingerprint {
+            c.setMeta(exchangeCursor + ":" + id, nil); c.setMeta(updateCursor + ":" + id, nil)
+            c.setMeta(fpKey, client.accountFingerprint)
+        }
         func step(_ name: String, _ work: () async throws -> Void) async {
             do { try await work(); reported.removeValue(forKey: id + name) }
             catch ConnectorError.http(404, _) { /* an engine without Circle yet: nothing to do */ }

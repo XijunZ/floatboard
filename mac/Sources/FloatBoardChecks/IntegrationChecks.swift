@@ -727,3 +727,37 @@ func integrationRebindingLiveChecks() async {
     PeopleStore(store: s).update(q)
     check(mid > before && s.failedWrites == mid + 1, "a_swallowed_write_failure_is_counted")
 }
+
+/// Round 20 (3): what this Mac read from an engine (Circle's activity and What's new cursors) belongs to that engine
+/// account: another engine or key starts from the beginning, and forgetting a connector forgets them.
+@MainActor func circleCursorPerEngineChecks() async {
+    let root = checkFolder("fb-ccur")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = checkStore(root, "ccur.sqlite", modules: [.circle]) else { return }
+    var asked: [String] = []
+    func engine(_ host: String) -> ConnectorClient {
+        ConnectorClient(baseURL: URL(string: "https://\(host)")!, key: "k") { req in
+            await MainActor.run {
+                let path = req.url!.path
+                if path == "/v2/circle/exchanges" || path == "/v2/circle/updates" { asked.append("\(host)\(path)?\(req.url!.query ?? "")") }
+                let body: Any = path == "/v2/circle/exchanges" ? ["exchanges": [], "readers": [], "next": 50, "more": false]
+                    : path == "/v2/circle/updates" ? ["updates": [], "next": 40, "more": false] : [:]
+                let ok = path == "/v2/circle/exchanges" || path == "/v2/circle/updates"
+                return ((try? JSONSerialization.data(withJSONObject: body)) ?? Data(), // try?-ok: test stand-in
+                        HTTPURLResponse(url: req.url!, statusCode: ok ? 200 : 404, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+    }
+    let a = engine("a.test"), b = engine("b.test")
+    await CircleSync.run(store: s, client: a, connector: "cc", now: Date())
+    await CircleSync.run(store: s, client: a, connector: "cc", now: Date())
+    let againA = asked.filter { $0.hasPrefix("a.test") }.suffix(2)
+    asked = []
+    await CircleSync.run(store: s, client: b, connector: "cc", now: Date())   // the connector now points at another engine
+    check(againA.allSatisfy { $0.contains("after=50") || $0.contains("after=40") } && asked.allSatisfy { $0.contains("after=0") } && asked.count == 2,
+          "circle_cursors_start_again_on_another_engine")
+    asked = []
+    ConnectorMemory.forget(connector: "cc", store: s)
+    await CircleSync.run(store: s, client: b, connector: "cc", now: Date())
+    check(asked.count == 2 && asked.allSatisfy { $0.contains("after=0") }, "forgetting_a_connector_forgets_its_circle_cursors")
+}
