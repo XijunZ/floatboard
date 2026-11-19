@@ -506,6 +506,16 @@ func integrationRebindingLiveChecks() async {
     check(p1.map { String(decoding: $0.2, as: UTF8.self) } == "hello world" && p1?.1["X-A"] == "1, 2" && p1?.1["Transfer-Encoding"] == nil
           && p2?.0 == 301 && p2?.1["Location"] == "https://x.example/" && p2.map { String(decoding: $0.2, as: UTF8.self) } == "abc" && p3 == nil,
           "pinned_get_parses_http_answers")
+    // Round 20 (1): a hostile or broken answer never crashes the app: negative or huge sizes are refused or ignored.
+    let bad = ["HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\nabc", "HTTP/1.1 200 OK\r\nContent-Length: 99999999999999999999\r\n\r\nabc",
+               "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n-5\r\nabc\r\n0\r\n\r\n",
+               "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n7fffffffffffffff\r\nabc\r\n0\r\n\r\n",
+               "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffffffff\r\nabc\r\n"]
+    let survived = bad.map { raw -> Bool in
+        let r = try? PinnedHTTP.parse(Data(raw.utf8)) // try?-ok: refusing is fine; not crashing is the check
+        return r == nil || r!.2.count <= 3
+    }
+    check(survived.allSatisfy { $0 }, "pinned_get_survives_bad_sizes")
 }
 
 /// Round 13 (A4): Search everything keeps each person's and each event's search text until the board changes, instead of
