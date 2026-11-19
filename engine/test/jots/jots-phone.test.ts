@@ -204,6 +204,11 @@ describe("jots on the phone: the draft and the undo bar belong to one account (C
     expect(p.stored["floatboard.jotqueue"].actions.map((a: any) => a.text)).toEqual(["a thought that must not vanish"]);
   });
 
+  it("phone_changes_to_a_jot_carry_its_identity", () => {
+    // Round 20: edits, deletes, restores and Make task name the jot's added time, so a number reused on the Mac is never hit.
+    expect((JOTS_JS.match(/key: j\.key, jot_added: j\.added/g) || []).length).toBe(5);
+  });
+
   it("a_jot_longer_than_the_engine_takes_is_never_cut_and_never_called_saved", () => {
     const p = page(() => "A");
     const toasts: string[] = [];

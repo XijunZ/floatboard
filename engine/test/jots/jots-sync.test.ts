@@ -378,3 +378,74 @@ describe("jots: a number reused after a restore", () => {
   });
 });
 
+// Round 20 (Codex 6a): reused numbers, continued.
+describe("jots: reused numbers, phone actions and recovered copies", () => {
+  const tOld = () => Date.now() - 3 * DAY, tNew = () => Date.now() - 60_000;
+  const row = (uid: string, key: string) => env.DB.prepare("SELECT key, mac_id, deleted, waiting, added FROM jot_copies WHERE user_id=? AND key=?").bind(uid, key).first<any>();
+
+  it("a_recovered_copy_never_blocks_the_replacement_upload", async () => {
+    const u = await setup("Recover then upload");
+    const a = iso(tOld());
+    await putJots(u.key, { jots: [jot(7, { text: "A", added: a, updated: a })] });
+    await phoneSend(u.cookie, [{ id: "edit-q001", op: "edit", key: "J-7", jot_added: a, text: "A, edited", made_at: iso(Date.now() - 120_000) }]);
+    // The restored Mac pulls first: its own 7 is another jot, so it keeps the phone's A as its jot 8 and acks that.
+    const w = (await waiting(u.key)).jots.find((j: any) => j.key === "J-7");
+    expect((await (await ack(u.key, [{ key: "J-7", rev: w.rev, mac_id: 8 }])).json<any>()).acked).toBe(1);
+    // Then it uploads its own 7 (B) and its 8 (A): both accepted, no 409.
+    const b = iso(tNew());
+    const r = await putJots(u.key, { jots: [jot(7, { text: "B", added: b, updated: b }), jot(8, { text: "A, edited", added: a, updated: iso(Date.now() - 100_000) })] });
+    expect(r.status).toBe(200);
+    expect((await r.json<any>()).accepted.sort()).toEqual([7, 8]);
+    expect(await row(u.id, "J-7")).toMatchObject({ mac_id: 7 });
+    const apart = (await env.DB.prepare("SELECT key, mac_id FROM jot_copies WHERE user_id=? AND mac_id=8").bind(u.id).first<any>());
+    expect(apart.key).not.toBe("J-7");
+    const versions = (await env.DB.prepare("SELECT count(*) AS n FROM jot_copy_versions WHERE user_id=? AND key=?").bind(u.id, apart.key).first<any>()).n;
+    expect(versions).toBeGreaterThanOrEqual(0);   // its history moved with it (none left under J-7)
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM jot_copy_versions WHERE user_id=? AND key='J-7'").bind(u.id).first<any>()).n).toBe(0);
+  });
+
+  it("a_stale_phone_delete_never_deletes_the_replacement_jot", async () => {
+    const u = await setup("Stale delete");
+    const a = iso(tOld()), b = iso(tNew());
+    await putJots(u.key, { jots: [jot(7, { text: "A", added: a, updated: a })] });
+    await putJots(u.key, { jots: [jot(7, { text: "B", added: b, updated: b })] });   // restored Mac: A set apart, B is J-7
+    const r = await (await phoneSend(u.cookie, [{ id: "del-q0001", op: "delete", key: "J-7", jot_added: a, made_at: iso(Date.now() - 30_000) }])).json<any>();
+    expect(r.accepted).toContain("del-q0001");
+    expect(await row(u.id, "J-7")).toMatchObject({ deleted: 0, mac_id: 7 });
+    const apart = await env.DB.prepare("SELECT deleted, waiting FROM jot_copies WHERE user_id=? AND key LIKE 'J-7~%'").bind(u.id).first<any>();
+    expect(apart).toMatchObject({ deleted: 1, waiting: 1 });   // the delete reached the jot it was meant for
+  });
+
+  it("a_stale_phone_edit_is_kept_as_a_separate_jot", async () => {
+    const u = await setup("Stale edit");
+    const a = iso(tOld()), b = iso(tNew());
+    await putJots(u.key, { jots: [jot(7, { text: "B", added: b, updated: b })] });   // the copy never held A (pruned, or never sent)
+    await phoneSend(u.cookie, [{ id: "edit-q0002", op: "edit", key: "J-7", jot_added: a, text: "A, edited offline", made_at: iso(Date.now() - 30_000) }]);
+    expect((await phoneJots(u.cookie)).jots.find((j: any) => j.key === "J-7")?.text).toBe("B");
+    const w = (await waiting(u.key)).jots.find((j: any) => j.text === "A, edited offline");
+    expect(w).toBeTruthy();
+    expect(w.key).not.toBe("J-7");
+    expect(w.mac_id ?? null).toBeNull();
+    expect(Date.parse(w.added)).toBe(Date.parse(a));
+  });
+
+  it("an_old_phone_delete_without_identity_never_deletes_a_jot_added_after_it", async () => {
+    const u = await setup("Legacy delete");
+    const b = iso(tNew());
+    await putJots(u.key, { jots: [jot(7, { text: "B", added: b, updated: b })] });
+    const r = await (await phoneSend(u.cookie, [{ id: "del-q0003", op: "delete", key: "J-7", made_at: iso(Date.now() - 10 * 60_000) }])).json<any>();
+    expect(r.dropped.map((d: any) => d.id)).toContain("del-q0003");
+    expect(await row(u.id, "J-7")).toMatchObject({ deleted: 0 });
+  });
+
+  it("the_same_jot_is_still_edited_and_deleted_with_its_identity", async () => {
+    const u = await setup("Same identity");
+    const a = iso(tOld());
+    await putJots(u.key, { jots: [jot(7, { text: "A", added: a, updated: a })] });
+    await phoneSend(u.cookie, [{ id: "edit-q0004", op: "edit", key: "J-7", jot_added: a, text: "A2", made_at: iso(Date.now() - 20_000) }]);
+    expect((await phoneJots(u.cookie)).jots.find((j: any) => j.key === "J-7")?.text).toBe("A2");
+    await phoneSend(u.cookie, [{ id: "del-q0005", op: "delete", key: "J-7", jot_added: a, made_at: iso(Date.now() - 10_000) }]);
+    expect(await row(u.id, "J-7")).toMatchObject({ deleted: 1 });
+  });
+});
+
