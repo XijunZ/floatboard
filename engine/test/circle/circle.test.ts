@@ -273,9 +273,16 @@ describe("circle: phone copy and actions", () => {
     let prompt = "";
     setCircleFetch((async (_i: RequestInfo | URL, init?: RequestInit) => { prompt = String(init?.body); return claudeReply({ draft: "Hi Kim, fancy a walk this weekend?" }); }) as typeof fetch);
     try {
-      const r = await call("/app/api/circle/draft", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify({ person: "P-1" }) });
+      // Round 20 (4): the draft names the account it was asked for; another account (a tab switched meanwhile) is refused.
+      const account = (await (await call("/app/api/circle", { headers: { Cookie: cookie } })).json<any>()).account;
+      const other = await call("/app/api/circle/draft", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify({ person: "P-1", account: "someone-else" }) });
+      expect(other.status).toBe(409);
+      expect(prompt).toBe("");   // nothing was asked of Claude
+      const r = await call("/app/api/circle/draft", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify({ person: "P-1", account }) });
       expect(r.status).toBe(200);
-      expect((await r.json<any>()).draft).toBe("Hi Kim, fancy a walk this weekend?");
+      const got = await r.json<any>();
+      expect(got.draft).toBe("Hi Kim, fancy a walk this weekend?");
+      expect(got.account).toBe(account);
       expect(prompt).toContain("Likes hiking");
       expect(prompt).toContain(HAIKU);
     } finally { setCircleFetch(null); }

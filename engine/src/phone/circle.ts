@@ -6,8 +6,7 @@
  */
 import type { Env } from "../env";
 import { nowISO } from "../env";
-import { readCappedJSON } from "../lib/http";
-import { accountMarker, appJSON, phoneWrite, requireAppSession, sameOrigin } from "./auth";
+import { accountMarker, appJSON, phoneWrite, requireAppSession } from "./auth";
 import { circleOn, unseal } from "../circle/common";
 import { circleFetch } from "../circle/net";
 import { draftInput } from "../circle/ai";
@@ -58,12 +57,13 @@ export async function handleCircleApp(req: Request, env: Env): Promise<Response 
     return appJSON({ account: mine, accepted, dropped }, 200, s.setCookie);
   }
   if (path === "/app/api/circle/draft" && req.method === "POST") {
-    if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);
-    const s = await requireAppSession(req, env);
-    if (!s) return appJSON({ error: "not signed in" }, 401);
-    if (!(await circleOn(env, s.userId))) return appJSON({ error: "Circle is off" }, 409, s.setCookie);
-    const b = await readCappedJSON(req, 4_000);
-    const person = b.ok ? (b.body as any)?.person : null;
+    // The account the draft is for goes with the request and comes back with the answer (round 20): a phone tab that
+    // switched account meanwhile is refused (409) before Claude is asked, and the page drops an answer for another account.
+    const w = await phoneWrite(req, env, 4_000, {
+      before: async (s) => (await circleOn(env, s.userId)) ? null : appJSON({ error: "Circle is off" }, 409, s.setCookie) });
+    if (!w.ok) return w.res;
+    const { s, account } = w;
+    const person = w.body?.person;
     if (typeof person !== "string" || !PERSON.test(person)) return appJSON({ error: "person must be a P-n id" }, 400, s.setCookie);
     const row = await env.DB.prepare("SELECT data_enc FROM circle_copy WHERE user_id=?").bind(s.userId).first<{ data_enc: string }>();
     const copy = row ? await unseal<{ people: CopyPerson[] }>(env, row.data_enc) : null;
@@ -73,7 +73,10 @@ export async function handleCircleApp(req: Request, env: Env): Promise<Response 
     const d = draftInput({ name: p.name, language: p.language, notes: p.notes, channel: p.email ? "email" : "whatsapp",
       messages: p.email ? await lastEmails(env, s.userId, p.email) : [] }, owner?.name ?? "");
     if (typeof d === "string") return appJSON({ error: d }, 400, s.setCookie);
-    return draftAnswer(env, s.userId, d, s.setCookie);
+    const res = await draftAnswer(env, s.userId, d, s.setCookie);
+    if (!res.ok) return res;
+    const out = await res.json<Record<string, unknown>>();
+    return appJSON({ ...out, account }, res.status, s.setCookie);
   }
   return null;
 }
