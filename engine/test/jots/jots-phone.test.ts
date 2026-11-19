@@ -204,6 +204,24 @@ describe("jots on the phone: the draft and the undo bar belong to one account (C
     expect(p.stored["floatboard.jotqueue"].actions.map((a: any) => a.text)).toEqual(["a thought that must not vanish"]);
   });
 
+  it("a_jot_longer_than_the_engine_takes_is_never_cut_and_never_called_saved", () => {
+    const p = page(() => "A");
+    const toasts: string[] = [];
+    (p.h as any).toast = (t: string) => toasts.push(t);
+    const screen = L.JotsScreen(p.h);
+    screen.restore();
+    screen.wire();
+    const box = p.el("jot-text");
+    const long = "x".repeat(20_001);
+    box.value = long;
+    p.el("jot-save").listeners.click.forEach((f: Function) => f());
+    expect(box.value).toBe(long);
+    expect(p.stored["floatboard.jotqueue"]).toBeUndefined();
+    expect(toasts.some((t) => /too long/i.test(t))).toBe(true);
+    expect(toasts).not.toContain("Saved");
+    expect(JOTS_JS).not.toMatch(/slice\(0, 20000\)/);   // no save, edit or share cuts the text any more
+  });
+
   it("a_draft_typed_under_one_account_is_never_shown_to_another", () => {
     let account: string | null = "A";
     const p = page(() => account);

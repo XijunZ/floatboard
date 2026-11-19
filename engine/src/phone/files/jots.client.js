@@ -179,6 +179,15 @@
     // Jots: account binding. Before any change is queued, the screen is bound to the account signed in now.
     function bound() { if (h.account() && heldBy !== h.account()) restore(); }
 
+    // The engine takes a phone jot of up to 20,000 characters (as JavaScript counts them). A longer one is never cut: it
+    // stays on screen with a message.
+    var PHONE_TEXT_MAX = 20000;
+    function tooLong(text) {
+      if (text.length <= PHONE_TEXT_MAX) return false;
+      h.toast("Too long for the phone (" + text.length.toLocaleString() + " of 20,000 characters). Shorten it, or save it on your Mac. Nothing was cut.");
+      return true;
+    }
+
     // Queues one change, kept on this phone first (read back): null when it couldn't be kept (storage full or off, or no
     // account), and then nothing is cleared or called saved; the caller keeps the words on screen.
     function queueAction(a) {
@@ -283,7 +292,7 @@
       var box = h.$("jot-text");
       var text = box.value.trim();
       if (!text) { box.focus(); return; }
-      if (!queueAction({ op: "add", text: text.slice(0, 20000) })) { saveDraft(box.value); return; }   // kept on screen and as the draft
+      if (tooLong(text) || !queueAction({ op: "add", text: text })) { saveDraft(box.value); return; }   // kept on screen and as the draft
       box.value = "";
       saveDraft(null);
       h.toast("Saved");
@@ -390,7 +399,7 @@
         ok.addEventListener("click", function () {
           var t = box.value.trim();
           if (!t || t === j.text) { h.closeSheet(); return; }
-          if (!queueAction({ op: "edit", key: j.key, text: t.slice(0, 20000) })) return;   // the sheet and its text stay
+          if (tooLong(t) || !queueAction({ op: "edit", key: j.key, text: t })) return;   // the sheet and its text stay
           h.closeSheet();
           h.toast("Saved");
         });
@@ -434,7 +443,8 @@
         var asJot = h.el("button", "btn", "Save as jot");
         asJot.addEventListener("click", function () {
           if (!box.value.trim()) return;
-          if (!queueAction({ op: "add", text: box.value.trim().slice(0, 20000) })) return;   // the share stays open with its text
+          var shared = box.value.trim();
+          if (tooLong(shared) || !queueAction({ op: "add", text: shared })) return;   // the share stays open with its text
           h.closeSheet();
           h.toast("Saved as a jot");
         });
