@@ -214,3 +214,26 @@ private struct Refused: Error {}
     check(quiet == 1 && asked == 2 && !PhoneReach.any(), "an_engine_that_fails_is_asked_again_only_after_10_minutes")
     PhoneReach.reset()
 }
+
+/// Round 20 (7): a reminder this Mac claimed but couldn't show is handed back at the phone's turn; when no phone can be
+/// reached it is not marked as the phone's (it would be shown nowhere): it stays, and this Mac shows it late.
+@MainActor func releasedWithoutPhoneChecks() async {
+    let root = checkFolder("fb-release-nophone")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = foundationStore(root, "rel.sqlite") else { return }
+    let budget = ReminderBudget(store: store)
+    budget.save(ReminderSettings(dailyLimit: 5, quietStart: 0, quietEnd: 0))
+    let now = Date()
+    guard let id = grant(budget, 7, now) else { check(false, "rel setup"); return }
+    var fail = true, shown: [String] = [], released: [String] = []
+    struct Refused: Error {}
+    let d = ReminderDelivery(store: store, claim: { _ in .mine }, schedule: { r in if fail { throw Refused() }; shown.append(r.id) },
+                             release: { rid in released.append(rid); return true }, phoneAvailable: { false })
+    _ = await d.tick(now: now)                                   // claimed here; macOS refused to show it
+    fail = false
+    let later = now.addingTimeInterval(ReminderBudget.phoneGrace + 60)
+    _ = await d.tick(now: later)                                 // the phone's turn: handed back
+    _ = await d.tick(now: later.addingTimeInterval(60))          // no phone: shown here, late
+    let phoneMarked = budget.forPhone(now: later).contains { $0.id == id }
+    check(released == [id] && shown == [id] && budget.pending().isEmpty && !phoneMarked, "a_released_reminder_with_no_phone_is_shown_late_on_the_mac")
+}
