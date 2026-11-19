@@ -231,6 +231,12 @@ public enum ReminderClaim: Equatable { case mine, phones, unreachable, noEngine 
                     guard back else { continue }
                     setClaimed(r.id, false)
                     settle(r.id, mine: false)
+                    // No phone can be reached now: not the phone's (it would be shown nowhere). It stays waiting, no longer
+                    // claimed, so the next tick shows it here, late.
+                    if !phoneAvailable() {
+                        if known { store.activity("reminders", .warning, "A reminder could not be shown on time; no phone can get it, so this Mac shows it late", trace: r.id) }
+                        changed = true; continue
+                    }
                     if known { store.activity("reminders", .warning, "A reminder could not be shown on this Mac; it goes to your phone instead", trace: r.id) }
                 }
                 budget.markDelivered(r.id, by: "phone", at: now); changed = true; continue
