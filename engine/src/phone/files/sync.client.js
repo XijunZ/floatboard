@@ -107,6 +107,7 @@
       if (a.action === "add") { item.title = a.title; if (a.group) item.group = a.group; } else item.card_id = a.card_id;
       if (a.action === "link_email") { item.message_id = a.message_id; item.gmail_id = a.gmail_id; item.account = a.account; item.sent_at = a.sent_at || null; }
       if (a.action === "delete" && a.teach) item.teach = a.teach;
+      if (a.action === "set_tags") item.tags = a.tags;   // the change itself (dropping it made the engine refuse every tag change)
       var n = byteLength(JSON.stringify(item)) + 1;
       if (out.length && size + n > BATCH_BYTES) break;
       size += n;
