@@ -80,7 +80,7 @@ describe("jots: an applied phone change and its 'seen' mark are written together
     // change itself), never as a separate write after it.
     expect(src).not.toMatch(/await seen\.run\(\); return "ok";/);
     expect(src).toMatch(/seenIfChanged/);
-    expect((src.match(/\.push\(seenIfChanged\)|, seenIfChanged\]/g) ?? []).length).toBe(2);
+    expect((src.match(/\.push\(seenIfChanged\)|, seenIfChanged\]/g) ?? []).length).toBe(3);   // round 20: the stale edit kept as a jot of its own carries it too
   });
 
   it("a_change_is_applied_once_and_a_repeat_is_harmless", async () => {
