@@ -831,3 +831,20 @@ extension ISO8601DateFormatter {
     await JotsSync.tick(connector: "jt", store: store, client: client)
     check(accepted.filter { $0 == odd.id }.isEmpty && JotsSyncCore(store: store).toPush(connector: "jt").isEmpty, "a_refused_jot_is_set_aside_not_retried_every_pass")
 }
+
+/// Round 28 (Codex 18): meeting notes deleted on the phone before this Mac first took them in arrive deleted (with the
+/// phone's time), so the Mac never sends them back as live.
+@MainActor func meetingNotesDeletedFirstChecks() {
+    let root = checkFolder("fb-mn-del")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = checkStore(root, "mn.sqlite", modules: [.jots]) else { return }
+    let t0 = Date().addingTimeInterval(-3600)
+    let row = EngineJot(key: "fathom:del1", macID: nil, text: "## Summary\nAgreed.", kind: "meeting_notes", source: "meeting", added: t0,
+                        updated: t0.addingTimeInterval(600), deleted: true, rev: 2,
+                        meeting: MeetingMeta(recapKey: "fathom:del1", fathomURL: "", meetingURL: "", title: "Weekly", scheduledStart: nil, invitees: [], received: t0))
+    let acks = JotsSyncCore(store: store).apply([row])
+    let j = JotStore(store: store).jot(origin: "fathom:del1")
+    check(acks.count == 1 && j?.deleted == true && j.map { abs($0.updated.timeIntervalSince(t0.addingTimeInterval(600))) < 1 } == true,
+          "meeting_notes_deleted_on_the_phone_before_intake_arrive_deleted")
+    check(JotsSyncCore(store: store).toPush(connector: "mn").allSatisfy { $0.deleted }, "deleted_meeting_notes_are_never_sent_back_live")
+}
