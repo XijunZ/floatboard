@@ -661,7 +661,13 @@ struct GeneralSection: View {
 
     private func label(_ name: String) -> String {
         guard let z = TimeZone(identifier: name) else { return name }
-        return name.replacingOccurrences(of: "_", with: " ") + (AppTime.hasSummerTime(z) ? "  ☀︎" : "")
+        let winter = AppTime.standardOffset(z)
+        var text = AppTime.offsetLabel(winter) + "  " + name.replacingOccurrences(of: "_", with: " ")
+        if AppTime.hasSummerTime(z), let next = z.nextDaylightSavingTimeTransition {
+            let summer = max(z.secondsFromGMT(), z.secondsFromGMT(for: next.addingTimeInterval(60)))
+            text += "  ☀︎ " + AppTime.offsetLabel(summer).replacingOccurrences(of: "UTC", with: "") + " in summer"
+        }
+        return text
     }
 
     private func summerNote(_ z: TimeZone, canTurnOff: Bool) -> String {
