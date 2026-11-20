@@ -682,7 +682,7 @@ func integrationRebindingLiveChecks() async {
     // Back to the version 17 shape: no jot_pushed, no screen_seq, the v17 triggers.
     let down = """
         DROP TABLE jot_pushed; DROP TRIGGER jots_seq_insert; DROP TRIGGER jots_seq_update; DROP TRIGGER jots_seq_task;
-        DROP INDEX jots_screen_seq; ALTER TABLE jots DROP COLUMN screen_seq;
+        DROP INDEX jots_screen_seq; ALTER TABLE jots DROP COLUMN screen_seq; ALTER TABLE circle_people DROP COLUMN task_area;
         CREATE TRIGGER jots_seq_insert AFTER INSERT ON jots BEGIN UPDATE jots SET change_seq = \(seq) WHERE id = NEW.id; END;
         CREATE TRIGGER jots_seq_update AFTER UPDATE OF text, kind, deleted, task_id ON jots WHEN NEW.change_seq = OLD.change_seq BEGIN
             UPDATE jots SET change_seq = \(seq) WHERE id = NEW.id; END;
@@ -866,4 +866,29 @@ func integrationRebindingLiveChecks() async {
     check(p.task == nil && p.event == nil, "picking_any_other_result_drops_every_request")
     p.pick(task: 42); p.shown(.calendar)
     check(p.task == nil, "leaving_the_board_drops_a_task_request")
+}
+
+/// Round 27: a version 18 board (no task_area yet) upgrades to 19 with every person and their details kept.
+@MainActor func taskAreaUpgradeChecks() {
+    let root = checkFolder("fb-v18-19")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let url = root.appendingPathComponent("v18.sqlite")
+    do { _ = try DB(url: url) } catch { check(false, "v18 setup: \(error)"); return }
+    var h: OpaquePointer?
+    guard sqlite3_open(url.path, &h) == SQLITE_OK else { check(false, "v18 open"); return }
+    var sql = "ALTER TABLE circle_people DROP COLUMN task_area; PRAGMA user_version = 18;"
+    for i in 1...25 {
+        sql += "INSERT INTO people(name, aliases, tier, source, added, updated) VALUES('Person \(i)', '[]', 'network', 'typed', 1, 1);"
+        sql += "INSERT INTO circle_people(person_id, company) VALUES(\(i), 'Company \(i)');"
+    }
+    let ok = sqlite3_exec(h, sql, nil, nil, nil) == SQLITE_OK
+    let why = String(cString: sqlite3_errmsg(h))
+    sqlite3_close(h)
+    guard ok else { check(false, "v18 board: \(why)"); return }
+    let store: Store
+    do { store = Store(db: try DB(url: url)) } catch { check(false, "v18->19 upgrade: \(error)"); return }
+    let people = PeopleStore(store: store).people()
+    let c = CircleStore(store: store)
+    check(people.count == 25 && people.allSatisfy { c.details($0.id).company == "Company \($0.id)" && c.details($0.id).taskArea == nil },
+          "upgrade_18_to_19_keeps_every_person_and_their_details")
 }

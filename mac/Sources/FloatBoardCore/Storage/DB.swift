@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 18
+    public static let schemaVersion = 19
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -230,6 +230,10 @@ public final class DB {
             // 17 -> 18: what each connector's phone copy holds (per connector), and a screening order that tag changes don't move.
             sql += v18Tables
         }
+        if version < 19 {
+            // 18 -> 19: a person's own board group for their "Message <name>" tasks (nullable; nil = automatic).
+            sql += v19Columns
+        }
         return sql
     }
 
@@ -334,6 +338,13 @@ public final class DB {
     CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN
         UPDATE cards SET notes=CASE WHEN NEW.deleted=1 THEN '' ELSE NEW.text END, updated=NEW.updated WHERE id=NEW.task_id;
     END;
+
+    """
+
+    /// Version 19: `circle_people.task_area`, the board group chosen for a person's "Message <name>" tasks (NULL: automatic:
+    /// a tag that is a group, else by tier). A group that no longer exists falls back to automatic.
+    static let v19Columns = """
+    ALTER TABLE circle_people ADD COLUMN task_area TEXT;
 
     """
 
@@ -576,7 +587,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq + v18Tables
+    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq + v18Tables + v19Columns
 
     /// The tables Circle adds in version 14 (the same text for a new board and an upgraded one).
     static let v14Tables = """

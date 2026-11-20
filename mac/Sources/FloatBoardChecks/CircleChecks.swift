@@ -341,3 +341,35 @@ let circleV14Drops = ["circle_people", "person_handles", "circle_exchanges", "ci
     check(due.contains { $0.person.tier == .friend } && !shownDue.contains { $0.person.tier == .friend }
           && shownDue.count == due.filter { $0.person.tier != .friend }.count, "due_this_week_follows_the_tier_chips")
 }
+
+/// Round 27: the board group of a new "Message <name>" task: the person's own choice, else their first tag that is a
+/// board group, else by tier (Network → Networking; Friend, Close friend, Family → Personal), else the default group.
+/// Names match case-insensitively; a rule naming a group the board no longer has falls through. Kept with the person
+/// (circle_people.task_area, schema 19) through phone changes.
+@MainActor func messageTaskGroupChecks() async {
+    let groups = ["Work", "Personal", "networking", "Investor"]
+    check(CircleDue.messageGroup(override: "work", tags: ["Investor"], tier: .network, groups: groups) == "Work", "message_group_override_first")
+    check(CircleDue.messageGroup(override: nil, tags: ["Advisor", "investor"], tier: .network, groups: groups) == "Investor", "message_group_tag_next")
+    check(CircleDue.messageGroup(override: nil, tags: [], tier: .network, groups: groups) == "networking", "message_group_network_tier_goes_to_networking")
+    check([PersonTier.friend, .close, .family].allSatisfy { CircleDue.messageGroup(override: nil, tags: [], tier: $0, groups: groups) == "Personal" },
+          "message_group_other_tiers_go_to_personal")
+    check(CircleDue.messageGroup(override: nil, tags: [], tier: .network, groups: ["Work"]) == nil, "message_group_else_the_default")
+    check(CircleDue.messageGroup(override: "Deleted group", tags: ["Gone"], tier: .friend, groups: groups) == "Personal",
+          "message_group_missing_groups_fall_through")
+
+    let root = checkFolder("fb-msg-group")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = circleStore(root, "mg.sqlite") else { return }
+    _ = s.addArea("Networking")
+    let c = CircleStore(store: s)
+    guard let ann = c.add(name: "Ann Example", tier: .network, tags: ItemTags(primary: nil, others: []), details: CircleDetails(), handles: []).person,
+          let ben = c.add(name: "Ben Example", tier: .network, tags: ItemTags(primary: nil, others: []), details: CircleDetails(), handles: []).person
+    else { check(false, "mg setup"); return }
+    var d = c.details(ben.id); d.taskArea = "Personal"; _ = c.save(ben.id, d)
+    let ta = CircleDue.makeTask(store: s, personID: ann.id).flatMap { s.card($0) }
+    let tb = CircleDue.makeTask(store: s, personID: ben.id).flatMap { s.card($0) }
+    check(ta?.area == "Networking" && tb?.area == "Personal", "message_tasks_go_to_the_chosen_group")
+    // A phone change (I contacted them) rewrites the person's Circle row: the choice stays.
+    _ = c.applyPhoneActions([CirclePhoneAction(id: "mg-1", person: ben.shortID.text, action: "contacted", madeAt: ISO8601DateFormatter().string(from: Date()))])
+    check(c.details(ben.id).taskArea == "Personal", "the_task_group_choice_survives_a_phone_change")
+}

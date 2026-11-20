@@ -170,6 +170,8 @@ public struct CircleDetails: Equatable {
     public var officerConfirmed: Date?
     /// Chinese contacts (P13): when the owner last looked by hand.
     public var manualChecked: Date?
+    /// The board group for this person's "Message <name>" tasks; nil = automatic (CircleDue.messageGroup).
+    public var taskArea: String?
     public init() {}
 }
 
