@@ -761,3 +761,26 @@ func integrationRebindingLiveChecks() async {
     await CircleSync.run(store: s, client: b, connector: "cc", now: Date())
     check(asked.count == 2 && asked.allSatisfy { $0.contains("after=0") }, "forgetting_a_connector_forgets_its_circle_cursors")
 }
+
+/// Round 22: the toolbar search's list: results grouped by where they live (Tasks, Calendar, Jots, Circle, Decisions,
+/// Goals), at most 5 a group with "Show all N", and ↓/↑ moving through every row across groups.
+@MainActor func searchListChecks() {
+    func hits(_ k: ItemKind, _ n: Int) -> [SearchHit] { (1...n).map { SearchHit(id: ShortID(kind: k, number: Int64($0)), title: "\(k.noun) \($0)", detail: "", date: nil) } }
+    let results: [(ItemKind, [SearchHit])] = [(.jot, hits(.jot, 7)), (.task, hits(.task, 2)), (.person, hits(.person, 1))]
+    var list = SearchList(results: results)
+    check(list.groups.map(\.title) == ["Tasks", "Jots", "Circle"] && list.groups.map(\.count) == [2, 7, 1], "search_list_groups_in_tab_order_with_counts")
+    check(list.rows.compactMap(\.hit).count == 2 + 5 + 1 && list.rows.contains { $0.showAll == .jot } && !list.rows.contains { $0.showAll == .task },
+          "search_list_shows_five_a_group_then_show_all")
+    list.expand(.jot)
+    check(list.rows.compactMap(\.hit).count == 2 + 7 + 1 && !list.rows.contains { $0.showAll != nil }, "search_list_show_all_expands_the_group")
+    var nav = SearchList(results: results)
+    nav.move(1)
+    let first = nav.highlighted?.hit?.id
+    nav.move(1); nav.move(1)
+    let third = nav.highlighted?.hit?.id
+    nav.move(-1); nav.move(-1); nav.move(-1)
+    check(first == ShortID(kind: .task, number: 1) && third == ShortID(kind: .jot, number: 1) && nav.highlighted?.hit?.id == ShortID(kind: .task, number: 1),
+          "search_list_arrows_move_across_groups_and_stop_at_the_ends")
+    check(SearchList(results: []).rows.isEmpty && SearchList(results: []).groups.isEmpty, "search_list_empty")
+    check(SearchList.title(.event) == "Calendar" && SearchList.title(.resolution) == "Goals" && SearchList.title(.decision) == "Decisions", "search_list_group_names")
+}

@@ -11,6 +11,7 @@ enum Snapshot {
         if ProcessInfo.processInfo.environment["FLOATBOARD_CLOCKSHOT"] != nil { ClockShot.run(dir: dir); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_CIRCLESHOTS"] != nil { CircleShots.run(dir: dir, store: store, ui: ui, google: google); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND11SHOTS"] != nil { Round8Shots.run(dir: dir, store: store, ui: ui, google: google, round11: true); return }
+        if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND22SHOTS"] != nil { Round22Shots.run(dir: dir); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND16SHOTS"] != nil { Round8Shots.run(dir: dir, store: store, ui: ui, google: google, round16: true); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND9SHOTS"] != nil { Round8Shots.run(dir: dir, store: store, ui: ui, google: google, round9: true); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND8SHOTS"] != nil { Round8Shots.run(dir: dir, store: store, ui: ui, google: google); return }
@@ -320,7 +321,6 @@ enum Snapshot {
                 [ReviewItem(id: "1", item: ShortID(kind: .decision, number: 4), title: "Move the offsite to March", detail: "from J-12"),
                  ReviewItem(id: "2", item: ShortID(kind: .decision, number: 5), title: "Hire a second designer", detail: "from meeting notes")] })
             saveLive(WeeklyReviewView {}, "foundation-review.png", CGSize(width: 520, height: 420))
-            saveLive(GlobalSearchView(initialQuery: "budget"), "foundation-search.png", CGSize(width: 440, height: 300))
             saveLive(VStack(alignment: .leading, spacing: 14) { AreasSection() }.padding(12), "foundation-settings-areas.png", CGSize(width: 700, height: 420))
         }
         if ProcessInfo.processInfo.environment["FLOATBOARD_JOTSHOTS"] != nil, LocalData.isScratchDatabase {

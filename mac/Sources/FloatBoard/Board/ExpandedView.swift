@@ -22,6 +22,9 @@ struct ExpandedView: View {
     @FocusState private var searchFocused: Bool
     @State private var showGuide = false
     @State private var searchShown = false
+    @State private var searchList = SearchList(results: [])   // the list under the search box (every area)
+    @State private var listOpen = false
+    @State private var searching = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -53,6 +56,23 @@ struct ExpandedView: View {
         .padding(.bottom, 12)
         .padding(.top, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The search list, under the toolbar's search box (right). Shown while the box has text, until Esc or an item opens.
+        .overlay(alignment: .topTrailing) {
+            if listOpen && !ui.search.trimmingCharacters(in: .whitespaces).isEmpty {
+                SearchResultsPanel(list: $searchList, searching: searching) { activate($0) }
+                    .padding(.trailing, 10).padding(.top, 2)
+            }
+        }
+        // Searched 150 ms after typing stops (people off the main thread): typing is never held up.
+        .task(id: ui.search) {
+            searching = true
+            try? await Task.sleep(nanoseconds: 150_000_000) // try?-ok: a cancelled wait means a newer query replaced this one
+            guard !Task.isCancelled else { return }
+            let r = await SearchRun.results(ui.search, store: store)
+            guard !Task.isCancelled else { return }
+            searchList = SearchList(results: r)
+            searching = false
+        }
         .overlay(alignment: .bottom) { UndoDeleteBar() }
         .overlay(alignment: .bottom) { UndoUnlinkBar() }
         .sheet(isPresented: $ui.showReview) { WeeklyReviewView { ui.showReview = false } }
@@ -61,10 +81,12 @@ struct ExpandedView: View {
         // A tab whose area was switched off goes back to the board.
         .onChange(of: store.modules) { _, on in if let m = ui.tab.module, !on.contains(m) { ui.tab = .board } }
         .toolbar { toolbarContent }
+        // No switching tabs while typing (round 22): the list shows where things are; the board still highlights its matches.
         .onChange(of: ui.search) { _, q in
-            if !q.isEmpty { ui.tab = .board }
+            listOpen = !q.trimmingCharacters(in: .whitespaces).isEmpty
             ui.currentMatch = orderedMatches.first
         }
+        .onChange(of: searchFocused) { _, on in if on && !ui.search.trimmingCharacters(in: .whitespaces).isEmpty { listOpen = true } }
         .onReceive(NotificationCenter.default.publisher(for: .floatBoardFocusSearch)) { _ in
             DispatchQueue.main.async { searchFocused = true }
         }
@@ -100,11 +122,20 @@ struct ExpandedView: View {
             // Always-visible search field (⌘F focuses it).
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search tasks", text: $ui.search)
+                TextField("Search", text: $ui.search)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
-                    .onSubmit { stepMatch(NSEvent.modifierFlags.contains(.shift) ? -1 : 1) }
-                    .onExitCommand { endSearch() }
+                    // Enter: the highlighted result opens; with none highlighted, on the Board, the next match as before.
+                    .onSubmit {
+                        if listOpen, let r = searchList.highlighted { activate(r) }
+                        else if ui.tab == .board { stepMatch(NSEvent.modifierFlags.contains(.shift) ? -1 : 1) }
+                        else if let first = searchList.rows.first(where: { $0.hit != nil }) { activate(first) }
+                    }
+                    .onKeyPress(.downArrow) { listOpen = true; searchList.move(1); return .handled }
+                    .onKeyPress(.upArrow) { searchList.move(-1); return .handled }
+                    // Esc: the list closes; a second Esc clears the search.
+                    .onExitCommand { if listOpen { listOpen = false } else { endSearch() } }
+                    .simultaneousGesture(TapGesture().onEnded { if !ui.search.isEmpty { listOpen = true } })   // a click shows the list again
                 if !ui.search.trimmingCharacters(in: .whitespaces).isEmpty {
                     // "2 of 5" (or "none") inside the field, then ✕ to exit the search.
                     let m = orderedMatches
@@ -128,11 +159,6 @@ struct ExpandedView: View {
             .overlay(Capsule().strokeBorder(searchFocused ? Color.accentColor : Color.clear, lineWidth: 1.5))
         }
         ToolbarItem(placement: .primaryAction) {
-            Button { ui.showGlobalSearch.toggle() } label: { Label("Search everything", systemImage: "text.magnifyingglass") }
-                .help("Search tasks, meetings and every area by words or an id (T-12, J-7)")
-                .popover(isPresented: $ui.showGlobalSearch, arrowEdge: .bottom) { GlobalSearchView() }
-        }
-        ToolbarItem(placement: .primaryAction) {
             Button { showGuide.toggle() } label: { Label("Guide", systemImage: "questionmark.circle") }
                 .help("What the colours, marks and icons mean")
                 .popover(isPresented: $showGuide, arrowEdge: .bottom) { GuideView() }
@@ -146,8 +172,18 @@ struct ExpandedView: View {
         }
     }
 
+    /// A row of the list: a result opens on its tab (the list closes; the query stays, so the box shows the list again);
+    /// "Show all N" shows that group's every result.
+    private func activate(_ r: SearchList.Row) {
+        if let k = r.showAll { searchList.expand(k); return }
+        guard let h = r.hit else { return }
+        listOpen = false
+        SearchRun.open(h, ui: ui)
+    }
+
     /// Esc / ✕: clear the search and leave the search box entirely (cursor out of it).
     private func endSearch() {
+        listOpen = false
         ui.search = ""
         searchFocused = false
         DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
