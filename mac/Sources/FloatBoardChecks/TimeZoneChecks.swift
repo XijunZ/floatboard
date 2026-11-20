@@ -43,4 +43,14 @@ import FloatBoardCore
     check(AppTime.setting == "Australia/Adelaide", "tz_summer_kept_when_no_fixed_winter_zone")
     try? AppTime.save(place: AppTime.macSetting, summerTime: false, to: store.db) // try?-ok: result checked below
     check(AppTime.setting == AppTime.macSetting && AppTime.place(from: store.db) == AppTime.macSetting, "tz_follow_mac_unaffected")
+
+    // Calendar: moving an event's start moves its end by the same amount.
+    let c = AppTime.calendar, day = c.startOfDay(for: winter)
+    func at(_ h: Int, _ m: Int = 0) -> Date { c.date(bySettingHour: h, minute: m, second: 0, of: day)! }
+    let later = EventPanelEdit.endAfterMovingStart(from: at(10), to: at(14), end: at(11))
+    let earlier = EventPanelEdit.endAfterMovingStart(from: at(14), to: at(9, 30), end: later)
+    check(later == at(15) && earlier == at(10, 30), "event_end_follows_start_both_ways")
+    let late = EventPanelEdit.endAfterMovingStart(from: at(22), to: at(23), end: at(23, 30))
+    let span = EventPanelEdit.span(day: day, start: at(23), end: late)
+    check(span.end.timeIntervalSince(span.start) == 5400, "event_end_follows_start_past_midnight")
 }

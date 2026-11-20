@@ -48,6 +48,7 @@ struct NewEventSheet: View {
                 Text("to").foregroundStyle(.secondary)
                 TimeInput(time: $end)
             }
+            .onChange(of: start) { was, now in end = EventPanelEdit.endAfterMovingStart(from: was, to: now, end: end) }
             if choice.allHidden {
                 // Every account that can take the event is hidden on this page: say so, and offer to show the default one.
                 let all = CalendarCache(store: store).connectedCalendars().filter { $0.owned && $0.shown }

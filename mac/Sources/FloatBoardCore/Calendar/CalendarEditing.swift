@@ -26,6 +26,12 @@ public enum EventPanelEdit {
         return c.dateComponents([.hour, .minute], from: a) == c.dateComponents([.hour, .minute], from: b)
     }
 
+    /// The end after the start moves: it moves by the same amount, so the event keeps its length (10:00–11:00 with the
+    /// start moved to 14:00 becomes 14:00–15:00; moved back to 9:30, 9:30–10:30).
+    public static func endAfterMovingStart(from old: Date, to new: Date, end: Date) -> Date {
+        end.addingTimeInterval(new.timeIntervalSince(old))
+    }
+
     /// A start and end from a day and two times of day. The end lands `endDayOffset` days after the start's day; an end that
     /// would not be after the start rolls on to the next day (23:00 to 01:00 ends the next morning, never 15 minutes later).
     public static func span(day: Date, start: Date, end: Date, endDayOffset: Int = 0) -> (start: Date, end: Date) {

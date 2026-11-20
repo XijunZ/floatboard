@@ -206,11 +206,7 @@ struct TimeInput: View {
                            nav: nav, navID: navID)
                 .popover(isPresented: $showClock, arrowEdge: .bottom) {
                     PickerPopover(model: $model, close: { showClock = false }) {
-                        DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
-                            .datePickerStyle(.graphical)
-                            .labelsHidden()
-                            .environment(\.calendar, AppTime.calendar)
-                            .environment(\.timeZone, AppTime.zone)
+                        ClockFace(model: $model)
                     }
                 }
         }
@@ -219,6 +215,100 @@ struct TimeInput: View {
         .onChange(of: time) { _, t in
             let fresh = SegmentModel.time(t)
             if fresh.values != model.values { model.values = fresh.values }
+        }
+    }
+}
+
+/// A clock face you click or drag. Hours first: the outer ring is 1–12, the inner ring 13–23 and 00; picking an hour
+/// moves on to the minutes (a click picks the nearest 5 minutes, a drag any minute). Click the HH or MM above to switch.
+struct ClockFace: View {
+    @Binding var model: SegmentModel
+    private let size: CGFloat = 210
+    private var r: CGFloat { size / 2 }
+    private var hours: Bool { model.active == 0 }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 2) {
+                part(0)
+                Text(":").foregroundStyle(.secondary)
+                part(1)
+            }
+            .font(.system(size: 22, weight: .medium)).monospacedDigit()
+            ZStack {
+                Circle().fill(Color.primary.opacity(0.06))
+                hand
+                if hours {
+                    ForEach(0..<24, id: \.self) { h in
+                        mark(h == 0 ? "00" : "\(h)", at: hourPoint(h), selected: model.values[0] == h, small: h == 0 || h > 12)
+                    }
+                } else {
+                    ForEach(0..<12, id: \.self) { i in
+                        mark(String(format: "%02d", i * 5), at: point(Double(i) / 12, radius: r * 0.8),
+                             selected: model.values[1] == i * 5, small: false)
+                    }
+                }
+            }
+            .frame(width: size, height: size)
+            .contentShape(Circle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { pick($0.location, click: false) }
+                .onEnded { v in
+                    let click = hypot(v.translation.width, v.translation.height) < 4
+                    pick(v.location, click: click)
+                    if hours { model.active = 1 }
+                })
+        }
+    }
+
+    private func part(_ i: Int) -> some View {
+        Text(model.display(i))
+            .padding(.horizontal, 4)
+            .background(RoundedRectangle(cornerRadius: 4).fill(model.active == i ? Color.accentColor.opacity(0.25) : .clear))
+            .contentShape(Rectangle())
+            .onTapGesture { model.select(i) }
+    }
+
+    private var hand: some View {
+        let end = hours ? hourPoint(model.values[0]) : point(Double(model.values[1]) / 60, radius: r * 0.8)
+        return ZStack {
+            Path { p in p.move(to: CGPoint(x: r, y: r)); p.addLine(to: end) }
+                .stroke(Color.accentColor, lineWidth: 2)
+            Circle().fill(Color.accentColor).frame(width: 6, height: 6).position(x: r, y: r)
+        }
+    }
+
+    private func mark(_ text: String, at p: CGPoint, selected: Bool, small: Bool) -> some View {
+        Text(text)
+            .font(.system(size: small ? 10 : 13, weight: selected ? .semibold : .regular)).monospacedDigit()
+            .foregroundStyle(selected ? Color.white : (small ? Color.secondary : Color.primary))
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(selected ? Color.accentColor : .clear))
+            .position(p)
+    }
+
+    /// A point on the face: `turn` 0 is 12 o'clock, going clockwise.
+    private func point(_ turn: Double, radius: CGFloat) -> CGPoint {
+        let a = turn * 2 * .pi
+        return CGPoint(x: r + radius * CGFloat(sin(a)), y: r - radius * CGFloat(cos(a)))
+    }
+    private func hourPoint(_ h: Int) -> CGPoint {
+        let inner = h == 0 || h > 12
+        return point(Double(h % 12) / 12, radius: r * (inner ? 0.52 : 0.8))
+    }
+
+    private func pick(_ loc: CGPoint, click: Bool) {
+        let dx = loc.x - r, dy = loc.y - r
+        var turn = atan2(Double(dx), Double(-dy)) / (2 * .pi)
+        if turn < 0 { turn += 1 }
+        model.buffer = ""
+        if hours {
+            let i = Int((turn * 12).rounded()) % 12
+            let inner = hypot(dx, dy) < r * 0.66
+            model.values[0] = inner ? (i == 0 ? 0 : i + 12) : (i == 0 ? 12 : i)
+        } else {
+            let m = click ? (Int((turn * 12).rounded()) % 12) * 5 : Int((turn * 60).rounded()) % 60
+            model.values[1] = m
         }
     }
 }
