@@ -59,8 +59,13 @@ struct ExpandedView: View {
         // The search list, under the toolbar's search box (right). Shown while the box has text, until Esc or an item opens.
         .overlay(alignment: .topTrailing) {
             if listOpen && !ui.search.trimmingCharacters(in: .whitespaces).isEmpty {
-                SearchResultsPanel(list: $searchList, searching: searching) { activate($0) }
-                    .padding(.trailing, 10).padding(.top, 2)
+                ZStack(alignment: .topTrailing) {
+                    // A click anywhere else in the window closes the list, as Esc does (the query stays). Like a menu,
+                    // that click only closes it.
+                    Color.black.opacity(0.001).contentShape(Rectangle()).onTapGesture { listOpen = false }
+                    SearchResultsPanel(list: $searchList, searching: searching) { activate($0) }
+                        .padding(.trailing, 10).padding(.top, 2)
+                }
             }
         }
         // Searched 150 ms after typing stops (people off the main thread): typing is never held up.
@@ -86,6 +91,7 @@ struct ExpandedView: View {
             listOpen = !q.trimmingCharacters(in: .whitespaces).isEmpty
             ui.currentMatch = orderedMatches.first
         }
+        .onChange(of: ui.tab) { _, _ in listOpen = false }   // another tab picked in the toolbar: the list closes
         .onChange(of: searchFocused) { _, on in if on && !ui.search.trimmingCharacters(in: .whitespaces).isEmpty { listOpen = true } }
         .onReceive(NotificationCenter.default.publisher(for: .floatBoardFocusSearch)) { _ in
             DispatchQueue.main.async { searchFocused = true }

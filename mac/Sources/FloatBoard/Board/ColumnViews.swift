@@ -108,6 +108,9 @@ struct Column: View {
                     withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
                 }
             }
+            // A task picked in search (maybe on another tab, before this column was on screen): scrolled to once laid out.
+            .onAppear { reveal(proxy, cards) }
+            .onChange(of: ui.revealTask) { _, _ in reveal(proxy, cards) }
             }
         }
         .padding(8)
@@ -118,6 +121,14 @@ struct Column: View {
             for s in items { if let id = Int64(s), let c = store.card(id) { store.move(c, to: status) } }
             return true
         } isTargeted: { targeted = $0 }
+    }
+
+    private func reveal(_ proxy: ScrollViewProxy, _ cards: [Card]) {
+        guard let id = RevealRequest.take(&ui.revealTask, ifIn: cards.map(\.id)) else { return }
+        // After this layout pass (a column that just appeared has no rows laid out yet).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
+        }
     }
 }
 

@@ -27,7 +27,9 @@ import SwiftUI
             ui.tab = .board
             ui.currentMatch = h.id.number
             ui.searchCommitted = true
+            ui.revealTask = RevealRequest(h.id.number)   // the column scrolls to it once it's on screen (also from another tab)
         case .event:
+            ui.revealEvent = RevealRequest(h.id.number)  // its block opens its panel once the day is on screen
             ui.calendarFocus = h.date
             ui.tab = .calendar
         default:
@@ -150,5 +152,40 @@ struct SearchResultsPanel: View {
                 w.close()
             }
         }
+    }
+}
+
+/// Round 23 picture (`FLOATBOARD_ROUND23SHOTS=1`, scratch database only): a task far down the To do column picked in
+/// search while the Calendar tab shows; the board then appears scrolled to it (outlined as the current match).
+@MainActor enum Round23Shots {
+    static func run(dir: String, store: Store, ui: UIState, google: Google) {
+        guard LocalData.isScratchDatabase else { print("Round23Shots: scratch database only"); return }
+        for i in 1...40 { store.add(title: String(format: "Task %02d", i), area: store.areas.first?.name ?? "Work", importance: .medium, due: nil) }
+        guard let target = store.cards.first(where: { $0.title == "Task 38" }) else { print("Round23Shots: no task"); return }
+        struct Root: View {
+            @EnvironmentObject var ui: UIState
+            var body: some View {
+                Group { if ui.tab == .board { Column(status: .todo) } else { Text("Calendar").frame(maxWidth: .infinity, maxHeight: .infinity) } }
+                    .frame(width: 320, height: 420)
+            }
+        }
+        ui.tab = .calendar
+        ui.search = "Task 38"
+        let host = NSHostingView(rootView: Root().environmentObject(store).environmentObject(ui).environmentObject(google))
+        host.frame = CGRect(x: 0, y: 0, width: 320, height: 420)
+        let w = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false; w.contentView = host
+        w.setFrameOrigin(NSPoint(x: -30000, y: -30000)); w.orderFrontRegardless()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        SearchRun.open(SearchHit(id: ShortID(kind: .task, number: target.id), title: target.title, detail: "", date: nil), ui: ui)
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        host.layoutSubtreeIfNeeded()
+        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+            host.cacheDisplay(in: host.bounds, to: rep)
+            let file = URL(fileURLWithPath: dir).appendingPathComponent("round23-task-from-calendar.png")
+            do { try rep.representation(using: .png, properties: [:])?.write(to: file) } catch { print("ERR: \(error)") }
+        }
+        print("ROUND23 revealTask pending after: \(ui.revealTask == nil ? "taken" : "still pending")")
+        w.close()
     }
 }
