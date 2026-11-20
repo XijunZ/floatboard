@@ -56,7 +56,10 @@ public enum EventPanelEdit {
         if now.title != opened.title, !t.isEmpty, t != event.title { title = t }
         guard !event.allDay else { return (title, nil) }
         let dayChanged = Due.dayString(now.day) != Due.dayString(opened.day)
-        let startChanged = !sameClock(now.start, opened.start), endChanged = !sameClock(now.end, opened.end)
+        let startChanged = !sameClock(now.start, opened.start)
+        // The panel moves the end with the start (endAfterMovingStart), so the end counts as edited only when it is not
+        // where that shift put it: a start-only move keeps the event's length, overnight or not.
+        let endChanged = !sameClock(now.end, opened.end) && !sameClock(now.end, endAfterMovingStart(from: opened.start, to: now.start, end: opened.end))
         guard dayChanged || startChanged || endChanged else { return (title, nil) }
         let c = AppTime.calendar
         let day = dayChanged ? now.day : event.start
@@ -64,8 +67,11 @@ public enum EventPanelEdit {
         let s = dayChanged || startChanged ? on(day, startClock) : event.start
         let e: Date
         if endChanged {
-            let offset = c.dateComponents([.day], from: c.startOfDay(for: event.start), to: c.startOfDay(for: event.end)).day ?? 0
-            e = span(day: day, start: s, end: now.end, endDayOffset: offset).end
+            // Under a day long: the end is the first time of that clock after the start (21:00 to 23:00 the same evening,
+            // 23:00 to 01:00 the next morning). Longer: the end keeps its day relative to the start.
+            let length = event.end.timeIntervalSince(event.start)
+            let offset = length < 86_400 ? 0 : c.dateComponents([.day], from: c.startOfDay(for: event.start), to: c.startOfDay(for: event.end)).day ?? 0
+            e = span(day: c.startOfDay(for: s), start: s, end: now.end, endDayOffset: offset).end
         } else {
             e = s.addingTimeInterval(event.end.timeIntervalSince(event.start))
         }

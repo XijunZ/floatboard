@@ -53,4 +53,18 @@ import FloatBoardCore
     let late = EventPanelEdit.endAfterMovingStart(from: at(22), to: at(23), end: at(23, 30))
     let span = EventPanelEdit.span(day: day, start: at(23), end: late)
     check(span.end.timeIntervalSince(span.start) == 5400, "event_end_follows_start_past_midnight")
+
+    // Codex 10: an overnight event (23:00-01:00) whose start moves to 21:00 (the panel moves the end to 23:00) is saved as
+    // 21:00-23:00 the same evening, not 26 hours long; editing the end after that still lands after the start.
+    let next = c.date(byAdding: .day, value: 1, to: day)!
+    func on(_ d: Date, _ h: Int, _ m: Int = 0) -> Date { c.date(bySettingHour: h, minute: m, second: 0, of: d)! }
+    let overnight = CalEvent(shortID: 1, account: "a", calendarID: "c", eventID: "o", start: at(23), end: on(next, 1), allDay: false, title: "Late", location: "", videoLink: "", description: "", htmlLink: "", recurringID: nil, googleUpdated: winter, fbCard: nil)
+    let opened = EventPanelEdit.Fields(overnight)
+    let shifted = EventPanelEdit.endAfterMovingStart(from: opened.start, to: at(21), end: opened.end)
+    let m1 = EventPanelEdit.changes(event: overnight, opened: opened, now: .init(title: "Late", day: opened.day, start: at(21), end: shifted)).move
+    check(m1?.start == at(21) && m1?.end == at(23), "overnight_event_start_moved_keeps_two_hours")
+    let m2 = EventPanelEdit.changes(event: overnight, opened: opened, now: .init(title: "Late", day: opened.day, start: at(21), end: at(23, 30))).move
+    check(m2?.start == at(21) && m2?.end == at(23, 30), "overnight_event_start_moved_then_end_edited_same_evening")
+    let m3 = EventPanelEdit.changes(event: overnight, opened: opened, now: .init(title: "Late", day: opened.day, start: at(23), end: on(next, 2))).move
+    check(m3?.start == at(23) && m3?.end == on(next, 2), "overnight_event_end_edited_stays_next_morning")
 }
