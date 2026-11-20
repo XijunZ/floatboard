@@ -32,8 +32,15 @@ struct TimeGrid: View {
 
     @EnvironmentObject var store: Store
     @EnvironmentObject var edits: CalendarEdits
+    @EnvironmentObject var ui: UIState
 
     private var hours: [Int] { Array(snapshotHours ?? 0...23) }
+
+    /// The hour to show at the top: an hour before the event search asked for when it's on this page, else 7:00.
+    private func topHour(_ events: [CalEvent]) -> Int {
+        guard let want = ui.revealEvent?.id, let e = events.first(where: { $0.shortID == want && !$0.allDay }) else { return 7 }
+        return max(0, cal.component(.hour, from: e.start) - 1)
+    }
     private var cal: Calendar { AppTime.calendar }
 
     var body: some View {
@@ -97,7 +104,8 @@ struct TimeGrid: View {
                     ScrollView(.vertical) {
                         grid(placed: placed, calendars: calendars, pending: pending, refused: refused)
                     }
-                    .onAppear { proxy.scrollTo(7, anchor: .top) }
+                    .onAppear { proxy.scrollTo(topHour(events), anchor: .top) }
+                    .onChange(of: ui.revealEvent) { _, _ in proxy.scrollTo(topHour(events), anchor: .top) }
                 }
             }
         }
@@ -273,6 +281,7 @@ private struct EventBlock: View {
 
     @EnvironmentObject var edits: CalendarEdits
     @EnvironmentObject var store: Store
+    @EnvironmentObject var ui: UIState
     @Environment(\.eventColours) private var tints
     @State private var open = false
     @State private var showRefusal = false
@@ -285,6 +294,11 @@ private struct EventBlock: View {
     /// A new event that Google has not confirmed yet (no E-n): shown, but not editable until it arrives.
     private var placeholder: Bool { event.shortID < 0 }
     private var editable: Bool { !placeholder && (calendar?.owned ?? false) }
+
+    private func revealIfAsked() {
+        guard !placeholder, RevealRequest.take(&ui.revealEvent, ifIn: [event.shortID]) != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { open = true }
+    }
 
     var body: some View {
         let narrow = columnWidth / CGFloat(item.columns) < 110
@@ -348,6 +362,9 @@ private struct EventBlock: View {
         .opacity(drag == .zero ? 1 : 0.8)
         .modifier(HoverDetail(suppressed: open || showRefusal || drag != .zero || grow != 0) { CalendarItemDetail(content: .event(event), calendar: calendar) })
         .popover(isPresented: $open, arrowEdge: .trailing) { EventPanel(event: event, calendar: calendar, waiting: waiting) }
+        // An event picked in search: its panel opens once its block is on screen (after the grid has scrolled to it).
+        .onAppear { revealIfAsked() }
+        .onChange(of: ui.revealEvent) { _, _ in revealIfAsked() }
         .popover(isPresented: $showRefusal, arrowEdge: .trailing) {
             if let refused {
                 VStack(alignment: .leading, spacing: 8) {

@@ -784,3 +784,14 @@ func integrationRebindingLiveChecks() async {
     check(SearchList(results: []).rows.isEmpty && SearchList(results: []).groups.isEmpty, "search_list_empty")
     check(SearchList.title(.event) == "Calendar" && SearchList.title(.resolution) == "Goals" && SearchList.title(.decision) == "Decisions", "search_list_group_names")
 }
+
+/// Round 23: a search result asks its tab to reveal the item once that tab is on screen (the board's columns, the
+/// Calendar's day): the request waits until the view holding the item takes it, and picking the same item twice asks twice.
+@MainActor func revealRequestChecks() {
+    var pending: RevealRequest? = RevealRequest(42)
+    let notHere = RevealRequest.take(&pending, ifIn: [1, 2, 3])
+    check(notHere == nil && pending?.id == 42, "a_reveal_waits_for_the_view_holding_the_item")
+    let taken = RevealRequest.take(&pending, ifIn: [41, 42])
+    check(taken == 42 && pending == nil, "a_reveal_is_taken_once_by_the_view_holding_it")
+    check(RevealRequest(42) != RevealRequest(42), "picking_the_same_item_twice_asks_twice")
+}
