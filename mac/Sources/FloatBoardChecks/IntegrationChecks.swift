@@ -842,3 +842,28 @@ func integrationRebindingLiveChecks() async {
     try? await Task.sleep(nanoseconds: 400_000_000) // try?-ok: only waits past the delay
     check(opened.isEmpty && current == rE, "navigating_away_during_the_delay_opens_nothing")
 }
+
+/// Round 26 (Codex 14): one place holds what search asked to show. A new pick of any kind replaces the old one; going
+/// to another tab or another day drops an event request (so coming back opens nothing); the move to its own tab and day
+/// keeps it.
+@MainActor func pendingRevealChecks() {
+    let d = AppTime.calendar.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 20))!
+    let next = AppTime.calendar.date(byAdding: .day, value: 1, to: d)!
+    var p = PendingReveals()
+    p.pick(event: 9, day: d)
+    p.shown(.calendar); p.calendarShows(day: d)
+    check(p.event?.id == 9, "an_event_request_survives_the_move_to_its_tab_and_day")
+    p.calendarShows(day: next)
+    p.calendarShows(day: d)   // and back
+    check(p.event == nil, "going_to_another_day_drops_the_event_request_so_coming_back_opens_nothing")
+    p.pick(event: 9, day: d)
+    p.shown(.board)
+    check(p.event == nil, "going_to_another_tab_drops_the_event_request")
+    p.pick(event: 9, day: d)
+    p.pick(task: 42)
+    check(p.event == nil && p.task?.id == 42, "picking_a_task_after_an_event_drops_the_event_request")
+    p.pickOther()
+    check(p.task == nil && p.event == nil, "picking_any_other_result_drops_every_request")
+    p.pick(task: 42); p.shown(.calendar)
+    check(p.task == nil, "leaving_the_board_drops_a_task_request")
+}

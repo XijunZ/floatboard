@@ -173,6 +173,8 @@ struct CalendarView: View {
         .environment(\.calendarSnapshot, snapshotHours != nil)
         .onAppear { edits.store = store; showFocusedDay() }
         .onChange(of: ui.calendarFocus) { _, _ in showFocusedDay() }
+        // Another day shown (not the one an event picked in search is on): that request is dropped (round 26).
+        .onChange(of: anchor) { _, day in ui.reveals.calendarShows(day: day) }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
             edits.prune()
             tick += 1
