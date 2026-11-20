@@ -600,37 +600,78 @@ struct RulebookEditor: View {
 /// its moment and shows at that moment's time in the chosen zone.
 struct GeneralSection: View {
     @EnvironmentObject var store: Store
-    @State private var setting = AppTime.setting
+    @State private var place = ""
+    @State private var summer = true
     @State private var search = ""
     @State private var error: String?
+    @State private var loaded = false
 
-    private var zones: [String] {
-        let q = search.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "_")
-        return q.isEmpty ? AppTime.allZones : AppTime.allZones.filter { $0.lowercased().contains(q) }
-    }
+    private var groups: [AppTime.ZoneGroup] { AppTime.groups(matching: search) }
+    private var placeZone: TimeZone? { place == AppTime.macSetting ? nil : TimeZone(identifier: place) }
 
     var body: some View {
-        SettingsBlock(title: "Time zone", help: "Every date and time on the board, the bar and your phone is shown in this zone. Europe/London is UK time (GMT in winter, BST in summer). Changing it never moves a task's day; a task with a time stays at the same moment.") {
-            Picker("Use", selection: $setting) {
+        SettingsBlock(title: "Time zone", help: "Every date and time on the board, the bar and your phone is shown in this zone. Zones are grouped by their winter offset from UTC; ☀︎ marks places with summer time, which follows the real clock changes automatically (Europe/London is GMT in winter, BST in summer). Changing it never moves a task's day; a task with a time stays at the same moment.") {
+            Picker("Use", selection: $place) {
                 Text("Follow this Mac (\(TimeZone.current.identifier))").tag(AppTime.macSetting)
-                Divider()
-                ForEach(zones, id: \.self) { Text($0).tag($0) }
-                if !zones.contains(setting) && setting != AppTime.macSetting { Text(setting).tag(setting) }
+                ForEach(groups) { g in
+                    Section(g.label) {
+                        ForEach(g.zones, id: \.self) { name in
+                            Text(label(name)).tag(name)
+                        }
+                    }
+                }
+                if place != AppTime.macSetting && !groups.contains(where: { $0.zones.contains(place) }) { Text(label(place)).tag(place) }
             }
             .labelsHidden().frame(width: 360)
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search zones, e.g. Shanghai", text: $search).textFieldStyle(.roundedBorder).frame(width: 330)
+                TextField("Search zones, e.g. Shanghai or +1", text: $search).textFieldStyle(.roundedBorder).frame(width: 330)
             }
-            Text("Now: \(Fmt.withTime(Date())) in \(setting == AppTime.macSetting ? TimeZone.current.identifier : setting)")
+            if let z = placeZone, AppTime.hasSummerTime(z) {
+                let winterOnly = AppTime.winterOnlyZone(for: z)
+                Toggle("Summer time", isOn: $summer).disabled(winterOnly == nil)
+                Text(summerNote(z, canTurnOff: winterOnly != nil))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).frame(width: 360, alignment: .leading)
+            }
+            Text("Now: \(Fmt.withTime(Date())) (\(AppTime.offsetLabel(AppTime.zone.secondsFromGMT())))")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             if let error { Text(error).font(.system(size: 11)).foregroundStyle(.red) }
         }
-        .onChange(of: setting) { _, new in
-            guard new != AppTime.setting else { return }
-            do { try AppTime.save(new, to: store.db); error = nil }
-            catch { self.error = "Couldn't save the time zone: \(error)"; setting = AppTime.setting; store.activity("settings", .error, "Couldn't save the time zone", detail: "\(error)") }
+        .onAppear {
+            place = AppTime.place(from: store.db)
+            summer = !AppTime.summerTimeOff(place: place)
+            loaded = true
         }
+        .onChange(of: place) { old, _ in
+            guard loaded, old != "" else { return }
+            summer = true   // a newly picked place follows its summer time until turned off
+            persist()
+        }
+        .onChange(of: summer) { _, _ in if loaded { persist() } }
+    }
+
+    private func persist() {
+        do { try AppTime.save(place: place, summerTime: summer, to: store.db); error = nil }
+        catch {
+            self.error = "Couldn't save the time zone: \(error)"
+            place = AppTime.place(from: store.db); summer = !AppTime.summerTimeOff(place: place)
+            store.activity("settings", .error, "Couldn't save the time zone", detail: "\(error)")
+        }
+    }
+
+    private func label(_ name: String) -> String {
+        guard let z = TimeZone(identifier: name) else { return name }
+        return name.replacingOccurrences(of: "_", with: " ") + (AppTime.hasSummerTime(z) ? "  ☀︎" : "")
+    }
+
+    private func summerNote(_ z: TimeZone, canTurnOff: Bool) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.timeZone = z; f.dateFormat = "d MMM"
+        let winter = AppTime.offsetLabel(AppTime.standardOffset(z))
+        guard canTurnOff else { return "Summer time follows \(place) automatically (it can't be turned off for this zone)." }
+        guard summer else { return "Summer time off: the clock stays at \(winter) all year." }
+        guard let next = z.nextDaylightSavingTimeTransition else { return "Summer time is followed automatically." }
+        let after = AppTime.offsetLabel(z.secondsFromGMT(for: next.addingTimeInterval(60)))
+        return "Automatic: clocks change to \(after) on \(f.string(from: next)). Turn off to stay at \(winter) all year."
     }
 }
 
