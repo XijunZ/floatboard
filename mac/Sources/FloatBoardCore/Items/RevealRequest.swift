@@ -31,3 +31,24 @@ public enum CalendarReveal {
 public enum OutsideClick {
     public static func closes(at p: CGPoint, keep: [CGRect]) -> Bool { !keep.contains { $0.contains(p) } }
 }
+
+/// Opens an event's panel a moment after search picked it (after the grid has scrolled to it), round 25: one pending
+/// open per block, cancelled by a newer schedule or `cancel()` (the block left the page or saw another request); when
+/// it fires it opens and then acknowledges only while the current request is still the one it was scheduled for.
+@MainActor public final class DelayedReveal {
+    private var task: Task<Void, Never>?
+    public init() {}
+
+    public func schedule(_ r: RevealRequest, delay: Double, current: @escaping () -> RevealRequest?, open: @escaping () -> Void,
+                         acknowledge: @escaping () -> Void) {
+        task?.cancel()
+        task = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) // try?-ok: a cancelled wait is checked just below
+            guard !Task.isCancelled, current() == r else { return }
+            open()
+            if current() == r { acknowledge() }
+        }
+    }
+
+    public func cancel() { task?.cancel(); task = nil }
+}

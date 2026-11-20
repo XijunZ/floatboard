@@ -811,3 +811,34 @@ func integrationRebindingLiveChecks() async {
     check(OutsideClick.closes(at: CGPoint(x: 100, y: 200), keep: [panel]) && !OutsideClick.closes(at: CGPoint(x: 700, y: 100), keep: [panel]),
           "a_click_outside_the_list_closes_it_a_click_inside_doesnt")
 }
+
+/// Round 25 (Codex 13): an event's panel opens after a short delay; a newer pick in that time, or leaving the page,
+/// cancels it. Two events picked quickly open only the second; navigating away opens nothing.
+@MainActor func delayedRevealChecks() async {
+    var current: RevealRequest?
+    var opened: [String] = [], acked: [String] = []
+    let a = DelayedReveal(), b = DelayedReveal()
+    let rA = RevealRequest(1), rB = RevealRequest(2)
+    current = rA
+    a.schedule(rA, delay: 0.15, current: { current }, open: { opened.append("A") }, acknowledge: { acked.append("A"); current = nil })
+    current = rB                                   // picked again within the delay
+    a.cancel()                                     // block A sees a request that isn't its own
+    b.schedule(rB, delay: 0.15, current: { current }, open: { opened.append("B") }, acknowledge: { acked.append("B"); current = nil })
+    try? await Task.sleep(nanoseconds: 400_000_000) // try?-ok: only waits past the delay
+    check(opened == ["B"] && acked == ["B"] && current == nil, "two_quick_picks_open_only_the_second_event")
+    // Even without the cancel, a stale callback opens nothing (it checks the current request first).
+    opened = []; acked = []
+    let rC = RevealRequest(3), rD = RevealRequest(4)
+    current = rC
+    a.schedule(rC, delay: 0.15, current: { current }, open: { opened.append("C") }, acknowledge: { acked.append("C") })
+    current = rD
+    try? await Task.sleep(nanoseconds: 400_000_000) // try?-ok: only waits past the delay
+    check(opened.isEmpty && acked.isEmpty && current == rD, "a_stale_reveal_never_opens_or_acknowledges")
+    // Leaving the page during the delay: nothing opens later.
+    let rE = RevealRequest(5)
+    current = rE
+    a.schedule(rE, delay: 0.15, current: { current }, open: { opened.append("E") }, acknowledge: { acked.append("E") })
+    a.cancel()                                     // the block disappeared
+    try? await Task.sleep(nanoseconds: 400_000_000) // try?-ok: only waits past the delay
+    check(opened.isEmpty && current == rE, "navigating_away_during_the_delay_opens_nothing")
+}
