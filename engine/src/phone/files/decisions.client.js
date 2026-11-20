@@ -17,12 +17,19 @@
   function loadDecisionCache() {
     var c = load(DEC_KEY), q = load(DEC_QUEUE_KEY), acc = confirmedAccount();
     decisions = c && typeof c.account === "string" && (!acc || c.account === acc) ? c : null;
-    decQueue = q && typeof q.account === "string" && Array.isArray(q.actions) && (!acc || q.account === acc) ? q
+    decQueue = q && typeof q.account === "string" && Array.isArray(q.actions) && (!acc || q.account === acc)
+      ? { account: q.account, actions: decShared.load(q.account) }
       : { account: decisions ? decisions.account : acc, actions: [] };
     if (!decQueue.account) decQueue.account = acc;
   }
 
-  function saveDecQueue() { store(DEC_QUEUE_KEY, decQueue.actions.length ? decQueue : null); }
+  // Shared by every tab of this phone (round 28): saved merged with what other tabs queued.
+  var decShared = SharedQueue(DEC_QUEUE_KEY, load, storeDurable);
+  function saveDecQueue() {
+    if (!decQueue.account) { store(DEC_QUEUE_KEY, decQueue.actions.length ? decQueue : null); return; }
+    var out = decShared.save(decQueue.account, decQueue.actions);
+    if (out) decQueue.actions = out;
+  }
 
   // Signing out or another account: drop what this phone holds for Decisions.
   function dropDecisions() {
@@ -30,6 +37,7 @@
     decQueue = { account: null, actions: [] };
     store(DEC_KEY, null);
     store(DEC_QUEUE_KEY, null);
+    decShared.forget();
   }
 
   // Shows or hides the Decisions screen inside More (called by render()).
@@ -52,6 +60,7 @@
   // it stores them (409 for another account: the queue is held, never sent elsewhere). One send at a time.
   var decSending = false;
   async function sendDecisionQueue() {
+    if (decQueue.account) decQueue.actions = decShared.merged(decQueue.account, decQueue.actions);   // what other tabs queued goes too
     var body = decisionSendBody(decQueue, confirmedAccount());
     if (body && body.tooBig) {   // could never be sent (over the engine's size limit): dropped, said once, the rest go on
       decQueue.actions = decQueue.actions.filter(function (a) { return a.id !== body.tooBig; });
@@ -116,8 +125,9 @@
     if (decQueue.account !== acc) loadDecisionCache();   // a queue this phone already holds (screen not opened yet) is kept
     var next = decisionEnqueue(decQueue, a, acc);
     if (!next) { toast("Changes of another account are still waiting on this phone. Sign in to it, or sign out, first."); return false; }
-    if (!storeDurable(DEC_QUEUE_KEY, next)) return false;
-    decQueue = next;
+    var kept = decShared.save(next.account, next.actions);   // merged with other tabs', then read back
+    if (!kept) return false;
+    decQueue = { account: next.account, actions: kept };
     renderDecisions();
     syncDecisions();
     return true;

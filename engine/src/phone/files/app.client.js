@@ -525,7 +525,13 @@
     noteTimer = setTimeout(function () { n.hidden = true; }, 6000);
   }
 
-  function saveQueue() { store(QUEUE_KEY, queue.actions.length ? queue : null); }
+  // Saved merged with what other tabs of this phone stored (round 28): a change another tab queued is never wiped.
+  var boardQueue = SharedQueue(QUEUE_KEY, load, storeDurable);
+  function saveQueue() {
+    if (!queue.account) { store(QUEUE_KEY, queue.actions.length ? queue : null); return; }
+    var out = boardQueue.save(queue.account, queue.actions);
+    if (out) queue.actions = out;
+  }
 
   // Forget everything this phone holds for an account: its board, its queue and the ids it sent.
   // The session generation shared by Jots, Circle and Decisions (`sessionAccepts` in files/sync.client.js): it goes up
@@ -541,6 +547,7 @@
     board = null;
     shownAccount = null;
     queue = { account: null, actions: [] };
+    boardQueue.forget();
     sentIds = [];
     store(BOARD_KEY, null);
     store(QUEUE_KEY, null);
@@ -607,6 +614,7 @@
     try {
       if (!me) acceptAccount(await api("/app/api/me"));
       var got = false;
+      if (queue.account) queue.actions = boardQueue.merged(queue.account, queue.actions);   // what other tabs queued goes too
       while (queue.actions.length) {
         var body = takeBatch(queue.actions, new Date().toISOString());
         if (!body.actions.length) break;
@@ -1239,7 +1247,8 @@
     }
     if (sessionGet(PAIR_KEY)) { showPair(); return; }
     var q = load(QUEUE_KEY);
-    queue = q && typeof q.account === "string" && Array.isArray(q.actions) ? q : { account: null, actions: [] };
+    queue = q && typeof q.account === "string" && Array.isArray(q.actions) ? { account: q.account, actions: boardQueue.load(q.account) }
+      : { account: null, actions: [] };
     var sent = load(SENT_KEY);
     sentIds = Array.isArray(sent) ? sent : [];
     me = null;
