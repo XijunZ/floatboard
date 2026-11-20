@@ -173,7 +173,9 @@ public struct JotAck: Equatable {
             // A later edit time and a delete made on the phone, with the earlier texts, in one transaction: acked only after it.
             do {
                 try store.performThrowing {
-                    if r.kind != JotKind.meetingNotes.rawValue && (r.updated > r.added || r.deleted) { try applyPhoneRow(saved.id, r) }
+                    // Meeting notes too: notes deleted (or edited) on the phone before this first intake arrive that way,
+                    // so they are never sent back as live (round 28).
+                    if r.updated > r.added || r.deleted { try applyPhoneRow(saved.id, r) }
                     try js.keepInHistoryRow(saved.id, r.versions)
                 }
             } catch {
