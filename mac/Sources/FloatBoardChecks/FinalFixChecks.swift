@@ -397,3 +397,21 @@ final class FakeGoogle: @unchecked Sendable {
         })
     }
 }
+
+/// Round 28 (Codex 17): an end the user set by hand is always the end saved, even when it equals the end the event had
+/// (10:00–11:00, start moved to 09:00 so the end shifted to 10:00, then the end set back to 11:00: 09:00–11:00 is saved).
+@MainActor func explicitEndChecks() {
+    let cal = AppTime.calendar
+    let day = cal.date(from: DateComponents(year: 2026, month: 11, day: 24))!
+    func at(_ h: Int) -> Date { cal.date(bySettingHour: h, minute: 0, second: 0, of: day)! }
+    let ev = CalEvent(shortID: 5, account: "a@example.com", calendarID: "c", eventID: "x", start: at(10), end: at(11), allDay: false, title: "Call",
+                      location: "", videoLink: "", description: "", htmlLink: "", recurringID: "", googleUpdated: Date(), fbCard: nil)
+    let opened = EventPanelEdit.Fields(ev)
+    var now = opened
+    now.start = at(9)
+    now.end = EventPanelEdit.endAfterMovingStart(from: opened.start, to: now.start, end: opened.end)   // the panel shifts it to 10:00
+    check(EventPanelEdit.changes(event: ev, opened: opened, now: now).move.map { [$0.start, $0.end] } == [at(9), at(10)], "start_move_keeps_the_length")
+    now.end = at(11); now.endEdited = true                                                              // then set back to 11:00 by hand
+    let m = EventPanelEdit.changes(event: ev, opened: opened, now: now).move
+    check(m?.start == at(9) && m?.end == at(11), "an_end_set_by_hand_is_saved_even_when_it_equals_the_old_end")
+}
