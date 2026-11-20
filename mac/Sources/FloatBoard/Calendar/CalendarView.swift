@@ -177,7 +177,7 @@ struct CalendarView: View {
             edits.prune()
             tick += 1
         }
-        .sheet(item: $edits.newEvent) { draft in NewEventSheet(start: draft.start) }
+        .sheet(item: $edits.newEvent) { draft in NewEventSheet(start: draft.start).environmentObject(edits).environmentObject(store) }
     }
 
     private var header: some View {
