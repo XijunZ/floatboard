@@ -91,11 +91,20 @@ export async function assert(a: Authenticator, options: any, opts: { origin?: st
 
 // ---------------------------------------------------------------- engine calls
 
-export const api = (path: string, body: unknown, opts: { origin?: string | null; cookie?: string } = {}) => {
+/** A board change names the account its queue was made under (round 28): added for the session's account unless the
+ *  body says otherwise (an `account` key, even undefined, is left as it is). */
+export async function withAccount(cookie: string | undefined, body: any): Promise<any> {
+  if (!cookie || !body || typeof body !== "object" || "account" in body) return body;
+  const m = await (await call("/app/api/me", { headers: { Cookie: cookie } })).json<any>();
+  return { ...body, account: m.account };
+}
+
+export const api = async (path: string, body: unknown, opts: { origin?: string | null; cookie?: string } = {}) => {
   const headers: Record<string, string> = {};
   if (opts.origin !== null) headers.Origin = opts.origin ?? BASE;
   if (opts.cookie) headers.Cookie = opts.cookie;
-  return call(path, { method: "POST", headers, body: JSON.stringify(body ?? {}) });
+  const b = path === "/app/api/action" ? await withAccount(opts.cookie, body) : body;
+  return call(path, { method: "POST", headers, body: JSON.stringify(b ?? {}) });
 };
 export const me = (cookie?: string, extra: Record<string, string> = {}) => call("/app/api/me", { headers: { ...(cookie ? { Cookie: cookie } : {}), ...extra } });
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { BASE, call, fathomHookPath, newUser } from "../helpers";
-import { pairPhone } from "../phone-helpers";
+import { pairPhone, withAccount } from "../phone-helpers";
 import { setNtfyFetch } from "../../src/reminders/alerts";
 import { runDueAlerts } from "../../src/reminders/due";
 
@@ -13,8 +13,8 @@ const card = (id: number, over: Record<string, unknown> = {}) => ({ id, title: `
   due: null, has_time: false, status: "todo", link: null, done_at: null, ...over });
 const put = (key: string, body: unknown) => call("/v2/board", { method: "PUT", key, body: JSON.stringify(body) });
 const board = (cookie: string) => call("/app/api/board", { headers: { Cookie: cookie } }).then((r) => r.json<any>());
-const send = (cookie: string, body: unknown) =>
-  call("/app/api/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify(body) });
+const send = async (cookie: string, body: unknown) =>
+  call("/app/api/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify(await withAccount(cookie, body)) });
 const macActions = (key: string) => call("/v2/phone-actions", { key }).then((r) => r.json<{ actions: any[] }>());
 const ALL_ON = { jots: true, circle: true, decisions: true, resolutions: true };
 
@@ -85,6 +85,36 @@ describe("foundation: tags and modules in the board copy", () => {
     const body = await (await send(u.cookie, batch)).json<any>();
     expect(body.accepted).toEqual(["ptag-q001"]);
     expect((await macActions(u.key)).actions[0]).toMatchObject({ client_id: "ptag-q001", action: "set_tags", tags: ["Personal", "Work"] });
+  });
+
+  // Round 28 (Codex 18): a Mac clock five minutes ahead: its tags_at is corrected like status_at, so a phone tag change
+  // made after the Mac's (on the engine's clock) is not marked superseded.
+  it("tags_at_is_corrected_for_the_macs_clock_like_status_at", async () => {
+    const u = await setup("Tags skew");
+    const now = Date.now(), ahead = 5 * 60_000;
+    await put(u.key, { sent_at: iso(now + ahead), cards: [card(1, { tags: ["Work"], tags_at: iso(now + ahead - 60_000), status_at: iso(now + ahead - 60_000) })] });
+    const account = (await (await call("/app/api/me", { headers: { Cookie: u.cookie } })).json<any>()).account;
+    const r = await (await send(u.cookie, { account, sent_at: iso(now), actions: [{ id: "ptag-sk01", made_at: iso(now - 10_000), card_id: 1, action: "set_tags", tags: ["Personal"] }] })).json<any>();
+    expect(r.accepted).toEqual(["ptag-sk01"]);
+    expect((r.superseded ?? [])).not.toContain("ptag-sk01");
+    expect((await macActions(u.key)).actions.map((a: any) => a.client_id)).toContain("ptag-sk01");
+  });
+
+  // Round 28 (Codex 18): every board change names the account its queue was made under; another account's (or none,
+  // from a page that predates this) is refused with 409, so the phone keeps it and nothing reaches the wrong board.
+  it("board_actions_are_bound_to_the_queue_account", async () => {
+    const u = await setup("Bound A"), v = await setup("Bound B");
+    const now = Date.now();
+    await put(u.key, { sent_at: iso(now), cards: [card(1)] });
+    const mine = (await (await call("/app/api/me", { headers: { Cookie: u.cookie } })).json<any>()).account;
+    const theirs = (await (await call("/app/api/me", { headers: { Cookie: v.cookie } })).json<any>()).account;
+    const act = (id: string) => ({ id, made_at: iso(now), card_id: 1, action: "set_tags", tags: ["Personal"] });
+    expect((await send(u.cookie, { account: theirs, sent_at: iso(now), actions: [act("ptag-ac01")] })).status).toBe(409);
+    expect((await send(u.cookie, { account: undefined, sent_at: iso(now), actions: [act("ptag-ac02")] })).status).toBe(409);
+    expect((await macActions(u.key)).actions).toHaveLength(0);
+    const ok = await send(u.cookie, { account: mine, sent_at: iso(now), actions: [act("ptag-ac03")] });
+    expect(ok.status).toBe(200);
+    expect((await macActions(u.key)).actions.map((a: any) => a.client_id)).toEqual(["ptag-ac03"]);
   });
 
   it("phone_set_tags_older_than_the_macs_change_loses_and_bad_ones_are_dropped", async () => {

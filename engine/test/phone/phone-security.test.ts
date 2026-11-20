@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { BASE, call, form, get, newUser, signIn } from "../helpers";
-import { api, assert, cookieOf, count, login, me, newAuthenticator, pairCode, pairPhone, register } from "../phone-helpers";
+import { api, assert, cookieOf, count, login, me, newAuthenticator, pairCode, pairPhone, register, withAccount } from "../phone-helpers";
 import { b64url, setPushFetch, unb64url } from "../../src/phone/webpush";
 import { alertFor, setNtfyFetch } from "../../src/reminders/alerts";
 import { removeDevice, handleAppAuth } from "../../src/phone/auth";
@@ -279,7 +279,7 @@ describe("M3 phone actions don't overwrite a newer board", () => {
       return undefined;
     });
     const r = await handleBoard(new Request(BASE + "/app/api/action", {
-      method: "POST", headers: { Origin: BASE, Cookie: cookie }, body: JSON.stringify({ card_id: 1, action: "doing" }),
+      method: "POST", headers: { Origin: BASE, Cookie: cookie }, body: JSON.stringify(await withAccount(cookie, { card_id: 1, action: "doing" })),
     }), e);
     expect(r!.status).toBe(200);
     const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
@@ -295,7 +295,7 @@ describe("M3 phone actions don't overwrite a newer board", () => {
       return undefined;
     });
     await handleBoard(new Request(BASE + "/app/api/action", {
-      method: "POST", headers: { Origin: BASE, Cookie: cookie }, body: JSON.stringify({ card_id: 1, action: "done" }),
+      method: "POST", headers: { Origin: BASE, Cookie: cookie }, body: JSON.stringify(await withAccount(cookie, { card_id: 1, action: "done" })),
     }), e);
     const b = await (await call("/app/api/board", { headers: { Cookie: cookie } })).json<any>();
     expect(b.cards.map((c: any) => [c.id, c.status])).toEqual([[1, "done"], [3, "todo"]]);

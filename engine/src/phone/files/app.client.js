@@ -614,7 +614,9 @@
         queue.actions = markAttempted(queue.actions, body);
         saveQueue();
         // A batch the engine refuses as malformed (400) is sent again one action at a time; one still refused leaves the queue.
-        var sent = await sendBatch(body, function (b) { return api("/app/api/action", { method: "POST", body: b }); },
+        // Every request names the account the queue was made under (one action at a time too): the engine refuses it for any
+        // other account (round 28).
+        var sent = await sendBatch(body, function (b) { b.account = queue.account; return api("/app/api/action", { method: "POST", body: b }); },
           function () { return new Date().toISOString(); });
         for (var i = 0; i < sent.results.length; i++) {
           var r = sent.results[i];

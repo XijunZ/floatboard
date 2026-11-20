@@ -80,7 +80,7 @@ function cookieValue(req: Request, name: string): string | null {
  * in (401), `before` (a route's own gate, such as the area being on), the body under `cap` bytes (413 too large, 400 not
  * JSON), an account named (400) and it is this session's (409, naming this session's account so the phone keeps its queue).
  */
-export async function phoneWrite(req: Request, env: Env, cap: number, opts: { before?: (s: AppSession) => Promise<Response | null> } = {}):
+export async function phoneWrite(req: Request, env: Env, cap: number, opts: { before?: (s: AppSession) => Promise<Response | null>; missingAccount?: 400 | 409 } = {}):
   Promise<{ ok: true; s: AppSession; body: any; account: string } | { ok: false; res: Response }> {
   if (!sameOrigin(req)) return { ok: false, res: appJSON({ error: "refused" }, 403) };
   const s = await requireAppSession(req, env);
@@ -91,7 +91,7 @@ export async function phoneWrite(req: Request, env: Env, cap: number, opts: { be
   if (!rb.ok) return { ok: false, res: appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie) };
   const account = await accountMarker(s.userId);
   const from = rb.body?.account;
-  if (typeof from !== "string" || !from) return { ok: false, res: appJSON({ error: "account is required" }, 400, s.setCookie) };
+  if (typeof from !== "string" || !from) return { ok: false, res: appJSON({ error: "account is required", account }, opts.missingAccount ?? 400, s.setCookie) };
   if (from !== account) return { ok: false, res: appJSON({ error: "These changes belong to another account.", account }, 409, s.setCookie) };
   return { ok: true, s, body: rb.body, account };
 }

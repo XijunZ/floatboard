@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
 import { BASE, call, newUser } from "../helpers";
-import { count, pairPhone } from "../phone-helpers";
+import { count, pairPhone, withAccount } from "../phone-helpers";
 import { purgePhoneActions } from "../../src/phone/board";
 
 const card = (id: number, over: Record<string, unknown> = {}) => ({ id, title: `Secret task ${id}`, group: "Work", color: "#aabbcc", importance: 1,
@@ -9,8 +9,8 @@ const card = (id: number, over: Record<string, unknown> = {}) => ({ id, title: `
 
 const put = (key: string, body: unknown) => call("/v2/board", { method: "PUT", key, body: JSON.stringify(body) });
 const board = (cookie?: string) => call("/app/api/board", { headers: cookie ? { Cookie: cookie } : {} });
-const act = (cookie: string | undefined, body: unknown, origin: string | null = BASE) =>
-  call("/app/api/action", { method: "POST", headers: { ...(cookie ? { Cookie: cookie } : {}), ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });
+const act = async (cookie: string | undefined, body: unknown, origin: string | null = BASE) =>
+  call("/app/api/action", { method: "POST", headers: { ...(cookie ? { Cookie: cookie } : {}), ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(await withAccount(cookie, body)) });
 const pending = (key: string) => call("/v2/phone-actions", { key }).then((r) => r.json<{ actions: any[] }>());
 
 async function setup(name = "Board user") {

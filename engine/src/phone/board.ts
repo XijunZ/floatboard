@@ -25,7 +25,7 @@ import { type Env, json, nowISO } from "../env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { readCappedJSON } from "../lib/http";
 import { route } from "../lib/router";
-import { accountMarker, appJSON, requireAppSession, sameOrigin } from "./auth";
+import { accountMarker, appJSON, phoneWrite, requireAppSession } from "./auth";
 import { GMAIL_ID, ownGmail } from "../email/search";
 
 export const MAX_CARDS = 500;
@@ -456,6 +456,8 @@ route("PUT", "/v2/board", async (req, env, user) => {
     const p = prevById.get(c.id);
     // No usable status_at: an unchanged step keeps its time; a changed or new one changed at this push.
     c.status_at = corrected(c.status_at, skew, receivedMs) ?? (p && p.status === c.status ? statusAt(p, prev!.updated) : now);
+    // The tags' time on the engine's clock too, like status_at (round 28): phone tag changes are compared with it.
+    if (c.tags_at) c.tags_at = corrected(c.tags_at, skew, receivedMs) ?? c.tags_at;
     if (!prev) continue; // the first copy is the baseline, not a change
     if (!p) log(c.id, "add", await encrypt(env, c.title), c.status_at);
     else if (p.status !== c.status) log(c.id, "status", c.status, c.status_at);
@@ -548,12 +550,13 @@ export async function handleBoard(req: Request, env: Env): Promise<Response | nu
     return appJSON(await boardBody(env, s.userId, s.deviceId), 200, s.setCookie);
   }
   if (path === "/app/api/action" && req.method === "POST") {
-    if (!sameOrigin(req)) return appJSON({ error: "refused" }, 403);
-    const s = await requireAppSession(req, env);
-    if (!s) return appJSON({ error: "not signed in" }, 401);
     const receivedMs = Date.now();
-    const rb = await readCappedJSON(req, MAX_ACTION_BYTES);
-    if (!rb.ok) return appJSON({ error: rb.tooLarge ? "too large" : "Invalid JSON" }, rb.tooLarge ? 413 : 400, s.setCookie);
+    // Every board change names the account its queue was made under (round 28): another account's is refused (409) and
+    // so is one naming none (a page from before this; 409, not 400, so the phone keeps it rather than dropping it).
+    const w = await phoneWrite(req, env, MAX_ACTION_BYTES, { missingAccount: 409 });
+    if (!w.ok) return w.res;
+    const { s } = w;
+    const rb = { body: w.body };
     const bad = (error: string, status = 400) => appJSON({ error }, status, s.setCookie);
     const r = "actions" in rb.body ? await doBatch(env, s.userId, s.deviceId, rb.body, receivedMs) : await doSingle(env, s.userId, s.deviceId, rb.body, receivedMs);
     if ("error" in r) return bad(r.error, r.status);
