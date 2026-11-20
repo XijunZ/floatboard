@@ -97,15 +97,30 @@ public struct DueEntry: Identifiable, Equatable {
         return grants
     }
 
-    /// "Message <name>": one reminder task per person (the open one is returned again), with their tags' first board group,
-    /// linked to them (related, by code). `slot`: also put it on the calendar then (a 30-minute event).
+    /// The board group for a new "Message <name>" task, as the board names it, in this order: the person's own choice; their
+    /// first tag that is a board group (Investor, Prospect…); by tier (Network → Networking; Friend, Close friend,
+    /// Family → Personal); else nil (the default group). Names match case-insensitively; a rule whose group isn't on the
+    /// board falls through to the next. Groups are never made here.
+    public static func messageGroup(override: String?, tags: [String], tier: PersonTier, groups: [String]) -> String? {
+        func onBoard(_ name: String?) -> String? {
+            guard let n = name?.trimmingCharacters(in: .whitespaces), !n.isEmpty else { return nil }
+            return groups.first { $0.caseInsensitiveCompare(n) == .orderedSame }
+        }
+        if let g = onBoard(override) { return g }
+        if let g = tags.lazy.compactMap({ onBoard($0) }).first { return g }
+        return onBoard(tier == .network ? "Networking" : "Personal")
+    }
+
+    /// "Message <name>": one reminder task per person (the open one is returned again), in the group `messageGroup` picks,
+    /// linked to them (related, by code). `slot`: also put it on the calendar then (a 30-minute event). Only new tasks: one
+    /// already made stays where it is.
     @discardableResult
     public static func makeTask(store: Store, personID: Int64, slot: Date? = nil, now: Date = Date()) -> Int64? {
         let c = CircleStore(store: store)
         guard let p = PeopleStore(store: store).person(personID), !p.deleted else { return nil }
         var d = c.details(personID)
         if let open = openTask(store, d) { return open }
-        let group = store.itemTags(p.shortID).all.first { t in store.areas.contains { $0.name.caseInsensitiveCompare(t) == .orderedSame } }
+        let group = messageGroup(override: d.taskArea, tags: store.itemTags(p.shortID).all, tier: p.tier, groups: store.areas.map(\.name))
         guard let id = store.makeTask(TaskDraft(title: "Message \(p.name)", notes: "", primaryTag: group, others: []), due: nil, dueHasTime: false,
                                       from: nil, now: now) else { return nil }
         store.link(ShortID(kind: .task, number: id), p.shortID, kind: .related, madeBy: .auto, actor: .user, now: now)

@@ -59,6 +59,16 @@ struct PersonForm: View {
                             Text("days (empty: \(CircleClock.label(CircleClock.interval(tier: tier, tags: tags, intervalDays: nil))))").foregroundStyle(.secondary)
                         }
                     }
+                    // The board group for this person's "Message <name>" tasks; Automatic: a tag that is a group, else by tier.
+                    row("Tasks go to") {
+                        HStack {
+                            Picker("", selection: $d.taskArea) {
+                                Text("Automatic").tag(String?.none)
+                                ForEach(store.areas.map(\.name), id: \.self) { Text($0).tag(String?.some($0)) }
+                            }.labelsHidden().frame(width: 180)
+                            Text(d.taskArea == nil ? "now: \(automaticGroup)" : "").foregroundStyle(.secondary)
+                        }
+                    }
                     row("How you know them") { TextField("e.g. university, former colleague", text: $d.howKnown) }
                     row("Company and role") {
                         HStack { TextField("Company", text: $d.company); TextField("Role", text: $d.role) }
@@ -149,11 +159,18 @@ struct PersonForm: View {
         }
     }
 
+    /// What Automatic picks for this person now (the board's default group when no rule applies).
+    private var automaticGroup: String {
+        CircleDue.messageGroup(override: nil, tags: tags, tier: tier, groups: store.areas.map(\.name)) ?? store.resolve("")
+    }
+
     private func load() {
         let c = CircleStore(store: store)
         if let id = request.personID, let p = PeopleStore(store: store).person(id) {
             name = p.name; aliases = p.aliases.joined(separator: ", "); tier = p.tier; tags = store.itemTags(p.shortID).all
             d = c.details(id)
+            // A group deleted or renamed since it was chosen: Automatic.
+            if let a = d.taskArea { d.taskArea = store.areas.first { $0.name.caseInsensitiveCompare(a) == .orderedSame }?.name }
             interval = d.intervalDays.map(String.init) ?? ""
             let (ids, rest) = Self.splitChatIDs(c.handles(id))
             chatIDs = ids

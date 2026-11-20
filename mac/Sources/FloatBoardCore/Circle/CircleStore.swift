@@ -16,7 +16,7 @@ import Foundation
 
     static let detailColumns = """
         how_known, company, role, birthday, language, notes, interval_days, firm, focus, purpose, stage, stage_at, snoozed_until,
-        reminded_at, reminder_task, updates_on, news_muted, feed_url, officer_id, officer_name, officer_confirmed, manual_checked
+        reminded_at, reminder_task, updates_on, news_muted, feed_url, officer_id, officer_name, officer_confirmed, manual_checked, task_area
         """
 
     /// A person's Circle fields (defaults when none were saved); throws when they can't be read, so nothing is written over them.
@@ -56,15 +56,16 @@ import Foundation
         d.updatesOn = DB.int(s, o + 15) != 0; d.newsMuted = DB.int(s, o + 16) != 0; d.feedURL = DB.text(s, o + 17)
         d.officerID = DB.text(s, o + 18); d.officerName = DB.text(s, o + 19); d.officerConfirmed = DB.date(s, o + 20)
         d.manualChecked = DB.date(s, o + 21)
+        d.taskArea = DB.isNull(s, o + 22) ? nil : DB.text(s, o + 22)
         return d
     }
 
     func writeDetailsRow(_ personID: Int64, _ d: CircleDetails) throws {
         try store.db.run("""
-            INSERT OR REPLACE INTO circle_people(person_id, \(Self.detailColumns)) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT OR REPLACE INTO circle_people(person_id, \(Self.detailColumns)) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, [personID, d.howKnown, d.company, d.role, d.birthday, d.language, d.notes, d.intervalDays.map { Int64($0) }, d.firm, d.focus,
                   d.purpose, d.stage, d.stageAt, d.snoozedUntil, d.remindedAt, d.reminderTask, d.updatesOn ? 1 : 0, d.newsMuted ? 1 : 0,
-                  d.feedURL, d.officerID, d.officerName, d.officerConfirmed, d.manualChecked])
+                  d.feedURL, d.officerID, d.officerName, d.officerConfirmed, d.manualChecked, d.taskArea])
     }
 
     /// Saves Circle's fields. Refused (with the reason) when it would make a sixth active prospect.
