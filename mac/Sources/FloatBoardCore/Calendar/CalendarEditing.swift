@@ -9,7 +9,12 @@ public enum EventPanelEdit {
         public var day: Date
         public var start: Date
         public var end: Date
-        public init(title: String, day: Date, start: Date, end: Date) { self.title = title; self.day = day; self.start = start; self.end = end }
+        /// The user set the end themselves (not only the shift that follows a start move): that end is saved as shown, even
+        /// when it equals the event's old end (round 28).
+        public var endEdited = false
+        public init(title: String, day: Date, start: Date, end: Date, endEdited: Bool = false) {
+            self.title = title; self.day = day; self.start = start; self.end = end; self.endEdited = endEdited
+        }
         /// What the panel shows for `e` when it opens.
         public init(_ e: CalEvent) { self.init(title: e.title, day: e.start, start: e.start, end: e.end) }
     }
@@ -59,7 +64,8 @@ public enum EventPanelEdit {
         let startChanged = !sameClock(now.start, opened.start)
         // The panel moves the end with the start (endAfterMovingStart), so the end counts as edited only when it is not
         // where that shift put it: a start-only move keeps the event's length, overnight or not.
-        let endChanged = !sameClock(now.end, opened.end) && !sameClock(now.end, endAfterMovingStart(from: opened.start, to: now.start, end: opened.end))
+        let endChanged = now.endEdited
+            || (!sameClock(now.end, opened.end) && !sameClock(now.end, endAfterMovingStart(from: opened.start, to: now.start, end: opened.end)))
         guard dayChanged || startChanged || endChanged else { return (title, nil) }
         let c = AppTime.calendar
         let day = dayChanged ? now.day : event.start

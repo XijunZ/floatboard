@@ -14,6 +14,8 @@ struct EventPanel: View {
     @State private var start: Date
     @State private var end: Date
     @State private var confirmDelete = false
+    /// The user set the end time themselves (the shift after a start move doesn't count): what they set is what is saved.
+    @State private var endEdited = false
     /// Set by Delete: the panel closing after it must not queue a change for an event that is going away.
     @State private var deleted = false
     /// The fields as they were when the panel opened: only what the user changed from these is sent. State, so a redraw
@@ -34,7 +36,7 @@ struct EventPanel: View {
     private func save() {
         guard editable, !deleted else { return }
         let event = edits.current(self.event)
-        let change = EventPanelEdit.changes(event: event, opened: opened, now: .init(title: title, day: day, start: start, end: end))
+        let change = EventPanelEdit.changes(event: event, opened: opened, now: .init(title: title, day: day, start: start, end: end, endEdited: endEdited))
         if let t = change.title { edits.rename(event, to: t) }
         if let m = change.move { edits.move(event, start: m.start, end: m.end) }
     }
@@ -55,7 +57,7 @@ struct EventPanel: View {
                     DateInput(date: $day)
                     TimeInput(time: $start)
                     Text("to").foregroundStyle(.secondary)
-                    TimeInput(time: $end)
+                    TimeInput(time: Binding(get: { end }, set: { end = $0; endEdited = true }))
                 }
                 .onChange(of: start) { was, now in end = EventPanelEdit.endAfterMovingStart(from: was, to: now, end: end) }
             } else {
