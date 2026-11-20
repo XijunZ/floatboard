@@ -52,3 +52,31 @@ public enum OutsideClick {
 
     public func cancel() { task?.cancel(); task = nil }
 }
+
+/// What search asked to show, in one place (round 26): at most one pending request, of the kind last picked. A new pick
+/// of any kind replaces it; it lasts only through the move to its own destination (the board for a task; the Calendar
+/// on the event's day for an event): another tab or another day drops it, so coming back later opens nothing.
+public struct PendingReveals: Equatable {
+    public enum Destination { case board, calendar, other }
+    public var task: RevealRequest?
+    public var event: RevealRequest?
+    public private(set) var eventDay: Date?
+    public init() {}
+
+    public mutating func pick(task id: Int64) { self = PendingReveals(); task = RevealRequest(id) }
+    public mutating func pick(event id: Int64, day: Date?) { self = PendingReveals(); event = RevealRequest(id); eventDay = day }
+    /// A result of another kind (a jot, a person, a decision, a goal): nothing of the board's or the Calendar's waits.
+    public mutating func pickOther() { self = PendingReveals() }
+
+    /// A tab is showing: requests for other tabs are dropped.
+    public mutating func shown(_ d: Destination) {
+        if d != .board { task = nil }
+        if d != .calendar { event = nil; eventDay = nil }
+    }
+
+    /// The Calendar moved to `day`: an event request for another day is dropped.
+    public mutating func calendarShows(day: Date) {
+        guard let d = eventDay, event != nil else { return }
+        if !AppTime.calendar.isDate(d, inSameDayAs: day) { event = nil; eventDay = nil }
+    }
+}

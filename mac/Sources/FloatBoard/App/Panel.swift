@@ -28,7 +28,10 @@ final class UIState: ObservableObject {
     }
 
     @Published var mode: Mode = .banner
-    @Published var tab: Tab = .board
+    @Published var tab: Tab = .board {
+        // A request search left for another tab is dropped (only the move to its own tab keeps it).
+        didSet { reveals.shown(tab == .board ? .board : tab == .calendar ? .calendar : .other) }
+    }
     /// The weekly review page (opened from the bar, or by the Sunday nudge).
     @Published var showReview = false
     /// Make task from a selection: the form shows while this is set.
@@ -51,8 +54,16 @@ final class UIState: ObservableObject {
     @Published var calendarFocus: Date?
     /// Search asked to show this task / event (round 23): taken by the board column holding the task (scrolled to it),
     /// or the Calendar block of the event (its panel opened), once that view is on screen.
-    @Published var revealTask: RevealRequest?
-    @Published var revealEvent: RevealRequest?
+    /// One place for both (round 26): a new pick of any kind replaces the old; another tab or day drops it.
+    @Published var reveals = PendingReveals()
+    var revealTask: RevealRequest? {
+        get { reveals.task }
+        set { reveals.task = newValue }
+    }
+    var revealEvent: RevealRequest? {
+        get { reveals.event }
+        set { reveals.event = newValue }
+    }
     /// Looks up what the bar should show at `now`. Called when the bar appears, once a minute, and when the calendar changes.
     func refreshMeeting(store: Store, now: Date = Date()) {
         let next = (bar.showNextMeeting ?? true) ? BarMeeting.visible(next: CalendarCache(store: store).nextMeeting(after: now), now: now) : nil

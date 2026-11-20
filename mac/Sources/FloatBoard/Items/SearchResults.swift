@@ -27,12 +27,13 @@ import SwiftUI
             ui.tab = .board
             ui.currentMatch = h.id.number
             ui.searchCommitted = true
-            ui.revealTask = RevealRequest(h.id.number)   // the column scrolls to it once it's on screen (also from another tab)
+            ui.reveals.pick(task: h.id.number)   // the column scrolls to it once it's on screen (also from another tab); replaces any older request
         case .event:
-            ui.revealEvent = RevealRequest(h.id.number)  // its block opens its panel once the day is on screen
+            ui.reveals.pick(event: h.id.number, day: h.date)  // its block opens its panel once the day is on screen; replaces any older request
             ui.calendarFocus = h.date
             ui.tab = .calendar
         default:
+            ui.reveals.pickOther()   // nothing of the board's or the Calendar's is left waiting
             if let handler = GlobalSearchOpen.handlers[h.id.kind] { handler(h.id) } else {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(h.id.text, forType: .string)
