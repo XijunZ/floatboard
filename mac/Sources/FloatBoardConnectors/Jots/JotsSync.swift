@@ -51,9 +51,25 @@ public enum JotsSync {
                 // In requests under the engine's size and count limits; the nudge goes with the first.
                 var sent = 0
                 for (i, batch) in ConnectorClient.jotBatches(push).enumerated() {
-                    let accepted = Set(try await client.putJots(batch, nudge: i == 0 ? nudge : nil))
-                    core.markPushed(batch.filter { accepted.contains($0.id) }, connector: id)
-                    sent += accepted.count
+                    do {
+                        let accepted = Set(try await client.putJots(batch, nudge: i == 0 ? nudge : nil))
+                        core.markPushed(batch.filter { accepted.contains($0.id) }, connector: id)
+                        sent += accepted.count
+                    } catch ConnectorError.http(400, _) {
+                        // The engine refused something in this request: each jot goes on its own, so one it refuses never
+                        // holds up the others; that one is left out of the phone copy (noted once) until it changes.
+                        for j in batch {
+                            do {
+                                let accepted = Set(try await client.putJots([j], nudge: nil))
+                                core.markPushed([j].filter { accepted.contains($0.id) }, connector: id)
+                                sent += accepted.count
+                            } catch ConnectorError.http(400, let why) {
+                                core.markPushed([j], connector: id)
+                                store.activity("jots", .warning, "J-\(j.id) couldn't go to the phone's copy; it stays on this Mac", detail: why)
+                            }
+                        }
+                        if i == 0 { _ = try await client.putJots([], nudge: nudge) }
+                    }
                 }
                 if push.isEmpty { _ = try await client.putJots([], nudge: nudge) }
                 lastNudge[id] = nudge

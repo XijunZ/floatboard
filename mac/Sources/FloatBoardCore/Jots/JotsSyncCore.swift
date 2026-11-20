@@ -69,7 +69,8 @@ public struct JotAck: Equatable {
         let rows = (try? store.db.query(sql, [connector, now.addingTimeInterval(-Self.window), limit]) { DB.int($0, 0) }) ?? [] // try?-ok: unreadable = nothing sent this time; the next pass sends it
         let js = JotStore(store: store)
         return rows.compactMap { js.jot($0) }.map {
-            PushJot(id: $0.id, text: $0.text, kind: $0.kind, source: $0.source, tags: store.itemTags($0.shortID).all, added: $0.added,
+            // The phone's tag rules (at most 20, each up to 60 characters): the engine refuses a request with any other.
+            PushJot(id: $0.id, text: $0.text, kind: $0.kind, source: $0.source, tags: TagRules.forPhone(store.itemTags($0.shortID).all), added: $0.added,
                     updated: $0.updated, deleted: $0.deleted)
         }
     }
