@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// "Show this item" from search, for a tab that may not be on screen yet (round 23): the request waits until the view
@@ -14,4 +15,19 @@ public struct RevealRequest: Equatable {
         r = nil
         return want
     }
+}
+
+/// The day grid's part of revealing an event from search (round 24): the hour to scroll to, an hour before the event,
+/// only while a request for an event on this page is pending. No request (nil, e.g. just acknowledged) moves nothing.
+public enum CalendarReveal {
+    public static func scrollHour(for r: RevealRequest?, in events: [CalEvent]) -> Int? {
+        guard let want = r?.id, let e = events.first(where: { $0.shortID == want && !$0.allDay }) else { return nil }
+        return max(0, AppTime.calendar.component(.hour, from: e.start) - 1)
+    }
+}
+
+/// The search list's outside-click test (round 24): a click outside every kept area closes the list; the click itself is
+/// never taken (what was clicked gets it, focus moves there).
+public enum OutsideClick {
+    public static func closes(at p: CGPoint, keep: [CGRect]) -> Bool { !keep.contains { $0.contains(p) } }
 }

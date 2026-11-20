@@ -795,3 +795,19 @@ func integrationRebindingLiveChecks() async {
     check(taken == 42 && pending == nil, "a_reveal_is_taken_once_by_the_view_holding_it")
     check(RevealRequest(42) != RevealRequest(42), "picking_the_same_item_twice_asks_twice")
 }
+
+/// Round 24 (Codex 12): where the day grid scrolls for an event picked in search (an hour before it), and that a request
+/// already handled (nil) never moves the grid (it used to jump back to 07:00 as the request was acknowledged); and the
+/// list's outside-click test, which lets every click through to what was clicked.
+@MainActor func revealScrollChecks() {
+    let day = AppTime.calendar.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 20))!
+    let evening = CalEvent(shortID: 9, account: "a@example.com", calendarID: "c", eventID: "x", start: day, end: day.addingTimeInterval(3600),
+                           allDay: false, title: "Dinner", location: "", videoLink: "", description: "", htmlLink: "", recurringID: "",
+                           googleUpdated: Date(), fbCard: nil)
+    check(CalendarReveal.scrollHour(for: RevealRequest(9), in: [evening]) == 19, "an_evening_event_picked_in_search_is_scrolled_to")
+    check(CalendarReveal.scrollHour(for: nil, in: [evening]) == nil, "an_acknowledged_reveal_never_moves_the_grid")
+    check(CalendarReveal.scrollHour(for: RevealRequest(8), in: [evening]) == nil, "a_reveal_for_another_page_never_moves_the_grid")
+    let panel = CGRect(x: 600, y: 0, width: 360, height: 400)
+    check(OutsideClick.closes(at: CGPoint(x: 100, y: 200), keep: [panel]) && !OutsideClick.closes(at: CGPoint(x: 700, y: 100), keep: [panel]),
+          "a_click_outside_the_list_closes_it_a_click_inside_doesnt")
+}
