@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { BASE, call, newUser } from "../helpers";
-import { pairPhone } from "../phone-helpers";
+import { pairPhone, withAccount } from "../phone-helpers";
 
 // Delete on the phone (docs/phone-app.md, "Sync v2"): `delete` (with an optional teach reason) and `restore`.
 
@@ -10,7 +10,7 @@ const card = (id: number, over: Record<string, unknown> = {}) => ({ id, title: `
 const put = (key: string, body: unknown) => call("/v2/board", { method: "PUT", key, body: JSON.stringify(body) });
 const board = (cookie: string) => call("/app/api/board", { headers: { Cookie: cookie } }).then((r) => r.json<any>());
 const send = (cookie: string, body: unknown) =>
-  call("/app/api/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify(body) });
+  withAccount(cookie, body).then((b) => call("/app/api/action", { method: "POST", headers: { Cookie: cookie, Origin: BASE }, body: JSON.stringify(b) }));
 const macActions = (key: string) => call("/v2/phone-actions", { key }).then((r) => r.json<{ actions: any[] }>());
 
 async function setup(name: string) {

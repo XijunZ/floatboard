@@ -160,7 +160,8 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
   it("a_batch_refused_with_400_is_split_once_and_a_still_refused_change_leaves_the_queue_quietly", () => {
     const sync = /async function sync\(\) \{([\s\S]*?)\n  \}\n/.exec(APP_JS)?.[1] ?? "";
     // The queue is sent through sendBatch (split into single actions after a 400), never with a bare api call.
-    expect(sync).toMatch(/await sendBatch\(body, function \(b\) \{ return api\("\/app\/api\/action", \{ method: "POST", body: b \}\); \}/);
+    // Round 28: each request (single actions too) names the queue's account.
+    expect(sync).toMatch(/await sendBatch\(body, function \(b\) \{ b\.account = queue\.account; return api\("\/app\/api\/action", \{ method: "POST", body: b \}\); \}/);
     // Refused single actions are removed from the queue and counted for the note.
     expect(sync).toMatch(/queue\.actions = afterSend\(queue\.actions, \{ accepted: sent\.rejected \}\)\.actions;[\s\S]*rejected \+= sent\.rejected\.length;[\s\S]*saveQueue\(\);/);
     expect(sync).toContain("note(replacedText(replaced, dropped, rejected));");
