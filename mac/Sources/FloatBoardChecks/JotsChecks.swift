@@ -796,3 +796,38 @@ extension ISO8601DateFormatter {
     _ = core.apply([delA])
     check(js.jot(b.id)?.deleted == false, "a_phone_delete_never_deletes_a_jot_that_reused_its_number")
 }
+
+/// Round 28 (Codex 18): the tags sent with jots follow the phone's rules (at most 20, each up to 60 characters, as the
+/// engine takes them), and a jot the engine still refuses never holds up the others: it is sent on its own, left out of
+/// the phone copy with a note, and the rest go.
+@MainActor func jotUploadTagChecks() async {
+    let root = checkFolder("fb-jot-tags")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let store = checkStore(root, "jt.sqlite", modules: [.jots]) else { return }
+    let long = "A very long group name that goes well past the sixty characters the phone takes"
+    _ = store.addArea(long)
+    var refuse: Set<Int64> = [], accepted: [Int64] = []
+    let client = ConnectorClient(baseURL: URL(string: "https://tags.test")!, key: "k") { req in
+        await MainActor.run {
+            var status = 200, out: Any = [:]
+            if req.httpMethod == "PUT" && req.url!.path == "/v2/jots" {
+                let o = (try? JSONSerialization.jsonObject(with: req.httpBody ?? Data()) as? [String: Any]) ?? [:] // try?-ok: test stand-in
+                let jots = o["jots"] as? [[String: Any]] ?? []
+                let badTags = jots.contains { j in let t = j["tags"] as? [String] ?? []; return t.count > 20 || t.contains { $0.utf16.count > 60 } }
+                let badID = jots.contains { refuse.contains(($0["id"] as? NSNumber)?.int64Value ?? 0) }
+                if badTags || badID { status = 400; out = ["error": "jots[0].tags must be up to 20 names of 1 to 60 characters"] }
+                else { let ids = jots.compactMap { ($0["id"] as? NSNumber)?.int64Value }; accepted += ids; out = ["accepted": ids] }
+            } else if req.url!.path == "/v2/jots/waiting" { out = ["jots": []] }
+            return ((try? JSONSerialization.data(withJSONObject: out)) ?? Data(), HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!) // try?-ok: test stand-in
+        }
+    }
+    let js = JotStore(store: store)
+    guard let tagged = js.create(text: "A note in the long group", now: Date()), let plain = js.create(text: "A plain note", now: Date()),
+          let odd = js.create(text: "One the engine refuses", now: Date()) else { check(false, "jt setup"); return }
+    _ = js.setTags(tagged.id, [long])
+    refuse = [odd.id]
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(Set(accepted) == [tagged.id, plain.id], "a_long_group_tag_no_longer_blocks_jots_and_one_refused_jot_blocks_nothing")
+    await JotsSync.tick(connector: "jt", store: store, client: client)
+    check(accepted.filter { $0 == odd.id }.isEmpty && JotsSyncCore(store: store).toPush(connector: "jt").isEmpty, "a_refused_jot_is_set_aside_not_retried_every_pass")
+}
