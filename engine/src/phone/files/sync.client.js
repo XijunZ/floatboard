@@ -166,6 +166,46 @@
     return q.slice(1);
   }
 
+  // ---- One queue for every tab of this phone (round 28). Tabs share the stored queue, but each keeps its own copy in
+  // memory: saving its copy as it is would wipe what another tab queued (a capture made in one tab, lost when another
+  // tab saved). So every save merges: the stored queue is the truth, plus what this tab added, minus what this tab
+  // removed (taken by the engine, or undone); what another tab removed is never brought back.
+
+  // `stored`: the queue as stored now; `mine`: this tab's copy; `known`: the ids this tab saw stored when it last read
+  // or wrote (an id it knew and no longer holds was removed here; one it never knew and holds is new here).
+  function queueReconcile(stored, mine, known) {
+    var mineById = {}, storedIds = {}, out = [];
+    (mine || []).forEach(function (a) { mineById[a.id] = a; });
+    (stored || []).forEach(function (a) {
+      storedIds[a.id] = true;
+      if (known[a.id] && !mineById[a.id]) return;   // removed in this tab
+      out.push(mineById[a.id] || a);                  // this tab's copy of it (its "attempted" mark) when it has one
+    });
+    (mine || []).forEach(function (a) { if (!storedIds[a.id] && !known[a.id]) out.push(a); });   // new in this tab
+    return out;
+  }
+
+  // A queue stored under `key` as { account, actions }, shared by the tabs. `save` returns the merged actions (this tab
+  // takes them as its copy), or null when the phone could not keep them (`store` says false).
+  function SharedQueue(key, load, store) {
+    var known = {};
+    function remember(list) { known = {}; list.forEach(function (a) { known[a.id] = true; }); return list; }
+    function read(account) {
+      var v = load(key);
+      return v && v.account === account && Array.isArray(v.actions) ? v.actions : [];
+    }
+    return {
+      load: function (account) { return remember(read(account).slice()); },
+      merged: function (account, mine) { return remember(queueReconcile(read(account), mine, known)); },
+      save: function (account, mine) {
+        var out = queueReconcile(read(account), mine, known);
+        if (store(key, out.length ? { account: account, actions: out } : null) === false) return null;
+        return remember(out);
+      },
+      forget: function () { known = {}; }
+    };
+  }
+
   // Saves a queue and reads it back: false when this phone could not keep it (storage full or off), so a change is only
   // shown as made once it will survive a reload.
   function storeDurable(key, value) {

@@ -213,3 +213,14 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
     for (const text of [APP_JS, PAGE_HTML, SW_JS]) expect(text).not.toContain("—");
   });
 });
+
+describe("phone queues are shared by every tab (round 28)", () => {
+  it("the_board_decisions_and_circle_queues_save_through_the_shared_queue", () => {
+    expect(APP_JS).toContain("function SharedQueue(");
+    expect(APP_JS).toMatch(/var boardQueue = SharedQueue\(QUEUE_KEY/);
+    expect(APP_JS).toMatch(/function saveQueue\(\) \{[\s\S]{0,200}boardQueue\.save\(/);
+    expect(APP_JS).toMatch(/var decShared = SharedQueue\(DEC_QUEUE_KEY/);
+    expect(APP_JS).toMatch(/var circleShared = SharedQueue\(CIRCLE_QUEUE_KEY/);
+  });
+});
+

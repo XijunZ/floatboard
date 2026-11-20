@@ -153,23 +153,25 @@
     // Which account the cache and queue belong to. An answer to a request sent before a sign-out or an account change is
     // thrown away (never cached under the new account): the app's shared session check (h.stamp / h.sameSession).
     var heldBy = null;
+    var shared = SharedQueue(QUEUE_KEY, h.load, function (k, v) { return (h.storeDurable || function (k2, v2) { h.store(k2, v2); return true; })(k, v); });
 
     function restore() {
       var acct = h.account();
       var c = h.load(CACHE_KEY), q = h.load(QUEUE_KEY);
       if (acct !== heldBy) { heldBy = acct; syncing = false; }
       cache = c && c.account === acct && Array.isArray(c.jots) ? c.jots : [];
-      queue = q && q.account === acct && Array.isArray(q.actions) ? q.actions : [];
+      queue = acct ? shared.load(acct) : [];   // the queue every tab of this phone shares (round 28)
       // The writing box: this account's own draft, or nothing (a draft of another account, or one from before drafts named
       // their account, is never shown).
       var box = h.$("jot-text"), d = h.load(DRAFT_KEY);
       if (box && !box.value) box.value = d && typeof d === "object" && d.account && d.account === acct && typeof d.text === "string" ? d.text : "";
     }
     function saveDraft(text) { h.store(DRAFT_KEY, text && heldBy ? { account: heldBy, text: text } : null); }
-    function saveQueue() { if (heldBy) h.store(QUEUE_KEY, queue.length ? { account: heldBy, actions: queue } : null); }
+    // Saved merged with what other tabs stored (a capture another tab made is never wiped).
+    function saveQueue() { if (heldBy) { var out = shared.save(heldBy, queue); if (out) queue = out; } }
 
     function drop() {
-      heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null);
+      heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null); shared.forget();
       h.store(DRAFT_KEY, null);
       var box = h.$("jot-text");
       if (box) box.value = "";   // the old account's unsaved words leave the screen too
@@ -194,13 +196,12 @@
       bound();
       a.id = a.id || h.newId();
       a.made_at = a.made_at || new Date().toISOString();
-      var next = queue.concat([a]);
-      var durable = h.storeDurable || function (k, v) { h.store(k, v); return true; };
-      if (!heldBy || !durable(QUEUE_KEY, { account: heldBy, actions: next })) {
+      var saved = heldBy ? shared.save(heldBy, queue.concat([a])) : null;   // merged with other tabs', then read back
+      if (!saved) {
         h.toast("Couldn't save on this phone (storage full?). Your text is still here; try again.");
         return null;
       }
-      queue = next;
+      queue = saved;
       render();
       pull();
       return a;
@@ -213,6 +214,7 @@
       var current = function () { return h.sameSession(stamp); };
       try {
         var r;
+        if (heldBy) queue = shared.merged(heldBy, queue);   // what other tabs queued goes too
         var body = queue.length && heldBy ? takeJotBatch(queue, new Date().toISOString()) : null;
         while (body && body.tooBig) {   // too big for any send: dropped with a message, never holding up the queue
           queue = queueWithout(queue, [body.tooBig]); saveQueue();
