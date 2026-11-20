@@ -283,6 +283,7 @@ private struct EventBlock: View {
     @EnvironmentObject var ui: UIState
     @Environment(\.eventColours) private var tints
     @State private var open = false
+    @State private var reveal = DelayedReveal()   // the pending panel open for an event picked in search
     @State private var showRefusal = false
     @State private var drag: CGSize = .zero
     @State private var grow: CGFloat = 0
@@ -294,13 +295,12 @@ private struct EventBlock: View {
     private var placeholder: Bool { event.shortID < 0 }
     private var editable: Bool { !placeholder && (calendar?.owned ?? false) }
 
-    /// The panel opens from the request it saw (after the grid has scrolled to it); the request is acknowledged only then.
+    /// The panel opens from the request it saw, after the grid has scrolled to it, and only while that request is still
+    /// the current one; the request is acknowledged only then. A newer pick (for another event) or leaving the page in
+    /// the meantime cancels it (round 25).
     private func revealIfAsked() {
-        guard !placeholder, let r = ui.revealEvent, r.id == event.shortID else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            open = true
-            if ui.revealEvent == r { ui.revealEvent = nil }
-        }
+        guard !placeholder, let r = ui.revealEvent, r.id == event.shortID else { reveal.cancel(); return }
+        reveal.schedule(r, delay: 0.35, current: { ui.revealEvent }, open: { open = true }, acknowledge: { ui.revealEvent = nil })
     }
 
     var body: some View {
@@ -367,7 +367,8 @@ private struct EventBlock: View {
         .popover(isPresented: $open, arrowEdge: .trailing) { EventPanel(event: event, calendar: calendar, waiting: waiting) }
         // An event picked in search: its panel opens once its block is on screen (after the grid has scrolled to it).
         .onAppear { revealIfAsked() }
-        .onChange(of: ui.revealEvent) { _, _ in revealIfAsked() }
+        .onChange(of: ui.revealEvent) { _, new in if new != nil { revealIfAsked() } }   // its own acknowledgement (nil) changes nothing
+        .onDisappear { reveal.cancel() }
         .popover(isPresented: $showRefusal, arrowEdge: .trailing) {
             if let refused {
                 VStack(alignment: .leading, spacing: 8) {
