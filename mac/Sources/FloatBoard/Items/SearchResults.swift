@@ -189,3 +189,117 @@ struct SearchResultsPanel: View {
         w.close()
     }
 }
+
+/// Closes the search list on a click outside it without taking the click (round 24): a local monitor for mouse-down
+/// that only notes where the click was; the event goes on unchanged, so what was clicked gets it and focus moves there.
+@MainActor final class OutsideClickMonitor: ObservableObject {
+    /// The list's frame in window coordinates (top left), kept by the list itself.
+    var keep: CGRect = .zero
+    var onOutside: () -> Void = {}
+    private var token: Any?
+
+    func start() {
+        guard token == nil else { return }
+        token = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let h = e.window?.contentView?.bounds.height ?? 0
+                let p = CGPoint(x: e.locationInWindow.x, y: h - e.locationInWindow.y)
+                if OutsideClick.closes(at: p, keep: [self.keep]) { self.onOutside() }
+            }
+            return e
+        }
+    }
+
+    func stop() {
+        if let token { NSEvent.removeMonitor(token) }
+        token = nil
+    }
+}
+
+/// Round 24 checks in a real window (`FLOATBOARD_ROUND24SHOTS=1`, scratch database only), printed as ROUND24 lines:
+/// - a click on another field while the search list is open closes the list, and typing then goes to that field;
+/// - an evening event picked in search stays in view with its panel open (the request acknowledged after it opened).
+@MainActor enum Round24Shots {
+    final class Model: ObservableObject { @Published var add = ""; @Published var listOpen = true }
+
+    struct Harness: View {
+        @ObservedObject var m: Model
+        @StateObject private var outside = OutsideClickMonitor()
+        var body: some View {
+            VStack(alignment: .leading, spacing: 20) {
+                TextField("Add a task", text: $m.add).textFieldStyle(.roundedBorder).frame(width: 240)
+                if m.listOpen {
+                    Text("the list").frame(width: 200, height: 120).background(Color.gray.opacity(0.2))
+                        .background(GeometryReader { g in Color.clear.onAppear { outside.keep = g.frame(in: .global) } })
+                }
+                Spacer()
+            }
+            .padding(20).frame(width: 400, height: 300)
+            .onAppear { outside.onOutside = { m.listOpen = false }; outside.start() }
+        }
+    }
+
+    static func say(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
+
+    static func run(dir: String, store: Store, ui: UIState, google: Google) {
+        guard LocalData.isScratchDatabase else { say("Round24Shots: scratch database only"); return }
+        NSApp.setActivationPolicy(.accessory)
+        // 1. Outside click: a titled window, so it can be key and take typing.
+        let m = Model()
+        let host = NSHostingView(rootView: Harness(m: m))
+        host.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let w = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false; w.contentView = host
+        w.setFrameOrigin(NSPoint(x: -30000, y: -30000)); w.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        say("ROUND24 step: window up, key \(w.isKeyWindow)")
+        let field = CGPoint(x: 20 + 120, y: host.bounds.height - 20 - 11)   // the field's middle, in window coordinates
+        func mouse(_ t: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(with: t, location: field, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+        }
+        // The up is queued first: a field's mouse-down tracks until it sees the up.
+        if let up = mouse(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
+        if let down = mouse(.leftMouseDown) { NSApp.sendEvent(down) }   // through the app, as a real click (the monitor sees it)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        say("ROUND24 step: clicked, first responder \(String(describing: type(of: w.firstResponder as Any)))")
+        if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                    windowNumber: w.windowNumber, context: nil, characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7) {
+            w.sendEvent(e)   // to the window's first responder (the window isn't key in a background run)
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        say("ROUND24 outside-click: list \(m.listOpen ? "still open" : "closed"), field text \"\(m.add)\"")
+        w.close()
+
+        // 2. An evening event picked in search.
+        Snapshot.seedCalendar(store)
+        let cal = AppTime.calendar
+        let eight = cal.date(bySettingHour: 20, minute: 0, second: 0, of: Date())!
+        let cache = CalendarCache(store: store)
+        cache.apply(account: "me@example.com", calendarID: "me@example.com",
+                    changes: [GoogleEventChange(eventID: "evening", cancelled: false,
+                                                fields: CalEventFields(start: eight, end: eight.addingTimeInterval(3600), title: "Evening dinner", videoLink: "", googleUpdated: Date()))],
+                    nextToken: nil)
+        guard let ev = cache.event(account: "me@example.com", calendarID: "me@example.com", eventID: "evening") else { say("ROUND24 no event"); return }
+        let ch = NSHostingView(rootView: CalendarView(span: .day).padding(12).frame(width: 900, height: 520)
+            .environmentObject(store).environmentObject(ui).environmentObject(google))
+        ch.frame = CGRect(x: 0, y: 0, width: 900, height: 520)
+        let cw = NSWindow(contentRect: ch.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        cw.isReleasedWhenClosed = false; cw.contentView = ch
+        cw.setFrameOrigin(NSPoint(x: -30000, y: -30000)); cw.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        let before = Set(NSApp.windows.map { ObjectIdentifier($0) })
+        SearchRun.open(SearchHit(id: ShortID(kind: .event, number: ev.shortID), title: ev.title, detail: "", date: ev.start), ui: ui)
+        RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+        ch.layoutSubtreeIfNeeded()
+        let popovers = NSApp.windows.filter { !before.contains(ObjectIdentifier($0)) && $0.isVisible }.count
+        if let rep = ch.bitmapImageRepForCachingDisplay(in: ch.bounds) {
+            ch.cacheDisplay(in: ch.bounds, to: rep)
+            let file = URL(fileURLWithPath: dir).appendingPathComponent("round24-evening-event.png")
+            do { try rep.representation(using: .png, properties: [:])?.write(to: file) } catch { say("ERR: \(error)") }
+        }
+        say("ROUND24 evening event: request \(ui.revealEvent == nil ? "acknowledged" : "still pending"), new windows (panel) \(popovers)")
+        cw.close()
+    }
+}

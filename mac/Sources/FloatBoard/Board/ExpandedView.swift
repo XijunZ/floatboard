@@ -25,6 +25,7 @@ struct ExpandedView: View {
     @State private var searchList = SearchList(results: [])   // the list under the search box (every area)
     @State private var listOpen = false
     @State private var searching = false
+    @StateObject private var outside = OutsideClickMonitor()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -59,13 +60,14 @@ struct ExpandedView: View {
         // The search list, under the toolbar's search box (right). Shown while the box has text, until Esc or an item opens.
         .overlay(alignment: .topTrailing) {
             if listOpen && !ui.search.trimmingCharacters(in: .whitespaces).isEmpty {
-                ZStack(alignment: .topTrailing) {
-                    // A click anywhere else in the window closes the list, as Esc does (the query stays). Like a menu,
-                    // that click only closes it.
-                    Color.black.opacity(0.001).contentShape(Rectangle()).onTapGesture { listOpen = false }
-                    SearchResultsPanel(list: $searchList, searching: searching) { activate($0) }
-                        .padding(.trailing, 10).padding(.top, 2)
-                }
+                // A click anywhere else in the window closes the list, as Esc does (the query stays); the click still
+                // goes to what was clicked (OutsideClickMonitor).
+                SearchResultsPanel(list: $searchList, searching: searching) { activate($0) }
+                    .background(GeometryReader { g in
+                        Color.clear.onAppear { outside.keep = g.frame(in: .global) }
+                            .onChange(of: g.frame(in: .global)) { _, f in outside.keep = f }
+                    })
+                    .padding(.trailing, 10).padding(.top, 2)
             }
         }
         // Searched 150 ms after typing stops (people off the main thread): typing is never held up.
@@ -92,6 +94,10 @@ struct ExpandedView: View {
             ui.currentMatch = orderedMatches.first
         }
         .onChange(of: ui.tab) { _, _ in listOpen = false }   // another tab picked in the toolbar: the list closes
+        .onChange(of: listOpen) { _, open in
+            if open { outside.onOutside = { listOpen = false }; outside.start() } else { outside.stop() }
+        }
+        .onDisappear { outside.stop() }
         .onChange(of: searchFocused) { _, on in if on && !ui.search.trimmingCharacters(in: .whitespaces).isEmpty { listOpen = true } }
         .onReceive(NotificationCenter.default.publisher(for: .floatBoardFocusSearch)) { _ in
             DispatchQueue.main.async { searchFocused = true }

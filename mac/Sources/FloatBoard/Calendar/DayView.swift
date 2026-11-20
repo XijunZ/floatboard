@@ -36,11 +36,6 @@ struct TimeGrid: View {
 
     private var hours: [Int] { Array(snapshotHours ?? 0...23) }
 
-    /// The hour to show at the top: an hour before the event search asked for when it's on this page, else 7:00.
-    private func topHour(_ events: [CalEvent]) -> Int {
-        guard let want = ui.revealEvent?.id, let e = events.first(where: { $0.shortID == want && !$0.allDay }) else { return 7 }
-        return max(0, cal.component(.hour, from: e.start) - 1)
-    }
     private var cal: Calendar { AppTime.calendar }
 
     var body: some View {
@@ -104,8 +99,12 @@ struct TimeGrid: View {
                     ScrollView(.vertical) {
                         grid(placed: placed, calendars: calendars, pending: pending, refused: refused)
                     }
-                    .onAppear { proxy.scrollTo(topHour(events), anchor: .top) }
-                    .onChange(of: ui.revealEvent) { _, _ in proxy.scrollTo(topHour(events), anchor: .top) }
+                    // 07:00, or an hour before an event search asked to show. Only a new request moves the grid: the
+                    // request being acknowledged (nil) leaves it where it is (round 24).
+                    .onAppear { proxy.scrollTo(CalendarReveal.scrollHour(for: ui.revealEvent, in: events) ?? 7, anchor: .top) }
+                    .onChange(of: ui.revealEvent) { _, new in
+                        if let h = CalendarReveal.scrollHour(for: new, in: events) { proxy.scrollTo(h, anchor: .top) }
+                    }
                 }
             }
         }
@@ -295,9 +294,13 @@ private struct EventBlock: View {
     private var placeholder: Bool { event.shortID < 0 }
     private var editable: Bool { !placeholder && (calendar?.owned ?? false) }
 
+    /// The panel opens from the request it saw (after the grid has scrolled to it); the request is acknowledged only then.
     private func revealIfAsked() {
-        guard !placeholder, RevealRequest.take(&ui.revealEvent, ifIn: [event.shortID]) != nil else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { open = true }
+        guard !placeholder, let r = ui.revealEvent, r.id == event.shortID else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            open = true
+            if ui.revealEvent == r { ui.revealEvent = nil }
+        }
     }
 
     var body: some View {
