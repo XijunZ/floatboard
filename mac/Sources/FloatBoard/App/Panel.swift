@@ -33,8 +33,6 @@ final class UIState: ObservableObject {
     @Published var showReview = false
     /// Make task from a selection: the form shows while this is set.
     @Published var makeTask: MakeTaskRequest?
-    /// Search everything (toolbar): the popover shows while true.
-    @Published var showGlobalSearch = false
     /// The open section of the Settings tab.
     @Published var settingsSection: SettingsSection = .mode
     @Published var hovering = false

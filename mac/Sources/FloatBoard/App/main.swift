@@ -377,8 +377,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func findInBoard() {
-        ui.tab = .board
-        expand()
+        expand()   // ⌘F focuses the search box on whatever tab is showing (it searches every area)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NotificationCenter.default.post(name: .floatBoardFocusSearch, object: nil)
         }

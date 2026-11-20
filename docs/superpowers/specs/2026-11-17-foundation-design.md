@@ -42,7 +42,7 @@ To write the fixture: run the checks with `FLOATBOARD_WRITE_SCHEMA_FIXTURE=<abso
 | Settings › Areas | `mac/Sources/FloatBoard/Settings/AreasSection.swift` |
 | Link chips, selectable text, selection menu, Make task form | `mac/Sources/FloatBoard/Items/` |
 | Weekly review page | `mac/Sources/FloatBoard/Items/WeeklyReviewView.swift` |
-| Global search UI | `mac/Sources/FloatBoard/Items/GlobalSearchView.swift` |
+| Global search UI | the toolbar search box and its list: `mac/Sources/FloatBoard/Items/SearchResults.swift` (list model `FloatBoardCore/Items/SearchList.swift`) |
 | Tag editor (task editor) | `mac/Sources/FloatBoard/Items/TagEditor.swift` |
 | Engine migration | `engine/migrations/0039_assistant_foundation.sql` |
 | Phone shell | `engine/src/phone/page.ts`, `engine/src/phone/files/app.client.js` |

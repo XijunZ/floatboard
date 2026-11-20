@@ -46,7 +46,7 @@ struct GuideView: View {
                     icon("pin", "Pin the board so it stays open when you click another app")
                     icon("envelope.fill", "✉ chip on a task with a source (where it came from): click to open the email or notes; red if high importance")
                     icon("video.fill", "Join on a task whose Link is a call (Meet, Zoom, Teams); Open for any other link. Any task can have one")
-                    icon("magnifyingglass", "Search: highlights matches; Enter jumps to the next")
+                    icon("magnifyingglass", "Search: every area at once. The list under the box groups what it finds by tab (Tasks, Calendar, Jots, Circle, Decisions, Goals); ↓↑ and Enter or a click open one. On the Board, matching tasks are highlighted too; Enter jumps to the next")
                 }
                 section("Connector tasks") {
                     note("Your engine (Settings › Mode) suggests tasks from your inputs (Settings › Inputs). Hover the ✉ chip to see why a task was suggested.")
@@ -90,7 +90,7 @@ struct GuideView: View {
                 section("Keyboard") {
                     line("⌃⌥N", "New task from anywhere")
                     line("⌃⌥B", "Show / hide the bar")
-                    line("⌘F", "Search the board")
+                    line("⌘F", "Search every area")
                     line("← →", "Add row: move between group, task, importance, due, time, Add")
                     line("↑ ↓", "Change the selected group / importance / date part")
                     line("Space", "Tick Due / Time, or press Add")
