@@ -57,6 +57,7 @@ struct EventPanel: View {
                     Text("to").foregroundStyle(.secondary)
                     TimeInput(time: $end)
                 }
+                .onChange(of: start) { was, now in end = EventPanelEdit.endAfterMovingStart(from: was, to: now, end: end) }
             } else {
                 Text("\(Fmt.short(event.start)) \(Fmt.clock(event.start))–\(Fmt.clock(event.end))").foregroundStyle(.secondary)
             }
