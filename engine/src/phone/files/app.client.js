@@ -710,7 +710,7 @@
     render();
     note(replacedText(replaced, dropped, rejected));
     syncJots();
-    if (pendingShare !== null && board && me) { var shared = pendingShare; pendingShare = null; shareInto(shared); }
+    showPendingShare();
     if (syncAgain && failures === 0 && me) { syncAgain = false; sync(); }
     if (me && failures === 0) circleSync(); // Circle: send its taps, then fetch its copy
   }
@@ -747,6 +747,7 @@
       toast("Couldn't save on this phone: storage full");
       return false;
     }
+    openCapture = null;   // queued: its form closes without keeping a draft of it (round 39)
     closeSheet();
     render();
     if (a.action === "delete" || a.action === "done") buzz();
@@ -824,14 +825,16 @@
     if (openCapture && !keepCaptureDraft()) { toast("Couldn't save on this phone: storage full"); return false; }
     openCapture = null;
     if (draftWaiting) setTimeout(restoreWaitingDraft, 0);
+    if (pendingShare !== null) setTimeout(showPendingShare, 0);   // a share that waited for this form
     var s = document.querySelector(".scrim");
     if (s) s.remove();
     sheetOpen = false;
     if (reloadWhenIdle) location.reload();
   }
 
+  // True once the sheet is on screen; false when an add form whose words couldn't be kept is still open (round 39).
   function openSheet(fill) {
-    if (closeSheet() === false) return;   // an add form whose words couldn't be kept stays
+    if (closeSheet() === false) return false;   // an add form whose words couldn't be kept stays
     var scrim = el("div", "scrim");
     var sheet = el("div", "sheet");
     sheet.setAttribute("role", "dialog");
@@ -845,6 +848,7 @@
     scrim.addEventListener("click", function (e) { if (e.target === scrim) cancelSheet(); });
     document.body.appendChild(scrim);
     sheetOpen = true;
+    return true;
   }
 
   function safeLink(link) {
@@ -1095,8 +1099,10 @@
         var t = title.value.trim();
         if (!t) { title.focus(); return; }
         tab = "todo";
-        if (act({ action: "add", title: t.slice(0, 200), group: group.value }, "Added. It will show on your Mac shortly.") && capture.account) {
-          dropDraft(capture.account, capture.id);   // queued: its draft (if any) goes
+        if (capture.queued) return;   // already queued: never a second task from the same form (round 39)
+        if (act({ action: "add", title: t.slice(0, 200), group: group.value }, "Added. It will show on your Mac shortly.")) {
+          capture.queued = true;
+          if (capture.account) dropDraft(capture.account, capture.id);   // queued: its draft (if any) goes
         }
       });
       sheet.appendChild(form);
@@ -1347,9 +1353,15 @@
     jots.sync().catch(function (e) { if (e instanceof SignedOut) showSignIn(); });
   }
 
+  // A share is let go only once its sheet is on screen (round 39): an add form that can't be put aside keeps it waiting,
+  // and it is shown as soon as that form closes.
+  function showPendingShare() {
+    if (pendingShare !== null && board && me && shareInto(pendingShare)) pendingShare = null;
+  }
+
   function shareInto(text) {
-    if (board && board.modules && board.modules.jots) { view = "jots"; render(); jots.shareSheet(text); }
-    else jots.shareSheet(text, true);
+    if (board && board.modules && board.modules.jots) { view = "jots"; render(); return jots.shareSheet(text); }
+    return jots.shareSheet(text, true);
   }
 
   function applyLaunch() {

@@ -448,8 +448,9 @@
     }
 
     // A share from another app: save it as a jot, or as a task.
+    // True once the share's sheet is on screen (false: another sheet that can't close yet keeps it waiting).
     function shareSheet(text, taskOnly) {
-      h.openSheet(function (sheet) {
+      return h.openSheet(function (sheet) {
         sheet.appendChild(h.el("h3", null, "Save to FloatBoard"));
         var box = h.el("textarea", "jot-box");
         box.value = text;

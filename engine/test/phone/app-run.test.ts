@@ -191,4 +191,40 @@ describe("phone app run whole: tabs and accounts (round 34)", () => {
     expect(unsubscribed).toBe(false);
     one.stop(); two.stop();
   });
+
+  // Round 39 (Codex 27).
+  const adds = (b: { storage: Map<string, string> }) => (JSON.parse(b.storage.get("floatboard.queue") ?? "null")?.actions ?? []).filter((a: any) => a.action === "add").length;
+
+  it("a_queued_capture_closes_its_form_even_when_its_draft_cannot_be_written_and_cannot_be_sent_twice", async () => {
+    const b = browser();
+    const one = runApp({ ...b, storageFails: (k) => k.startsWith("floatboard.capturedraft"), reply: (p) => (p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : board("acc-a")) });
+    await flush();
+    const before = adds(b);
+    one.byId("add").fire("click");
+    one.find("add-title").value = "Book the venue";
+    const form = [...one.created].reverse().find((e) => e.tagName === "FORM");
+    form.fire("submit"); await flush();
+    form.fire("submit"); await flush();   // pressed again: the form must be gone (or refuse)
+    expect(adds(b)).toBe(before + 1);
+    expect(one.toasts).not.toContain("Couldn't save on this phone: storage full");
+    one.stop();
+  });
+
+  it("a_share_blocked_by_an_unsavable_add_form_is_shown_once_that_form_closes", async () => {
+    const b = browser();
+    let answerBoard: (r: any) => void = () => {};
+    let held = true;
+    const one = runApp({ ...b, search: "?share_text=Shared+words+from+another+app", storageFails: (k) => k.startsWith("floatboard.capturedraft"),
+      reply: (p) => (p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : held ? new Promise((r) => { answerBoard = r; }) : board("acc-a")) });
+    await flush();
+    one.byId("add").fire("click");                       // the cached board is up; the owner starts a task
+    one.find("add-title").value = "Half-written task";
+    held = false;
+    answerBoard(board("acc-a")); await flush();           // the board arrives: the share can't replace the open form
+    const shown = () => one.created.some((e) => e.tagName === "TEXTAREA" && e.value === "Shared words from another app");
+    expect(shown()).toBe(false);
+    one.created.filter((e) => e.textContent === "Close").pop().fire("click"); await flush();   // the owner closes the form
+    expect(shown()).toBe(true);
+    one.stop();
+  });
 });

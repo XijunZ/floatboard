@@ -67,7 +67,7 @@ export type Reply = { status: number; body: any } | Promise<{ status: number; bo
 
 // One tab of the app. `storage` is the browser's localStorage, shared by the tabs of one test; `reply(path, init)` answers
 // fetch (a Promise held back by the test is a slow answer).
-export function runApp(o: { storage: Map<string, string>; locks: any; Channel: any; reply: (path: string, init: any) => Reply; storageFails?: () => boolean; push?: { ready: Promise<any> } }) {
+export function runApp(o: { storage: Map<string, string>; locks: any; Channel: any; reply: (path: string, init: any) => Reply; storageFails?: (key: string) => boolean; search?: string; push?: { ready: Promise<any> } }) {
   const els: Record<string, any> = {};
   const created: any[] = [];
   const byId = (id: string) => (els[id] ??= fakeElement());
@@ -86,12 +86,12 @@ export function runApp(o: { storage: Map<string, string>; locks: any; Channel: a
   };
   const localStorage = {
     getItem: (k: string) => (o.storage.has(k) ? o.storage.get(k)! : null),
-    setItem: (k: string, v: string) => { if (o.storageFails && o.storageFails()) throw new Error("QuotaExceededError"); o.storage.set(k, String(v)); },
+    setItem: (k: string, v: string) => { if (o.storageFails && o.storageFails(k)) throw new Error("QuotaExceededError"); o.storage.set(k, String(v)); },
     removeItem: (k: string) => { o.storage.delete(k); },
   };
   const session = new Map<string, string>();
   const sessionStorage = { getItem: (k: string) => session.get(k) ?? null, setItem: (k: string, v: string) => { session.set(k, v); }, removeItem: (k: string) => { session.delete(k); } };
-  const location = { hash: "", search: "", pathname: "/app/", href: "https://example.test/app/", origin: "https://example.test", reload: () => { (location as any).reloaded = true; } };
+  const location = { hash: "", search: o.search ?? "", pathname: "/app/", href: "https://example.test/app/", origin: "https://example.test", reload: () => { (location as any).reloaded = true; } };
   const fetch = async (path: string, init: any) => {
     const r = await o.reply(path, init);
     return { status: r.status, ok: r.status >= 200 && r.status < 300, json: async () => r.body };
