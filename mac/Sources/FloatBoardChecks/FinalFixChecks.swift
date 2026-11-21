@@ -533,3 +533,22 @@ final class FakeGoogle: @unchecked Sendable {
         check(store.card(id) != nil && store.lastDeleted == nil, "undo_works_on_a_second_try")
     } catch { check(false, "undo failure checks: \(error)") }
 }
+
+/// Round 40 (Codex 28): a follow-up already on the board from one of the person's engines (Mac only or online) is never
+/// added again when the other engine proposes the same message after a switch.
+@MainActor func crossEngineTaskChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-r40-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    do {
+        let store = Store(db: try DB(url: root.appendingPathComponent("x.sqlite")))
+        func p(_ id: String) -> Proposal {
+            Proposal(id: id, kind: .task, sourceKey: SourceKey(messageID: "fathom:AbCdEf123456#1", sentAt: "2026-11-20T10:00:00Z"), title: "Send Sam the deck",
+                     why: "", due: nil, hasTime: false, group: nil, importance: 1, sourceLabel: "Fathom", link: "", summary: nil,
+                     taskRef: nil, learned: nil, provenance: Provenance(model: "m", skillVersion: "1", created: "2026-11-20T10:00:00Z"))
+        }
+        _ = try Reconciler.apply([p("on-1")], connector: "mac", store: store, defaultGroup: store.areas.first?.name ?? "Work", autoAdd: true)
+        _ = try Reconciler.apply([p("online-1")], connector: "email", store: store, defaultGroup: store.areas.first?.name ?? "Work", autoAdd: true)
+        check(store.cards.filter { $0.title == "Send Sam the deck" }.count == 1, "the_same_follow_up_from_the_other_engine_is_not_added_twice")
+    } catch { check(false, "cross engine checks: \(error)") }
+}

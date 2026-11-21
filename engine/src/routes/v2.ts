@@ -327,6 +327,7 @@ route("GET", "/v2/status", async (_req, env, user) => {
   return json({
     settings_version: s?.settings_version ?? 0, schema: schemaFor(env), needs_attention,
     waiting: await count("SELECT COUNT(*) n FROM app_events WHERE user_id=? AND processed=0"),
+    chats_waiting: await count("SELECT COUNT(*) n FROM chat_rows WHERE user_id=? AND processed=0"),   // round 40: not judged yet
     last_run_ok: good?.finished ?? null, last_run_error: run?.error ?? null, oldest_unprocessed_event: oldest?.t ?? null,
     // The whole engine database (all users), so the Mac can offer to archive old data before D1's limit.
     db_size_bytes: await dbSizeBytes(env),

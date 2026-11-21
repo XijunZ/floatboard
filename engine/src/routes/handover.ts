@@ -3,7 +3,10 @@
  * on the Mac) hands its state to the one on standby every few minutes, and again at the moment of switching, so a switch
  * starts exactly where the other left off and nothing set up is lost:
  * - inputs: Gmail sign-ins (with their own Google client), the Fathom API key, and how far each was read (cursor);
- * - what was already judged (`seen`, last 30 days), so nothing is judged twice;
+ * - what was already judged (`seen`, last 30 days), so nothing is judged twice, and the meetings already judged
+ *   (`recap_keys`, every alias, last 30 days: Fathom catch-up checks these), round 40;
+ * - the person's own name (`owner_name`): judging uses it to know which asks and meeting actions are theirs (the engine
+ *   on the Mac is labelled "This Mac", which is never a person), round 40;
  * - the Claude key, when the receiving engine has none.
  * The Mac app moves it between its two engines over HTTPS with the person's user key (the same key that already reads
  * all of their data). Rules, groups and what was learned are owned by the Mac and sent as settings, not here.
@@ -15,6 +18,9 @@ import { logEvent } from "../lib/runlog";
 import { route } from "../lib/router";
 
 const KINDS = ["gmail", "fathom"];
+/** The label the Mac's own engine was once created with: never a person's name. */
+const MACHINE_LABEL = "This Mac";
+const ownerName = (n: string | null | undefined) => (n && n.trim() && n.trim() !== MACHINE_LABEL ? n.trim().slice(0, 200) : null);
 const SEEN_DAYS = 30;
 const MAX_BODY = 2_000_000;
 
@@ -33,9 +39,12 @@ route("GET", "/v2/handover", async (_req, env, user) => {
   const since = new Date(Date.now() - SEEN_DAYS * 86400e3).toISOString();
   const seen = (await env.DB.prepare("SELECT message_id FROM seen WHERE user_id=? AND at > ?").bind(user.id, since).all<{ message_id: string }>())
     .results.map((r) => r.message_id);
-  const u = await env.DB.prepare("SELECT anthropic_key_enc FROM users WHERE id=?").bind(user.id).first<{ anthropic_key_enc: string | null }>();
+  const recapKeys = (await env.DB.prepare("SELECT key FROM recap_keys WHERE user_id=? AND claim IS NULL AND created > ?").bind(user.id, since)
+    .all<{ key: string }>()).results.map((r) => r.key);
+  const u = await env.DB.prepare("SELECT anthropic_key_enc, name FROM users WHERE id=?").bind(user.id).first<{ anthropic_key_enc: string | null; name: string | null }>();
   await logEvent(env, { run_id: "handover", user_id: user.id, decision: "handover sent", detail: `${sources.length} input(s), ${seen.length} seen` }).run();
-  return json({ version: 1, at: nowISO(), sources, seen, claude_key: await open(u?.anthropic_key_enc ?? null) });
+  return json({ version: 1, at: nowISO(), sources, seen, recap_keys: recapKeys, owner_name: ownerName(u?.name),
+    claude_key: await open(u?.anthropic_key_enc ?? null) });
 });
 
 /**
@@ -46,7 +55,7 @@ route("GET", "/v2/handover", async (_req, env, user) => {
 route("POST", "/v2/handover", async (req, env, user) => {
   const b = await readCappedJSON(req, MAX_BODY);
   if (!b.ok) return json({ error: b.tooLarge ? "too large" : "Invalid JSON" }, b.tooLarge ? 413 : 400);
-  const body = b.body as { sources?: Handed[]; seen?: string[]; claude_key?: string | null; apply_enabled?: boolean };
+  const body = b.body as { sources?: Handed[]; seen?: string[]; recap_keys?: string[]; owner_name?: string | null; claude_key?: string | null; apply_enabled?: boolean };
   if (!Array.isArray(body.sources) || !Array.isArray(body.seen)) return json({ error: "sources and seen are required" }, 400);
   const apply = body.apply_enabled === true;
   const now = nowISO();
@@ -74,6 +83,15 @@ route("POST", "/v2/handover", async (req, env, user) => {
   }
   for (const id of body.seen.slice(0, 50_000)) {
     if (typeof id === "string" && id && id.length <= 500) stmts.push(env.DB.prepare("INSERT OR IGNORE INTO seen(user_id,message_id,at) VALUES(?,?,?)").bind(user.id, id, now));
+  }
+  for (const k of (Array.isArray(body.recap_keys) ? body.recap_keys : []).slice(0, 50_000)) {
+    if (typeof k === "string" && k && k.length <= 500) stmts.push(env.DB.prepare("INSERT OR IGNORE INTO recap_keys(user_id,key,created) VALUES(?,?,?)").bind(user.id, k, now));
+  }
+  // The person's name: taken at a switch (the sender is the one in use); on standby only where this engine has none.
+  const name = ownerName(body.owner_name);
+  if (name) {
+    stmts.push(apply ? env.DB.prepare("UPDATE users SET name=? WHERE id=?").bind(name, user.id)
+      : env.DB.prepare("UPDATE users SET name=? WHERE id=? AND (name IS NULL OR trim(name)='' OR name=?)").bind(name, user.id, MACHINE_LABEL));
   }
   if (typeof body.claude_key === "string" && body.claude_key) {
     stmts.push(env.DB.prepare("UPDATE users SET anthropic_key_enc=? WHERE id=? AND anthropic_key_enc IS NULL").bind(await encrypt(env, body.claude_key), user.id));

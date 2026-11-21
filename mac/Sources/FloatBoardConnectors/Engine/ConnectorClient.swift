@@ -84,6 +84,8 @@ public struct ConnectorStatus: Codable, Equatable {
     public var keys: EngineKeys?
     /// Last 30 days of Claude use per job ("judge", "recap", "learn", "reply"), as a monthly estimate in US dollars.
     public var aiCost: [String: JobCost] = [:]
+    /// Chats taken in but not judged yet (round 40); 0 from older engines.
+    public var chatsWaiting = 0
 
     public init(settingsVersion: Int = 0, schema: [SettingField] = [], needsAttention: [String] = [], waiting: Int = 0,
                 lastRunOK: String? = nil, lastRunError: String? = nil, oldestUnprocessedEvent: String? = nil, dbSizeBytes: Int? = nil) {
@@ -95,7 +97,7 @@ public struct ConnectorStatus: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case settingsVersion = "settings_version", schema, needsAttention = "needs_attention", waiting
         case lastRunOK = "last_run_ok", lastRunError = "last_run_error", oldestUnprocessedEvent = "oldest_unprocessed_event"
-        case dbSizeBytes = "db_size_bytes", sources, keys, aiCost = "ai_cost"
+        case dbSizeBytes = "db_size_bytes", sources, keys, aiCost = "ai_cost", chatsWaiting = "chats_waiting"
     }
 
     public init(from d: Decoder) throws {
@@ -111,6 +113,7 @@ public struct ConnectorStatus: Codable, Equatable {
         sources = try c.decodeIfPresent([EngineSource].self, forKey: .sources) ?? []
         keys = try c.decodeIfPresent(EngineKeys.self, forKey: .keys)
         aiCost = try c.decodeIfPresent([String: JobCost].self, forKey: .aiCost) ?? [:]
+        chatsWaiting = try c.decodeIfPresent(Int.self, forKey: .chatsWaiting) ?? 0
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import FloatBoardConnectors
 import FloatBoardCore
 
@@ -160,6 +161,40 @@ import FloatBoardCore
         l = try JSONSerialization.jsonObject(with: try await local.handoverState()) as? [String: Any] ?? [:]
         check(LocalMode.isOn(store: store) && inbox(l)?["cursor"] as? String == "hist-30" && inbox(l)?["enabled"] as? Bool == true,
               "mac_only_again_starts_where_always_on_left_off")
+
+        // Round 40 (Codex 28).
+        // The person's own name (the online user's "Me") judges on this Mac too, never the connector's label "This Mac".
+        check(l["owner_name"] as? String == "Me", "mac_only_judges_as_the_owner_not_as_this_mac")
+        // A meeting already judged online (its recap key) is known on this Mac after the switch, so catch-up skips it.
+        _ = try await raw(onlineEngine, "POST", "https://online.test/v2/handover",
+                          #"{"sources":[],"seen":[],"recap_keys":["fathom:AbCdEf123456"],"apply_enabled":false}"#, auth)
+        await LocalMode.mirror(store: store)   // on Mac only: the Mac hands to the online engine; this direction is checked below
+        try await local.receiveHandover(try await online.handoverState(), switching: false)
+        l = try JSONSerialization.jsonObject(with: try await local.handoverState()) as? [String: Any] ?? [:]
+        check((l["recap_keys"] as? [String])?.contains("fathom:AbCdEf123456") == true, "handover_carries_the_meetings_already_judged")
+        // "On this Mac" judging is copied to the online engine as its own default (Haiku), so its settings keep updating.
+        try store.saveConnectorSettings(connector: LocalMode.connectorID, values: ["model_judge": "On this Mac", "my_rules": "Invoices are tasks\nRent is a task"])
+        store.reload()
+        await LocalMode.mirror(store: store)
+        store.reload()
+        let onlineSettings = store.connectors.first { $0.id == "email" }?.settings ?? [:]
+        check(onlineSettings["model_judge"] as? String == "Haiku" && onlineSettings["my_rules"] as? String == "Invoices are tasks\nRent is a task",
+              "on_this_mac_judging_is_copied_online_as_haiku")
+        // A chat this Mac's engine took in but couldn't judge yet: leaving Mac only is refused (nothing is stranded).
+        let macKey2 = try ConnectorAccounts.key(for: LocalMode.connectorID) ?? ""
+        var cr = URLRequest(url: URL(string: LocalMode.address + "/v2/chats")!); cr.httpMethod = "POST"
+        cr.setValue("Bearer \(macKey2)", forHTTPHeaderField: "Authorization"); cr.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        cr.httpBody = Data(#"{"app":"whatsapp","chats":[{"key":"wa:447700900999@s.whatsapp.net:Z1","name":"Bo","group":false,"senders":["Bo"],"transcript":"[2026-11-20 09:12] Bo: Can you book the table for Friday?","link":"","received":"2026-11-20T09:12:00Z"}]}"#.utf8)
+        _ = try await LocalMode.handle(cr)
+        var refused = false
+        do { try await LocalMode.disable(store: store) } catch { refused = true }
+        check(refused && LocalMode.isOn(store: store), "leaving_mac_only_waits_for_chats_still_to_be_judged")
+        // Leave this Mac's engine as the later checks expect it (they count its chats).
+        var h: OpaquePointer?
+        if sqlite3_open(LocalData.screeningDatabase.path, &h) == SQLITE_OK {
+            sqlite3_exec(h, "DELETE FROM chat_rows WHERE row_key='wa:447700900999@s.whatsapp.net:Z1'", nil, nil, nil)
+            sqlite3_close(h)
+        }
     } catch { check(false, "mode switching: \(error)") }
 }
 

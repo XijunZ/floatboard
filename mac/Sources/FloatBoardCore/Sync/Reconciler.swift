@@ -113,6 +113,11 @@ public enum Reconciler {
                 return
             }
             guard let row else {
+                // Already on the board from the person's other engine (Mac only and online read the same mail and
+                // meetings): one task per message, whichever engine proposed it first (round 40).
+                let elsewhere = try store.db.query("SELECT count(*) FROM cards WHERE source_mid=? AND source_sent IS ? AND connector<>?",
+                                                   [key.messageID, key.sentAt, connector]) { DB.int($0, 0) }.first ?? 0
+                if elsewhere > 0 { sum.skippedExisting += 1; info("Already on the board from your other engine; not added again"); return }
                 let title = p.title.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !title.isEmpty else { info("Ignored task with an empty title", .warning); return }
                 guard autoAdd else { info("Not added (auto-add is off)"); return }

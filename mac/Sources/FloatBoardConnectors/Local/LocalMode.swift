@@ -96,7 +96,9 @@ public enum LocalMode {
             req.httpMethod = "POST"
             req.setValue(try secret(adminName, store: store) { "" }, forHTTPHeaderField: "X-Admin-Key")
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = Data(#"{"name":"This Mac"}"#.utf8)
+            // The engine's user is the person (judging uses the name to know which asks are theirs), never "This Mac",
+            // which is only the connector's label; a handover from the online engine brings the name it knows (round 40).
+            req.httpBody = try JSONSerialization.data(withJSONObject: ["name": NSFullUserName()])
             let (d, r) = try await e.handle(req)
             guard r.statusCode == 200, let o = try JSONSerialization.jsonObject(with: d) as? [String: Any], let key = o["key"] as? String else {
                 throw LocalEngineError.script("couldn't create this Mac's user (\(r.statusCode))")
@@ -131,6 +133,7 @@ public enum LocalMode {
         guard let to = online(store).first else { throw LocalEngineError.script("connect an online engine first") }
         guard let remote = ConnectorAccounts.client(for: to, store: store) else { throw LocalEngineError.script("no key for \(to.name)") }
         if let local = client(store: store) {
+            try await drain(local, store: store)
             let state = try await local.handoverState()
             try await remote.receiveHandover(state, switching: true)
             // On standby this Mac's engine keeps everything but has its inputs switched off.
@@ -152,14 +155,33 @@ public enum LocalMode {
     /// Phone alert settings belong to the online engine (it sends the alerts), so they are never copied onto it.
     static let onlineOwned: Set<String> = ["alerts_on", "critical_hours"]
 
+    /// Model choices only this Mac can run, and what an online engine uses instead (its default, Haiku), round 40.
+    static let modelKeys: Set<String> = ["model_judge", "model_recap", "model_reply"]
+    static let onDevice = "On this Mac", onlineDefault = "Haiku"
+
     static func copySettings(from: String, to: String, store: Store) throws {
-        guard let src = store.connectors.first(where: { $0.id == from })?.settings,
+        guard var src = store.connectors.first(where: { $0.id == from })?.settings,
               let dst = store.connectors.first(where: { $0.id == to })?.settings else { return }
+        if to != connectorID {   // an online engine refuses "On this Mac" (and with it every other setting in the same save)
+            for k in modelKeys where src[k] as? String == onDevice { src[k] = onlineDefault }
+        }
         let changed = src.filter { k, v in
             !(to != connectorID && onlineOwned.contains(k)) && !NSDictionary(dictionary: [k: v]).isEqual(to: [k: dst[k] as Any])
         }
         guard !changed.isEmpty else { return }
         try store.saveConnectorSettings(connector: to, values: changed, note: "copied from \(from == connectorID ? name : from)")
+    }
+
+    /// Before leaving Mac only (round 40): what this Mac's engine took in is judged and brought onto the board first, so
+    /// nothing is stranded in an engine going on standby. Chats it can't judge yet (no Claude key, offline) keep Mac only on.
+    static func drain(_ local: ConnectorClient, store: Store) async throws {
+        for _ in 0..<20 { if try await local.run().done { break } }
+        let report = await ConnectorSync.run(connector: connectorID, store: store, client: local, now: Date())
+        if let e = report.error { throw LocalEngineError.script("couldn't bring this Mac's last suggestions onto the board first (\(e)); Mac only stays on") }
+        let waiting = try await local.status().chatsWaiting
+        if waiting > 0 {
+            throw LocalEngineError.script("\(waiting) chat\(waiting == 1 ? "" : "s") on this Mac still to be judged; Mac only stays on until they are (try again in a minute)")
+        }
     }
 
     /// Every few minutes: the engine that screens hands its state to the one on standby (which never reads), so a switch
