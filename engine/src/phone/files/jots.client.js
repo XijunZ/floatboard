@@ -154,7 +154,7 @@
     // thrown away (never cached under the new account): the app's shared session check (h.stamp / h.sameSession).
     var heldBy = null;
     // Written only by the active tab (round 31); kept (read back) on each change, before anything is sent.
-    var shared = QueueStore(QUEUE_KEY, h.load, function (k, v) { return (h.storeDurable || function (k2, v2) { h.store(k2, v2); return true; })(k, v); }, h.owns);
+    var shared = QueueStore(QUEUE_KEY, h.load, function (k, v) { return (h.storeDurable || function (k2, v2) { h.store(k2, v2); return true; })(k, v); });
     function active() { return !h.active || h.active(); }
 
     function restore() {
@@ -172,9 +172,7 @@
     function saveQueue() { return heldBy && active() ? shared.save(heldBy, queue) : false; }
 
     function drop() {
-      // The account's waiting changes are parked under it, never deleted: they go when it signs in again. If the phone
-      // can't keep the parked copy, they stay where they are (nothing lost) and the owner is told.
-      if (heldBy && active() && queue.length && !shared.park(heldBy, queue)) h.toast("Couldn't set your waiting jots aside on the phone; they are kept. Free some space, then try again.");
+      // The account's waiting changes were parked under it first (park(), called before any account switch).
       heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null);
       h.store(DRAFT_KEY, null);
       var box = h.$("jot-text");
@@ -472,8 +470,7 @@
         asTask.addEventListener("click", function () {
           var title = selectionTitle(box.value);
           if (!title) return;
-          h.closeSheet();
-          h.addTask(title);
+          if (h.addTask(title) !== false) h.closeSheet();   // not saved on the phone: the sheet stays open with its text
         });
         if (!taskOnly) sheet.appendChild(asJot);
         sheet.appendChild(asTask);
@@ -493,6 +490,7 @@
 
     return { restore: restore, drop: drop, sync: pull, remove: remove, render: render, wire: wire, shareSheet: shareSheet, cleanup: cleanup,
       add: function (text) { return queueAction({ op: "add", text: text }); },
+      park: function () { return !heldBy || !queue.length || shared.park(heldBy, queue); },   // true once kept aside
       keep: function () { return !heldBy || saveQueue(); },   // stepping down: the last word; false if it was not kept
       focus: function () { setTimeout(function () { h.$("jot-text").focus(); }, 80); } };
   }

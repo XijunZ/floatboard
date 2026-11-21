@@ -23,16 +23,12 @@
   }
 
   // Written only by the active tab (round 31); kept (read back) on each change.
-  var decShared = QueueStore(DEC_QUEUE_KEY, load, storeDurable, owns);
+  var decShared = QueueStore(DEC_QUEUE_KEY, load, storeDurable);
   function saveDecQueue() { return tabActive && decQueue.account ? decShared.save(decQueue.account, decQueue.actions) : false; }
 
   // Signing out or another account: drop what this phone holds for Decisions.
   function dropDecisions() {
-    // Waiting changes are parked under their account, never deleted: they go when it signs in again. If the phone can't
-    // keep the parked copy, they stay where they are (nothing lost) and the owner is told.
-    if (decQueue.account && tabActive && decQueue.actions.length && !decShared.park(decQueue.account, decQueue.actions)) {
-      toast("Couldn't set your waiting decision changes aside on the phone; they are kept. Free some space, then try again.");
-    }
+    // Waiting changes were parked under their account first (parkAll in app.client.js; nothing is dropped otherwise).
     decisions = null;
     decQueue = { account: null, actions: [] };
     store(DEC_KEY, null);

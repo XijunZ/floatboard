@@ -171,7 +171,7 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
 
   it("account_is_checked_before_the_queue_is_sent_and_cache_of_another_account_is_dropped", () => {
     // Sync asks /me first when the account isn't confirmed in this session, and acceptAccount drops another account's data.
-    expect(APP_JS).toMatch(/if \(!me\) acceptAccount\(await api\("\/app\/api\/me"\)\);[\s\S]*while \(queue\.actions\.length\)/);
+    expect(APP_JS).toMatch(/if \(!me && !acceptAccount\(await api\("\/app\/api\/me"\)\)\) throw [\s\S]*while \(queue\.actions\.length\)/);
     // A board answering for another account drops the board and the queue.
     expect(APP_JS).toMatch(/function gotBoard\(b\) \{\s*if \(b\.account && me && b\.account !== me\.account\) \{[\s\S]*dropAccountData\(\)/);
     // The cache shown at launch must belong to the queue's account too.

@@ -35,7 +35,6 @@ function harness(opts: { me?: { account: string } | null; shown?: string | null;
   };
   const src = `
     var me = H.me, shownAccount = H.shown, sessionGen = 0, tabActive = true;
-    function owns() { return true; }
     var el = H.el, $ = H.$, load = H.load, store = H.store, toast = H.toast, openSheet = H.openSheet, closeSheet = H.closeSheet,
         api = H.api, newId = H.newId, render = H.render, showSignIn = H.showSignIn;
     var window = { addEventListener: function () {}, scrollTo: function () {} };

@@ -127,7 +127,7 @@ describe("jots on the phone: account changes (Codex round 3)", () => {
 
   it("gotBoard_rebinds_jots_right_after_an_account_switch", () => {
     const body = /function gotBoard\(b\) \{([\s\S]*?)\n    board = /.exec(APP_JS)?.[1] ?? "";
-    expect(body).toMatch(/dropAccountData\(\);[\s\S]*jots\.restore\(\);/);
+    expect(body).toMatch(/if \(!dropAccountData\(\)\) throw [\s\S]*jots\.restore\(\);/);
   });
 
   it("a_late_cleanup_answer_is_not_shown_to_another_account", async () => {

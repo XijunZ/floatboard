@@ -166,102 +166,56 @@
     return q.slice(1);
   }
 
-  // ---- One active tab (round 31). Only one tab of this browser runs the app at a time: it alone reads, writes and sends
-  // the queues, so there is never a merge between tabs. Any other tab shows "FloatBoard is open in another tab" with
-  // "Use here", which asks the active tab to hand over: it keeps what it holds first, and refuses if it couldn't.
+  // ---- One active tab (round 31; Web Locks only since round 33). Only one tab of this browser runs the app at a time: the
+  // one holding the "floatboard-active" Web Lock, which it keeps for its lifetime (so it can't be lost without asking).
+  // Any other tab shows "FloatBoard is open in another tab" with "Use here", which queues for the lock and asks the
+  // active tab to hand over: it lets go only once everything it holds is kept. A refusal, whenever it arrives, cancels
+  // the queued request. A browser without Web Locks runs as the active tab, with a notice to use one tab only.
   //
-  // Round 32: where the browser has Web Locks, the lock is the only ownership (a slow answer just waits). Without them, a
-  // lease in storage. Either way the active tab writes an owner record ({ id, at }) when it takes over, and every queue
-  // write checks it still names this tab (owns()), so a tab that lost ownership can never overwrite its successor. Losing
-  // ownership without asking (lease taken while paused) keeps nothing: the successor already has what was kept.
-  //
-  // `o`: { locks (navigator.locks or null), channel (a BroadcastChannel or null), lease: { load, store } (the owner record),
-  // now(), every(fn, ms), wait(ms), onActive(), onInactive(), onLost() (optional), onRefused(), beforeStepDown() -> bool }.
+  // `o`: { locks (navigator.locks or null), channel (a BroadcastChannel or null), onActive(), onInactive(), onRefused(),
+  // onNoLocks(), beforeStepDown() -> true once everything this tab holds is kept }.
   function ActiveTab(o) {
-    var id = String(o.now()) + Math.random().toString(36).slice(2), active = false, release = null, pending = null;
-    var useLocks = !!o.locks;
-    var LEASE_MS = 6000, BEAT_MS = 2000;
-    function becomeActive() { if (active) return; active = true; o.lease.store({ id: id, at: o.now() }); o.onActive(); }
-    function owner() { var v = o.lease.load(); return v && typeof v.id === "string" && typeof v.at === "number" ? v : null; }
-    function owns() { var v = owner(); return active && !!v && v.id === id; }
-    function letGo() { active = false; if (release) { var r = release; release = null; r(); } }
-    // Asked by another tab: hand over only once everything this tab holds is kept; otherwise keep ownership.
+    var id = Math.random().toString(36).slice(2) + Date.now().toString(36), active = false, release = null, asking = null;
+    function hold(lock) {
+      if (!lock) { o.onInactive(); return null; }
+      asking = null;
+      return new Promise(function (r) { release = r; active = true; o.onActive(); });
+    }
     function handOver(to) {
       if (!active) return;
       var kept = false;
       try { kept = o.beforeStepDown() === true; } catch (e) { kept = false; }
-      if (!kept) { if (o.channel) o.channel.postMessage({ type: "refused", to: to }); return; }
-      letGo();
-      if (o.channel) o.channel.postMessage({ type: "handed-over", to: to });
+      if (!kept) { o.channel.postMessage({ type: "refused", to: to }); return; }
+      active = false;
+      var r = release; release = null;
+      if (r) r();
       o.onInactive();
-    }
-    // Ownership lost without asking: nothing is kept from memory (it may be older than what the successor kept).
-    function lose() { if (!active) return; letGo(); (o.onLost || o.onInactive)(); }
-    function takeLock(wait) {
-      o.locks.request("floatboard-active", wait ? {} : { ifAvailable: true }, function (lock) {
-        if (!lock) { o.onInactive(); return null; }
-        return new Promise(function (r) { release = r; becomeActive(); });
-      });
-    }
-    function fresh(v) { return v && o.now() - v.at < LEASE_MS; }
-    function beat() {
-      if (!active) return;
-      var v = owner();
-      if (v && v.id !== id) { lose(); return; }   // another tab is the owner now
-      if (!useLocks) o.lease.store({ id: id, at: o.now() });   // the lease is renewed only without Web Locks
-    }
-    function leaseTake(force) {
-      var v = owner();
-      if (!force && v && v.id !== id && fresh(v)) { o.onInactive(); return Promise.resolve(); }
-      o.lease.store({ id: id, at: o.now() });
-      // Taken over from a tab that didn't answer: wait one beat so it sees the lease is gone before this tab acts.
-      return (force ? o.wait(BEAT_MS + 500) : Promise.resolve()).then(function () {
-        var now = owner();
-        if (now && now.id === id) becomeActive(); else o.onInactive();
-      });
     }
     if (o.channel) o.channel.onmessage = function (e) {
       var d = e && e.data;
       if (!d) return;
       if (d.type === "step-down" && d.from !== id) handOver(d.from);
-      else if ((d.type === "handed-over" || d.type === "refused") && d.to === id && pending) pending(d.type);
+      else if (d.type === "refused" && d.to === id && asking) { asking.abort(); asking = null; o.onRefused(); }
     };
-    o.every(beat, BEAT_MS);
-    function taken() {
-      if (useLocks) { takeLock(true); return Promise.resolve(); }
-      o.lease.store({ id: id, at: o.now() }); becomeActive(); return Promise.resolve();
-    }
     return {
-      start: function () { if (useLocks) { takeLock(false); return Promise.resolve(); } return leaseTake(false); },
-      useHere: function () {
-        if (!o.channel) return useLocks ? (takeLock(true), Promise.resolve()) : leaseTake(true);
-        return new Promise(function (resolve) {
-          pending = function (answer) {
-            pending = null;
-            if (answer === "handed-over") { resolve(taken()); return; }
-            if (answer === "refused") { o.onRefused(); resolve(); return; }
-            // No answer: with Web Locks, wait for the lock (it is free once that tab is gone); without, take a lease
-            // only once it has gone stale.
-            if (useLocks) { takeLock(true); resolve(); return; }
-            var v = owner();
-            if (v && v.id !== id && fresh(v)) { o.onRefused(); resolve(); return; }
-            resolve(leaseTake(false));
-          };
-          o.channel.postMessage({ type: "step-down", from: id });
-          if (pending) o.wait(BEAT_MS + 500).then(function () { if (pending) pending("no answer"); });
-        });
+      start: function () {
+        if (!o.locks) { active = true; o.onNoLocks(); o.onActive(); return; }
+        o.locks.request("floatboard-active", { ifAvailable: true }, hold).catch(function () { /* never held */ });
       },
-      isActive: function () { return active; },
-      owns: owns
+      useHere: function () {
+        if (active || asking || !o.locks) return;
+        asking = new AbortController();
+        o.locks.request("floatboard-active", { signal: asking.signal }, hold).catch(function () { /* cancelled by a refusal */ });
+        if (o.channel) o.channel.postMessage({ type: "step-down", from: id });
+      },
+      isActive: function () { return active; }
     };
   }
 
   // A screen's queue, stored as { account, actions } (written only by the active tab). Another account's waiting changes
   // are parked under that account and come back when it signs in again; nothing is ever deleted or relabelled, and the
   // active copy is cleared only once its parked copy is kept.
-  // `owns()` (optional): checked before every write, which is refused once this tab is no longer the owner.
-  function QueueStore(key, load, put, owns) {
-    function store(k, v) { return owns && !owns() ? false : put(k, v); }
+  function QueueStore(key, load, store) {
     function parkedKey(account) { return key + ":parked:" + account; }
     function list(v) { return v && Array.isArray(v.actions) ? v.actions : []; }
     function addTo(k, account, actions) {

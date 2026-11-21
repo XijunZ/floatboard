@@ -12,7 +12,6 @@
   var MOVE = { todo: "Move to To do", doing: "Move to Doing", watch: "Move to Watch", done: "Mark as done" };
   var MOVED = { todo: "Moved to To do", doing: "Moved to Doing", watch: "Moved to Watch", done: "Done" };
   var BOARD_KEY = "floatboard.board";   // { account, board, at }: the last board and when it was synced
-  var ACTIVE_KEY = "floatboard.activeTab";   // { id, at }: the active tab's lease, only where Web Locks don't exist
   var QUEUE_KEY = "floatboard.queue";   // { account, actions: [{ id, made_at, card_id?, action, title?, group? }] }
   var SENT_KEY = "floatboard.sent";     // ids this phone sent lately, to notice when the engine reports one not applied
   var REFRESH_MS = 60000;
@@ -527,7 +526,7 @@
   }
 
   // Only the active tab writes the queue (round 31); kept on each change, before anything is sent.
-  var boardQueue = QueueStore(QUEUE_KEY, load, storeDurable, owns);
+  var boardQueue = QueueStore(QUEUE_KEY, load, storeDurable);
   function saveQueue() { return tabActive && queue.account ? boardQueue.save(queue.account, queue.actions) : false; }
 
   // Forget everything this phone holds for an account: its board, its queue and the ids it sent.
@@ -538,16 +537,23 @@
   function sessionStamp() { return { gen: sessionGen, account: sessionAccount() }; }
   function sameSession(stamp, respAccount) { return sessionAccepts(stamp, sessionStamp(), respAccount); }
 
+  // Every account's waiting changes set aside under it; true only once all of them are kept.
+  function parkAll() {
+    var ok = !queue.account || !queue.actions.length || boardQueue.park(queue.account, queue.actions);
+    ok = jots.park() && ok;
+    ok = (!circleQueue.account || !circleQueue.actions.length || circleShared.park(circleQueue.account, circleQueue.actions)) && ok;
+    ok = (!decQueue.account || !decQueue.actions.length || decShared.park(decQueue.account, decQueue.actions)) && ok;
+    return ok;
+  }
+
+  // False (and nothing dropped) when the waiting changes couldn't be kept aside: the switch is refused.
   function dropAccountData() {
+    if (!parkAll()) { toast("Couldn't keep this account's unsent changes on this phone; free some space and try again"); return false; }
     sessionGen += 1;   // first: every answer still on its way belongs to the old session
     closeSheet();      // and no sheet of the old account stays open (a form saved later would land in the new one)
     board = null;
     shownAccount = null;
-    // Waiting changes are parked under their account, never deleted or relabelled: they go when it signs in again. If
-    // the phone can't keep the parked copy, the queue stays where it is (nothing lost) and the owner is told.
-    if (queue.account && tabActive && !boardQueue.park(queue.account, queue.actions)) {
-      toast("Couldn't set this account's waiting changes aside on the phone; they are kept. Free some space, then try again.");
-    }
+    // Waiting changes were parked under their account above (never deleted or relabelled): they go when it signs in again.
     queue = { account: null, actions: [] };
     sentIds = [];
     store(BOARD_KEY, null);
@@ -555,6 +561,7 @@
     jots.drop(); // Jots: the cached jots and their queue go with the account
     circleDrop(); // Circle's copy and queue go with the account
     dropDecisions();   // Decisions' cached copy and queue (files/decisions.client.js)
+    return true;
   }
 
   // /app/api/me answered: the session's account. Any board or queue of another account is dropped, never shown or sent.
@@ -562,19 +569,21 @@
     var cached = load(BOARD_KEY);
     var other = (cached && !(cached.account === m.account)) || (shownAccount && shownAccount !== m.account) ||
       (queue.account && queue.account !== m.account);
-    if (other) dropAccountData();
+    if (other && !dropAccountData()) return false;
     me = m;
     shownAccount = m.account;
     // This account's waiting changes, including any parked while another account was signed in.
     if (queue.account !== m.account || !queue.actions.length) queue = { account: m.account, actions: boardQueue.load(m.account) };
     jots.restore();
+    return true;
   }
 
   // A board from the engine (GET /app/api/board or the answer to a batch of actions).
   function gotBoard(b) {
     if (b.account && me && b.account !== me.account) {
-      // The session now belongs to another account (signed in elsewhere in this browser): start clean for it.
-      dropAccountData();
+      // The session now belongs to another account (signed in elsewhere in this browser): start clean for it, once this
+      // account's waiting changes are kept aside (otherwise nothing changes; the next sync tries again).
+      if (!dropAccountData()) throw new Error("Couldn't keep this account's unsent changes on this phone");
       me.account = b.account;
       shownAccount = b.account;
       queue = { account: b.account, actions: boardQueue.load(b.account) };
@@ -605,7 +614,7 @@
     var m = null;
     try { m = await api("/app/api/me"); } catch (e) { if (e instanceof SignedOut) { showSignIn(); return; } }
     if (!m || m.account === mine) return;
-    acceptAccount(m);   // parks this account's changes (never deleted), shows the account signed in now
+    if (!acceptAccount(m)) return;   // parks this account's changes (never deleted), shows the account signed in now
     var n = queueCount(mine);
     note("Signed in as another account in another tab: changes for " + was + " kept" + (n ? " (" + n + ")" : "") + ". Sign back in to send them.");
     sync();
@@ -633,7 +642,7 @@
     spin.classList.add("spin");
     var replaced = 0, dropped = 0, rejected = 0;
     try {
-      if (!me) acceptAccount(await api("/app/api/me"));
+      if (!me && !acceptAccount(await api("/app/api/me"))) throw new Error("Couldn't keep this account's unsent changes on this phone");
       var got = false;
       while (queue.actions.length) {
         var body = takeBatch(queue.actions, new Date().toISOString());
@@ -717,8 +726,10 @@
     queue.account = account;
     queue.actions.push(a);
     if (!saveQueue()) {
-      // Not kept on the phone: it stays in memory (and is still sent), but is never shown as saved.
-      closeSheet(); render(); toast("Couldn't save on this phone: storage full"); failures = 0; sync(); return;
+      // Not kept on the phone: taken back out (never held in memory only) and the form stays open with its text to retry.
+      queue.actions = queue.actions.filter(function (x) { return x !== a; });
+      toast("Couldn't save on this phone: storage full");
+      return false;
     }
     closeSheet();
     render();
@@ -727,6 +738,7 @@
     if (u) showUndo(u); else toast(done);
     failures = 0;
     sync();
+    return true;
   }
 
   /** A short vibration where the phone has one (Delete, Done). */
@@ -1239,11 +1251,10 @@
     account: sessionAccount,
     stamp: sessionStamp, sameSession: sameSession,   // the shared session check (late answers are dropped)
     active: function () { return tabActive; },
-    owns: owns,   // only the active tab writes or sends its queue (round 31)
     modules: function () { return board && board.modules; },
     zone: function () { return board && board.time_zone; },
     makeDecision: function (text, source, context) { decisionForm(text, source, context); },   // Decisions (files/decisions.client.js)
-    addTask: function (title) { act({ action: "add", title: title.slice(0, 200), group: groups()[0] || null }, "Added. It will show on your Mac shortly."); },
+    addTask: function (title) { return act({ action: "add", title: title.slice(0, 200), group: groups()[0] || null }, "Added. It will show on your Mac shortly."); },
   });
   jots.wire();
   // Long-press shortcuts ("New jot", "Plan") and Share into FloatBoard arrive as the page's address; read once, then cleared.
@@ -1358,10 +1369,9 @@
     navigator.serviceWorker.register("/app/sw.js", { scope: "/app/" }).catch(function () { /* the app still works without it */ });
   }
 
-  // ---- One active tab (round 31): this tab runs the app only while it holds the "active" lock.
+  // ---- One active tab (round 31; Web Locks only since round 33): this tab runs the app only while it holds the lock.
   var tabActive = false, wasActive = false;
-  // Every queue write checks this tab is still the owner (round 32), so a tab that lost ownership never overwrites.
-  function owns() { return !!leader && leader.owns(); }
+  try { localStorage.removeItem("floatboard.activeTab"); } catch (e) { /* the old lease (rounds 31-32), no longer used */ }
   // A handover: every queue kept first, or none of it happens (this tab stays the owner and says why).
   function keepAll() {
     var ok = [
@@ -1375,10 +1385,6 @@
   var leader = ActiveTab({
     locks: navigator.locks && typeof navigator.locks.request === "function" ? navigator.locks : null,
     channel: tabChannel,
-    lease: { load: function () { return load(ACTIVE_KEY); }, store: function (v) { store(ACTIVE_KEY, v); } },
-    now: function () { return Date.now(); },
-    every: function (fn, ms) { setInterval(fn, ms); },
-    wait: function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); },
     onActive: function () {
       $("elsewhere").hidden = true;
       if (wasActive) { location.reload(); return; }   // back from another tab: start fresh from what that tab kept
@@ -1392,8 +1398,7 @@
       document.querySelectorAll("main.screen").forEach(function (m) { m.hidden = m.id !== "elsewhere"; });
       $("elsewhere").hidden = false;
     },
-    // Ownership taken while this tab was paused: nothing in memory is kept; start again from what the new owner kept.
-    onLost: function () { tabActive = false; location.reload(); },
+    onNoLocks: function () { toast("This browser can't coordinate tabs: use FloatBoard in one tab only."); },
     onRefused: function () { $("use-here").disabled = false; toast("The other tab couldn't save; try again"); },
     // Stepping down when asked: only once what this tab holds is kept (each change is already kept; this is the last word).
     beforeStepDown: function () { return keepAll(); }

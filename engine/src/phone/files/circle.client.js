@@ -8,7 +8,7 @@
   var CIRCLE_QUEUE_KEY = "floatboard.circleq"; // { account, actions: [...] }
   var CIRCLE_SEND_BYTES = 30000;
   // Written only by the active tab (round 31); kept (read back) on each change.
-  var circleShared = QueueStore(CIRCLE_QUEUE_KEY, load, storeDurable, owns);
+  var circleShared = QueueStore(CIRCLE_QUEUE_KEY, load, storeDurable);
   function circleSave() { return tabActive && circleQueue.account ? circleShared.save(circleQueue.account, circleQueue.actions) : false; }
   // The tiers' names, closest first; a tier not listed (a newer Mac) shows no label.
   var CIRCLE_TIERS = { family: "Family", close: "Close friend", friend: "Friend", network: "Network" };               // under the engine's 32 KB cap for /app/api/circle/action
@@ -32,11 +32,7 @@
   function circleDrop() {
     // A Circle sheet left open (a person, a draft, a link's confirm) belongs to the account that is going: closed.
     if (document.querySelector(".sheet[data-circle]")) closeSheet();
-    // The outgoing account's waiting changes are parked under it first (never deleted; they go when it signs in again).
-    // If the phone can't keep the parked copy, they stay where they are and the owner is told (round 31: the order was wrong).
-    if (circleQueue.account && tabActive && circleQueue.actions.length && !circleShared.park(circleQueue.account, circleQueue.actions)) {
-      toast("Couldn't set your waiting Circle changes aside on the phone; they are kept. Free some space, then try again.");
-    }
+    // The outgoing account's waiting changes were parked first (parkAll in app.client.js; nothing is dropped otherwise).
     circleCopy = null;
     circleQueue = { account: null, actions: [] };
     store(CIRCLE_KEY, null);
