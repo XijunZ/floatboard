@@ -129,7 +129,8 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
     expect(APP_JS).toContain('"Just delete"');
     expect(APP_JS).toMatch(/if \(a\.action === "delete" \|\| a\.action === "done"\) buzz\(\);/);
     expect(APP_JS).toContain("navigator.vibrate(30)");
-    expect(APP_JS).toMatch(/undoDeleteStep\(u, queue\.actions, syncing, newId\(\), new Date\(\)\.toISOString\(\)\)/);
+    // Round 30: decided on the queue as every tab has it, under the shared lock.
+    expect(APP_JS).toMatch(/boardQueue\.update\(acct, queue\.actions, function \(list\) \{\s*var step = undoDeleteStep\(u, list, sending, newId\(\), new Date\(\)\.toISOString\(\)\)/);
     expect(PAGE_HTML).toContain('<symbol id="i-trash"');
     expect(PAGE_HTML).toContain('<button id="undo-btn" class="undo-btn" type="button">Undo</button>');
   });

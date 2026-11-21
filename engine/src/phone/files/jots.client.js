@@ -168,10 +168,12 @@
     }
     function saveDraft(text) { h.store(DRAFT_KEY, text && heldBy ? { account: heldBy, text: text } : null); }
     // Saved merged with what other tabs stored (a capture another tab made is never wiped).
-    function saveQueue() { if (heldBy) { var out = shared.save(heldBy, queue); if (out) queue = out; } }
+    function saveQueue() { if (heldBy) shared.save(heldBy, queue); }   // merged with other tabs', one tab at a time (round 30)
 
     function drop() {
-      heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null); h.store(QUEUE_KEY, null); shared.forget();
+      // The account's waiting changes are parked under it, never deleted (round 30): they go when it signs in again.
+      if (heldBy) shared.park(heldBy, queue);
+      heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null);
       h.store(DRAFT_KEY, null);
       var box = h.$("jot-text");
       if (box) box.value = "";   // the old account's unsaved words leave the screen too
@@ -190,21 +192,23 @@
       return true;
     }
 
-    // Queues one change, kept on this phone first (read back): null when it couldn't be kept (storage full or off, or no
-    // account), and then nothing is cleared or called saved; the caller keeps the words on screen.
+    // Queues one change, kept on this phone first (read back, merged with other tabs' under the shared lock). Resolves
+    // with the change, or null when it couldn't be kept (storage full or off, or no account): then nothing is cleared or
+    // called saved; the caller keeps the words on screen.
     function queueAction(a) {
       bound();
       a.id = a.id || h.newId();
       a.made_at = a.made_at || new Date().toISOString();
-      var saved = heldBy ? shared.save(heldBy, queue.concat([a])) : null;   // merged with other tabs', then read back
-      if (!saved) {
-        h.toast("Couldn't save on this phone (storage full?). Your text is still here; try again.");
-        return null;
-      }
-      queue = saved;
-      render();
-      pull();
-      return a;
+      var failed = function () { h.toast("Couldn't save on this phone (storage full?). Your text is still here; try again."); return null; };
+      if (!heldBy) return Promise.resolve(failed());
+      var acct = heldBy;
+      return shared.save(acct, queue.concat([a])).then(function (saved) {
+        if (!saved) return failed();
+        if (heldBy === acct) queue = saved;
+        render();
+        pull();
+        return a;
+      });
     }
 
     async function pull() {
@@ -294,10 +298,12 @@
       var box = h.$("jot-text");
       var text = box.value.trim();
       if (!text) { box.focus(); return; }
-      if (tooLong(text) || !queueAction({ op: "add", text: text })) { saveDraft(box.value); return; }   // kept on screen and as the draft
-      box.value = "";
-      saveDraft(null);
-      h.toast("Saved");
+      if (tooLong(text)) { saveDraft(box.value); return; }   // kept on screen and as the draft
+      return queueAction({ op: "add", text: text }).then(function (a) {
+        if (!a) { saveDraft(box.value); return; }
+        if (box.value.trim() === text) { box.value = ""; saveDraft(null); }   // words typed meanwhile stay
+        h.toast("Saved");
+      });
     }
 
     // Before and after side by side; "Use cleaned" or "Keep mine". Needs a connection.
@@ -360,9 +366,11 @@
         var mk = h.el("button", "btn act", "Make task");
         mk.addEventListener("click", function () {
           var text = selectionOr(j);
-          if (!queueAction({ op: "make_task", key: j.key, jot_added: j.added, text: text.slice(0, 2000) })) return;
-          h.closeSheet();
-          h.toast("Task \"" + selectionTitle(text) + "\" goes to your Mac.");
+          queueAction({ op: "make_task", key: j.key, jot_added: j.added, text: text.slice(0, 2000) }).then(function (a) {
+            if (!a) return;
+            h.closeSheet();
+            h.toast("Task \"" + selectionTitle(text) + "\" goes to your Mac.");
+          });
         });
         sheet.appendChild(mk);
         if ((h.modules() || {}).decisions) {
@@ -380,7 +388,7 @@
         var cl = h.el("button", "btn act", "Clean up");
         cl.addEventListener("click", function () {
           cleanup(j.text, function (cleaned) {
-            if (queueAction({ op: "edit", key: j.key, jot_added: j.added, text: cleaned })) h.toast("Cleaned. Your text is in its history.");
+            queueAction({ op: "edit", key: j.key, jot_added: j.added, text: cleaned }).then(function (a) { if (a) h.toast("Cleaned. Your text is in its history."); });
           });
         });
         sheet.appendChild(cl);
@@ -401,9 +409,12 @@
         ok.addEventListener("click", function () {
           var t = box.value.trim();
           if (!t || t === j.text) { h.closeSheet(); return; }
-          if (tooLong(t) || !queueAction({ op: "edit", key: j.key, jot_added: j.added, text: t })) return;   // the sheet and its text stay
-          h.closeSheet();
-          h.toast("Saved");
+          if (tooLong(t)) return;   // the sheet and its text stay
+          queueAction({ op: "edit", key: j.key, jot_added: j.added, text: t }).then(function (a) {
+            if (!a) return;   // the sheet and its text stay
+            h.closeSheet();
+            h.toast("Saved");
+          });
         });
         sheet.appendChild(ok);
         setTimeout(function () { box.focus(); }, 50);
@@ -411,8 +422,10 @@
     }
 
     function remove(j) {
-      var a = queueAction({ op: "delete", key: j.key, jot_added: j.added });
-      if (!a) return;
+      return queueAction({ op: "delete", key: j.key, jot_added: j.added }).then(function (a) { if (a) deleted(j, a); });
+    }
+
+    function deleted(j, a) {
       h.closeSheet();
       try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { /* no vibration */ }
       var bar = h.$("undo");
@@ -420,12 +433,23 @@
       bar.hidden = false;
       var btn = h.$("undo-btn");
       if (cancelUndo) cancelUndo();
+      // Undo decides on the queue as every tab has it now (under the shared lock): a delete any tab has sent (or is
+      // sending) is answered with a restore; one never sent is just taken out (round 30).
       var undo = function () {
         cancel();
-        var cur = queue.filter(function (x) { return x.id === a.id; })[0] || a;
-        var step = undoJotDelete(queue, jotAttempted(cur) || syncing ? Object.assign({}, cur, { attempted: true }) : cur);
-        if (step.restore) queueAction({ op: "restore", key: j.key, jot_added: j.added });
-        else { queue = step.queue; saveQueue(); render(); }
+        if (!heldBy) return;
+        var acct = heldBy, sending = syncing;
+        shared.update(acct, queue, function (list) {
+          var cur = list.filter(function (x) { return x.id === a.id; })[0] || a;
+          var step = undoJotDelete(list, jotAttempted(cur) || sending ? Object.assign({}, cur, { attempted: true }) : cur);
+          if (!step.restore) return step.queue;
+          return list.concat([{ id: h.newId(), made_at: new Date().toISOString(), op: "restore", key: j.key, jot_added: j.added }]);
+        }).then(function (out) {
+          if (!out || heldBy !== acct) return;
+          queue = out;
+          render();
+          pull();
+        });
       };
       var cancel = function () { btn.removeEventListener("click", undo, true); bar.hidden = true; clearTimeout(undoTimer); cancelUndo = null; };
       cancelUndo = cancel;
@@ -445,10 +469,13 @@
         var asJot = h.el("button", "btn", "Save as jot");
         asJot.addEventListener("click", function () {
           if (!box.value.trim()) return;
-          var shared = box.value.trim();
-          if (tooLong(shared) || !queueAction({ op: "add", text: shared })) return;   // the share stays open with its text
-          h.closeSheet();
-          h.toast("Saved as a jot");
+          var words = box.value.trim();
+          if (tooLong(words)) return;   // the share stays open with its text
+          queueAction({ op: "add", text: words }).then(function (a) {
+            if (!a) return;   // the share stays open with its text
+            h.closeSheet();
+            h.toast("Saved as a jot");
+          });
         });
         var asTask = h.el("button", "btn secondary", "Save as task");
         asTask.addEventListener("click", function () {

@@ -112,7 +112,7 @@ describe("jots on the phone: account changes (Codex round 3)", () => {
     return { h, stored, sheets, answer: (v: any) => answer(v) };
   }
 
-  it("an_offline_jot_after_an_account_switch_is_saved_for_the_new_account", () => {
+  it("an_offline_jot_after_an_account_switch_is_saved_for_the_new_account", async () => {
     let account = "A";
     const p = phone(() => account);
     const screen = L.JotsScreen(p.h);
@@ -120,7 +120,7 @@ describe("jots on the phone: account changes (Codex round 3)", () => {
     // gotBoard(): the session now belongs to B; the app drops A's data (drop) and switches account.
     screen.drop();
     account = "B";
-    screen.add("Written offline after the switch");
+    await screen.add("Written offline after the switch");
     expect(p.stored["floatboard.jotqueue"]?.account).toBe("B");
     expect(JSON.stringify(p.stored["floatboard.jotqueue"])).toContain("Written offline after the switch");
   });
@@ -178,7 +178,7 @@ describe("jots on the phone: the draft and the undo bar belong to one account (C
     return { h, stored, el };
   }
 
-  it("a_save_the_phone_cannot_keep_is_not_reported_as_saved_and_keeps_the_text", () => {
+  it("a_save_the_phone_cannot_keep_is_not_reported_as_saved_and_keeps_the_text", async () => {
     const p = page(() => "A");
     let full = false;
     const toasts: string[] = [];
@@ -191,14 +191,14 @@ describe("jots on the phone: the draft and the undo bar belong to one account (C
     box.value = "a thought that must not vanish";
     box.listeners.input.forEach((f: Function) => f());
     full = true;   // storage full: the queue can't be kept
-    p.el("jot-save").listeners.click.forEach((f: Function) => f());
+    await Promise.all(p.el("jot-save").listeners.click.map((f: Function) => f()));
     expect(box.value).toBe("a thought that must not vanish");
     expect(p.stored["floatboard.jotdraft"]?.text).toBe("a thought that must not vanish");
     expect(toasts).not.toContain("Saved");
     expect(p.stored["floatboard.jotqueue"]).toBeUndefined();
-    expect(screen.add("shared text")).toBeNull();
+    expect(await screen.add("shared text")).toBeNull();
     full = false;
-    p.el("jot-save").listeners.click.forEach((f: Function) => f());
+    await Promise.all(p.el("jot-save").listeners.click.map((f: Function) => f()));
     expect(box.value).toBe("");
     expect(toasts).toContain("Saved");
     expect(p.stored["floatboard.jotqueue"].actions.map((a: any) => a.text)).toEqual(["a thought that must not vanish"]);
@@ -227,15 +227,15 @@ describe("jots on the phone: the draft and the undo bar belong to one account (C
     expect(JOTS_JS).not.toMatch(/slice\(0, 20000\)/);   // no save, edit or share cuts the text any more
   });
 
-  it("two_tabs_offline_keep_both_captures_and_an_ack_in_one_never_brings_a_change_back", () => {
+  it("two_tabs_offline_keep_both_captures_and_an_ack_in_one_never_brings_a_change_back", async () => {
     // Two tabs of the same phone share one storage (round 28, Codex 18).
     const p = page(() => "A");
     const durable = (k: string, v: any) => { p.h.store(k, v); return true; };
     (p.h as any).storeDurable = durable;
     const tab1 = L.JotsScreen(p.h), tab2 = L.JotsScreen(p.h);
     tab1.restore(); tab2.restore();
-    expect(tab1.add("captured in tab one")).toBeTruthy();
-    expect(tab2.add("captured in tab two")).toBeTruthy();
+    expect(await tab1.add("captured in tab one")).toBeTruthy();
+    expect(await tab2.add("captured in tab two")).toBeTruthy();
     expect(p.stored["floatboard.jotqueue"].actions.map((a: any) => a.text).sort()).toEqual(["captured in tab one", "captured in tab two"]);
   });
 
@@ -288,12 +288,12 @@ describe("jots on the phone: the draft and the undo bar belong to one account (C
     expect(r.el("jot-text").value).toBe("");
   });
 
-  it("the_delete_undo_bar_is_dropped_on_an_account_switch", () => {
+  it("the_delete_undo_bar_is_dropped_on_an_account_switch", async () => {
     let account: string | null = "A";
     const p = page(() => account);
     const screen = L.JotsScreen(p.h);
     screen.restore();
-    screen.remove({ key: "J-1", text: "x", kind: "jot", tags: [], added: new Date().toISOString() });
+    await screen.remove({ key: "J-1", text: "x", kind: "jot", tags: [], added: new Date().toISOString() });
     expect(p.el("undo").hidden).toBe(false);
     expect(p.el("undo-btn").listeners.click?.length).toBe(1);
     screen.drop();

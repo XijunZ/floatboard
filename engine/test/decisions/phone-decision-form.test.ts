@@ -52,12 +52,13 @@ function harness(opts: { me?: { account: string } | null; shown?: string | null;
   const app = new Function("H", "localStorage", src)({ ...h, me: opts.me ?? null, shown: opts.shown ?? null },
     { setItem: (k: string, v: string) => { if (opts.storageFails) throw new Error("full"); storage[k] = v; }, getItem: (k: string) => storage[k] ?? null,
       removeItem: (k: string) => { delete storage[k]; } });
-  const submit = (text: string) => {
+  const submit = (text: string): Promise<void> | void => {
     const form = [...made].reverse().find((m) => m.tag === "form")!;
     const area = made.find((m) => m.tag === "textarea")!;
     area.value = text;
     if (!area.isConnected) return;   // the sheet is gone: nothing to press
     form.listeners.submit.forEach((f) => f({ preventDefault() {} }));
+    return new Promise((r) => setTimeout(r, 0));   // round 30: the save is kept under the shared lock first
   };
   return { ...h, app, submit };
 }
@@ -65,22 +66,22 @@ function harness(opts: { me?: { account: string } | null; shown?: string | null;
 const queued = (storage: Record<string, string>) => (storage["floatboard.decisions.queue"] ? JSON.parse(storage["floatboard.decisions.queue"]) : null);
 
 describe("phone Make decision form (Codex review 3)", () => {
-  it("a_form_opened_under_one_account_never_queues_under_another", () => {
+  it("a_form_opened_under_one_account_never_queues_under_another", async () => {
     const t = harness({ me: { account: "acc-a" }, shown: "acc-a" });
     t.app.decisionForm("We keep the old supplier", "J-1", "notes");
     // A background sync confirms another account while the form is open.
     t.app.switchAccount("acc-b");
-    t.submit("Keep the old supplier");
+    await t.submit("Keep the old supplier");
     const q = queued(t.storage);
     expect(q === null || !(q.actions || []).some((a: any) => a.source === "J-1")).toBe(true);
     expect(t.toasts.some((x) => x.startsWith("Decision saved"))).toBe(false);
   });
 
-  it("an_offline_save_is_queued_under_the_forms_account_and_only_then_reported", () => {
+  it("an_offline_save_is_queued_under_the_forms_account_and_only_then_reported", async () => {
     // Launched offline: /me never answered (me is null) and Decisions' cache was never loaded; the board names the account.
     const t = harness({ me: null, shown: "acc-a" });
     t.app.decisionForm("We keep the old supplier", "J-1", "notes");
-    t.submit("Keep the old supplier");
+    await t.submit("Keep the old supplier");
     const q = queued(t.storage);
     expect(q?.account).toBe("acc-a");
     expect(q?.actions.map((a: any) => [a.action, a.text, a.source])).toEqual([["make", "Keep the old supplier", "J-1"]]);
@@ -88,10 +89,10 @@ describe("phone Make decision form (Codex review 3)", () => {
     expect(t.isOpen()).toBe(false);
   });
 
-  it("when_the_phone_cannot_keep_it_the_form_stays_open_with_its_words", () => {
+  it("when_the_phone_cannot_keep_it_the_form_stays_open_with_its_words", async () => {
     const t = harness({ me: { account: "acc-a" }, shown: "acc-a", storageFails: true });
     t.app.decisionForm("We keep the old supplier", "J-1", "notes");
-    t.submit("Keep the old supplier");
+    await t.submit("Keep the old supplier");
     expect(t.isOpen()).toBe(true);
     expect(t.made.find((m) => m.tag === "textarea")!.value).toBe("Keep the old supplier");
     expect(t.toasts.some((x) => x.startsWith("Decision saved"))).toBe(false);
@@ -109,7 +110,7 @@ describe("phone Make decision form (Codex review 3)", () => {
     expect(L.decisionEnqueue(null, a, null)).toBeNull();
   });
 
-  it("dropping_account_data_closes_open_sheets", () => {
+  it("dropping_account_data_closes_open_sheets", async () => {
     const drop = APP_JS.slice(APP_JS.indexOf("function dropAccountData()"));
     expect(drop.slice(0, drop.indexOf("\n  }\n"))).toContain("closeSheet();");
   });

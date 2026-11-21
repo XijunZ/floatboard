@@ -17,27 +17,22 @@
   function loadDecisionCache() {
     var c = load(DEC_KEY), q = load(DEC_QUEUE_KEY), acc = confirmedAccount();
     decisions = c && typeof c.account === "string" && (!acc || c.account === acc) ? c : null;
-    decQueue = q && typeof q.account === "string" && Array.isArray(q.actions) && (!acc || q.account === acc)
-      ? { account: q.account, actions: decShared.load(q.account) }
-      : { account: decisions ? decisions.account : acc, actions: [] };
-    if (!decQueue.account) decQueue.account = acc;
+    // This account's queue: what is stored for it, and anything parked for it while another account was signed in.
+    var qa = acc || (q && typeof q.account === "string" ? q.account : null) || (decisions ? decisions.account : null);
+    decQueue = { account: qa, actions: qa ? decShared.load(qa) : [] };
   }
 
-  // Shared by every tab of this phone (round 28): saved merged with what other tabs queued.
+  // Shared by every tab of this phone (rounds 28, 30): saved merged with what other tabs queued, one tab at a time.
   var decShared = SharedQueue(DEC_QUEUE_KEY, load, storeDurable);
-  function saveDecQueue() {
-    if (!decQueue.account) { store(DEC_QUEUE_KEY, decQueue.actions.length ? decQueue : null); return; }
-    var out = decShared.save(decQueue.account, decQueue.actions);
-    if (out) decQueue.actions = out;
-  }
+  function saveDecQueue() { if (decQueue.account) decShared.save(decQueue.account, decQueue.actions); }
 
   // Signing out or another account: drop what this phone holds for Decisions.
   function dropDecisions() {
+    // Waiting changes are parked under their account, never deleted (round 30): they go when it signs in again.
+    if (decQueue.account) decShared.park(decQueue.account, decQueue.actions);
     decisions = null;
     decQueue = { account: null, actions: [] };
     store(DEC_KEY, null);
-    store(DEC_QUEUE_KEY, null);
-    decShared.forget();
   }
 
   // Shows or hides the Decisions screen inside More (called by render()).
@@ -118,19 +113,21 @@
 
   // Queues an action under `account` (the account its form or sheet was opened in; otherwise the confirmed one or the cached
   // copy's). True only once it is kept on this phone; false: nothing was queued (the caller keeps its form open).
+  // Resolves true once the change is kept on this phone (merged with other tabs' under the shared lock), false if not.
   function queueDecision(a, account) {
-    if (!a) return false;
+    if (!a) return Promise.resolve(false);
     var acc = account || confirmedAccount() || (decisions && decisions.account) || null;
-    if (!acc) { toast("Sign in again to do this."); return false; }
+    if (!acc) { toast("Sign in again to do this."); return Promise.resolve(false); }
     if (decQueue.account !== acc) loadDecisionCache();   // a queue this phone already holds (screen not opened yet) is kept
     var next = decisionEnqueue(decQueue, a, acc);
-    if (!next) { toast("Changes of another account are still waiting on this phone. Sign in to it, or sign out, first."); return false; }
-    var kept = decShared.save(next.account, next.actions);   // merged with other tabs', then read back
-    if (!kept) return false;
-    decQueue = { account: next.account, actions: kept };
-    renderDecisions();
-    syncDecisions();
-    return true;
+    if (!next) { toast("Changes of another account are still waiting on this phone. Sign in to it, or sign out, first."); return Promise.resolve(false); }
+    return decShared.save(next.account, next.actions).then(function (kept) {
+      if (!kept) return false;
+      if (decQueue.account === next.account || !decQueue.account) decQueue = { account: next.account, actions: kept };
+      renderDecisions();
+      syncDecisions();
+      return true;
+    });
   }
 
   function renderDecisions() {
@@ -186,9 +183,11 @@
         var n = el("button", "btn secondary", "Not a decision");
         n.addEventListener("click", function () {
           if (!sameSession(origin)) { closeSheet(); toast("You changed account, so nothing was marked."); return; }
-          if (!queueDecision(notDecisionAction(d, newId(), new Date().toISOString()), origin.account)) return;
-          closeSheet();
-          toast("Marked not a decision. Your Mac adds it to the Decisions rulebook.");
+          queueDecision(notDecisionAction(d, newId(), new Date().toISOString()), origin.account).then(function (ok) {
+            if (!ok) return;
+            closeSheet();
+            toast("Marked not a decision. Your Mac adds it to the Decisions rulebook.");
+          });
         });
         sheet.appendChild(n);
       }
@@ -214,9 +213,11 @@
         var act = reviewAction(d, a1.value, a2.value, newId(), new Date().toISOString());
         if (!act) { toast("Write what happened first."); return; }
         if (!sameSession(origin)) { closeSheet(); toast("You changed account, so this review was not saved."); return; }
-        if (!queueDecision(act, origin.account)) { toast("Couldn't keep this review on the phone. Your words are still here; try Save again."); return; }
-        closeSheet();
-        toast("Review saved. Your Mac keeps it as a jot.");
+        queueDecision(act, origin.account).then(function (ok) {
+          if (!ok) { toast("Couldn't keep this review on the phone. Your words are still here; try Save again."); return; }
+          closeSheet();
+          toast("Review saved. Your Mac keeps it as a jot.");
+        });
       });
       sheet.appendChild(form);
     });
@@ -269,9 +270,11 @@
           toast("You changed account, so this decision was not saved.");
           return;
         }
-        if (!queueDecision(act, origin.account)) { toast("Couldn't keep this decision on the phone. Your words are still here; try Save again."); return; }
-        closeSheet();
-        toast("Decision saved. Your Mac records it on its next sync.");
+        queueDecision(act, origin.account).then(function (ok) {
+          if (!ok) { toast("Couldn't keep this decision on the phone. Your words are still here; try Save again."); return; }
+          closeSheet();
+          toast("Decision saved. Your Mac records it on its next sync.");
+        });
       });
       api("/app/api/decisions/fill", { method: "POST", body: { selection: String(selection || "").slice(0, 8000), context: String(context || "").slice(0, 8000) } })
         .then(function (answer) {

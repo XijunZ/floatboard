@@ -527,11 +527,8 @@
 
   // Saved merged with what other tabs of this phone stored (round 28): a change another tab queued is never wiped.
   var boardQueue = SharedQueue(QUEUE_KEY, load, storeDurable);
-  function saveQueue() {
-    if (!queue.account) { store(QUEUE_KEY, queue.actions.length ? queue : null); return; }
-    var out = boardQueue.save(queue.account, queue.actions);
-    if (out) queue.actions = out;
-  }
+  // Under the shared lock, one tab at a time (round 30); a queue with no account yet is not written (never over another's).
+  function saveQueue() { if (queue.account) boardQueue.save(queue.account, queue.actions); }
 
   // Forget everything this phone holds for an account: its board, its queue and the ids it sent.
   // The session generation shared by Jots, Circle and Decisions (`sessionAccepts` in files/sync.client.js): it goes up
@@ -546,11 +543,11 @@
     closeSheet();      // and no sheet of the old account stays open (a form saved later would land in the new one)
     board = null;
     shownAccount = null;
+    // Waiting changes are parked under their account, never deleted or relabelled (round 30): they go when it signs in again.
+    if (queue.account) boardQueue.park(queue.account, queue.actions);
     queue = { account: null, actions: [] };
-    boardQueue.forget();
     sentIds = [];
     store(BOARD_KEY, null);
-    store(QUEUE_KEY, null);
     store(SENT_KEY, null);
     jots.drop(); // Jots: the cached jots and their queue go with the account
     circleDrop(); // Circle's copy and queue go with the account
@@ -565,7 +562,8 @@
     if (other) dropAccountData();
     me = m;
     shownAccount = m.account;
-    queue.account = m.account;
+    // This account's waiting changes, including any parked while another account was signed in.
+    if (queue.account !== m.account || !queue.actions.length) queue = { account: m.account, actions: boardQueue.load(m.account) };
     jots.restore();
   }
 
@@ -576,7 +574,7 @@
       dropAccountData();
       me.account = b.account;
       shownAccount = b.account;
-      queue.account = b.account;
+      queue = { account: b.account, actions: boardQueue.load(b.account) };
       jots.restore(); // Jots: bind to the new account at once
     }
     board = { updated: b.updated || null, cards: Array.isArray(b.cards) ? b.cards : [], pending: b.pending || 0 };
@@ -594,6 +592,25 @@
     if (me && me.account) store(BOARD_KEY, { account: me.account, board: board, at: lastSync });
     retryDecisionQueue();   // Decisions: its own queue goes too once the connection is back (files/decisions.client.js)
     return sup.count;
+  }
+
+  // A 409 from the engine: another tab signed this browser in as another account. Sending stops; the session's account is
+  // asked again; this account's waiting changes stay stored under it (parked), and the owner is told.
+  async function accountConflict() {
+    var was = me && me.name ? me.name : "the other account";
+    var mine = queue.account;
+    var m = null;
+    try { m = await api("/app/api/me"); } catch (e) { if (e instanceof SignedOut) { showSignIn(); return; } }
+    if (!m || m.account === mine) return;
+    acceptAccount(m);   // parks this account's changes (never deleted), shows the account signed in now
+    var n = queueCount(mine);
+    note("Signed in as another account in another tab: changes for " + was + " kept" + (n ? " (" + n + ")" : "") + ". Sign back in to send them.");
+    sync();
+  }
+
+  function queueCount(account) {
+    var p = load(QUEUE_KEY + ":parked:" + account);
+    return p && Array.isArray(p.actions) ? p.actions.length : 0;
   }
 
   function scheduleRetry() {
@@ -646,6 +663,9 @@
       failures = 0;
     } catch (e) {
       if (e instanceof SignedOut) { syncing = false; spin.classList.remove("spin"); showSignIn(); return; }
+      // 409: the session now belongs to another account (signed in in another tab). Nothing more is sent; this
+      // account's changes stay stored under it (parked, never relabelled or deleted) and go when it signs in again.
+      if (e && e.status === 409) { syncing = false; spin.classList.remove("spin"); await accountConflict(); return; }
       isOffline = offline(e);
       failures += 1;
       scheduleRetry();
@@ -731,13 +751,21 @@
     hideUndo();
     if (!undoLive(u, Date.now())) return;
     if (u.deleted) {
-      // Not sent yet: taken out of the queue, nothing is sent. Sent (or being sent): a restore brings it back on the Mac.
-      var step = undoDeleteStep(u, queue.actions, syncing, newId(), new Date().toISOString());
-      if (step.restore) { act(step.restore, "Bringing it back"); return; }
-      queue.actions = step.actions;
-      saveQueue();
-      render();
-      toast("Not deleted");
+      // Not sent yet: taken out of the queue, nothing is sent. Sent (or being sent, by any tab): a restore brings it back
+      // on the Mac. Decided on the queue as every tab has it now, under the shared lock (round 30).
+      var acct = queue.account, sending = syncing, restore = null;
+      if (!acct) return;
+      boardQueue.update(acct, queue.actions, function (list) {
+        var step = undoDeleteStep(u, list, sending, newId(), new Date().toISOString());
+        restore = step.restore || null;
+        return step.restore ? list.concat([step.restore]) : step.actions;
+      }).then(function (out) {
+        if (!out || queue.account !== acct) return;
+        queue.actions = out;
+        render();
+        toast(restore ? "Bringing it back" : "Not deleted");
+        if (restore) sync();
+      });
       return;
     }
     act(undoAction(u, newId(), new Date().toISOString()), "Moved back to " + STEP_NAMES[u.from]);

@@ -166,10 +166,11 @@
     return q.slice(1);
   }
 
-  // ---- One queue for every tab of this phone (round 28). Tabs share the stored queue, but each keeps its own copy in
-  // memory: saving its copy as it is would wipe what another tab queued (a capture made in one tab, lost when another
-  // tab saved). So every save merges: the stored queue is the truth, plus what this tab added, minus what this tab
-  // removed (taken by the engine, or undone); what another tab removed is never brought back.
+  // ---- One queue for every tab of this phone (rounds 28, 30). Tabs share the stored queue, but each keeps its own copy
+  // in memory. Every change of the stored queue (read, merge, write) runs under a lock (navigator.locks), so two tabs
+  // never interleave: what other tabs queued is kept, what this tab removed stays removed, and what another tab removed
+  // is never brought back. Markers that an action was sent only go from false to true. A queue of another account is
+  // parked under that account, never deleted or relabelled, and comes back when that account signs in again.
 
   // `stored`: the queue as stored now; `mine`: this tab's copy; `known`: the ids this tab saw stored when it last read
   // or wrote (an id it knew and no longer holds was removed here; one it never knew and holds is new here).
@@ -179,28 +180,86 @@
     (stored || []).forEach(function (a) {
       storedIds[a.id] = true;
       if (known[a.id] && !mineById[a.id]) return;   // removed in this tab
-      out.push(mineById[a.id] || a);                  // this tab's copy of it (its "attempted" mark) when it has one
+      var m = mineById[a.id];
+      if (!m) { out.push(a); return; }
+      // This tab's copy, with the sent markers as either tab last knew them (once sent, always sent).
+      var both = Object.assign({}, a, m);
+      if (a.attempted || m.attempted) both.attempted = true;
+      if (a.sent || m.sent) both.sent = true;
+      out.push(both);
     });
     (mine || []).forEach(function (a) { if (!storedIds[a.id] && !known[a.id]) out.push(a); });   // new in this tab
     return out;
   }
 
-  // A queue stored under `key` as { account, actions }, shared by the tabs. `save` returns the merged actions (this tab
-  // takes them as its copy), or null when the phone could not keep them (`store` says false).
-  function SharedQueue(key, load, store) {
+  // One holder at a time per queue across the tabs; where Web Locks don't exist the work runs as before (best effort).
+  function queueLock(name, fn) {
+    var locks = typeof navigator !== "undefined" && navigator && navigator.locks;
+    if (locks && typeof locks.request === "function") return locks.request("floatboard:" + name, function () { return fn(); });
+    return Promise.resolve().then(fn);
+  }
+
+  // A queue stored under `key` as { account, actions }, shared by the tabs. `save`, `update` and `park` run under the
+  // lock and resolve with the queue as stored (null when the phone couldn't keep it).
+  function SharedQueue(key, load, store, lock) {
     var known = {};
+    var withLock = lock || queueLock;
     function remember(list) { known = {}; list.forEach(function (a) { known[a.id] = true; }); return list; }
+    function parkedKey(account) { return key + ":parked:" + account; }
     function read(account) {
       var v = load(key);
       return v && v.account === account && Array.isArray(v.actions) ? v.actions : [];
     }
+    // The stored queue belongs to another account: this account's changes go to its parked queue instead.
+    function otherAccount(account) { var v = load(key); return !!(v && typeof v.account === "string" && v.account !== account && (v.actions || []).length); }
+    function addParked(account, list) {
+      var p = load(parkedKey(account)), have = p && Array.isArray(p.actions) ? p.actions : [];
+      var ids = {}; have.forEach(function (a) { ids[a.id] = true; });
+      var all = have.concat(list.filter(function (a) { return !ids[a.id]; }));
+      return store(parkedKey(account), all.length ? { account: account, actions: all } : null);
+    }
+    function write(account, out) {
+      if (otherAccount(account)) return addParked(account, out) === false ? null : out;
+      return store(key, out.length ? { account: account, actions: out } : null) === false ? null : out;
+    }
     return {
-      load: function (account) { return remember(read(account).slice()); },
+      // This account's queue: what is stored, plus anything parked for it (another account was signed in meanwhile).
+      load: function (account) {
+        var list = read(account).slice(), p = load(parkedKey(account));
+        if (p && Array.isArray(p.actions) && p.actions.length && !otherAccount(account)) {
+          var ids = {}; list.forEach(function (a) { ids[a.id] = true; });
+          list = list.concat(p.actions.filter(function (a) { return !ids[a.id]; }));
+          if (store(key, { account: account, actions: list }) !== false) store(parkedKey(account), null);
+        }
+        return remember(list);
+      },
       merged: function (account, mine) { return remember(queueReconcile(read(account), mine, known)); },
       save: function (account, mine) {
-        var out = queueReconcile(read(account), mine, known);
-        if (store(key, out.length ? { account: account, actions: out } : null) === false) return null;
-        return remember(out);
+        var snapshot = (mine || []).slice();
+        return withLock(key, function () {
+          var out = queueReconcile(read(account), snapshot, known);
+          return write(account, out) ? remember(out) : null;
+        });
+      },
+      // A decision on the queue as it is stored now (Undo of a delete), made and written under the lock.
+      update: function (account, mine, change) {
+        var snapshot = (mine || []).slice();
+        return withLock(key, function () {
+          var out = change(queueReconcile(read(account), snapshot, known));
+          return write(account, out) ? remember(out) : null;
+        });
+      },
+      // Another account signs in: this account's changes are kept under its name (never deleted or relabelled).
+      park: function (account, mine) {
+        var snapshot = (mine || []).slice();
+        return withLock(key, function () {
+          var out = account ? queueReconcile(read(account), snapshot, known) : [];
+          if (account && out.length) addParked(account, out);
+          var v = load(key);
+          if (!v || v.account === account || !account) store(key, null);
+          known = {};
+          return out;
+        });
       },
       forget: function () { known = {}; }
     };
