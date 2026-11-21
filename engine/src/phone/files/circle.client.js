@@ -8,7 +8,7 @@
   var CIRCLE_QUEUE_KEY = "floatboard.circleq"; // { account, actions: [...] }
   var CIRCLE_SEND_BYTES = 30000;
   // Written only by the active tab (round 31); kept (read back) on each change.
-  var circleShared = QueueStore(CIRCLE_QUEUE_KEY, load, storeDurable);
+  var circleShared = QueueStore(CIRCLE_QUEUE_KEY, load, queueKeep);
   function circleSave() { return tabActive && circleQueue.account ? circleShared.save(circleQueue.account, circleQueue.actions) : false; }
   // The tiers' names, closest first; a tier not listed (a newer Mac) shows no label.
   var CIRCLE_TIERS = { family: "Family", close: "Close friend", friend: "Friend", network: "Network" };               // under the engine's 32 KB cap for /app/api/circle/action

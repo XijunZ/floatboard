@@ -160,7 +160,7 @@ describe("I2 one browser, one account", () => {
     expect(APP_JS).toContain("store(BOARD_KEY, { account: me.account, board: board, at: lastSync })");
     expect(APP_JS).toMatch(/function acceptAccount\(m\) \{[\s\S]*cached\.account === m\.account[\s\S]*queue\.account !== m\.account[\s\S]*dropAccountData\(\)/);
     // Round 30: the account's waiting changes are parked under it (never deleted or relabelled), the board goes.
-    expect(APP_JS).toMatch(/function parkAll\(\) \{[\s\S]*boardQueue\.park\(queue\.account, queue\.actions\)[\s\S]*function dropAccountData\(\) \{\s*if \(!parkAll\(\)\)[\s\S]*store\(BOARD_KEY, null\);/);
+    expect(APP_JS).toMatch(/function parkAll\(\) \{[\s\S]*boardQueue\.park\(queue\.account, queue\.actions\)[\s\S]*function dropAccountData\(\) \{\s*if \(!tabActive\) return false;[^\n]*\n\s*if \(!parkAll\(\)\)[\s\S]*store\(BOARD_KEY, null\);/);
     // Pairing and sign-in drop the cache and unsubscribe the browser's old push subscription first.
     expect(APP_JS).toMatch(/function resetBrowser\(\)[\s\S]*store\(BOARD_KEY, null\)[\s\S]*unsubscribe\(\)/);
     expect((APP_JS.match(/await resetBrowser\(\)/g) ?? []).length).toBe(2);

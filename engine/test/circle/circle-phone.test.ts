@@ -71,7 +71,7 @@ describe("phone Circle", () => {
 
   it("sign_out_clears_circles_phone_cache", () => {
     expect(CIRCLE_JS).toMatch(/function circleDrop\(\)[\s\S]*?store\(CIRCLE_KEY, null\)/);
-    expect(APP_JS).toMatch(/function dropAccountData\(\) \{\s*if \(!parkAll\(\)\) [^\n]*\n\s*sessionGen \+= 1;[\s\S]*?circleDrop\(\)/);
+    expect(APP_JS).toMatch(/function dropAccountData\(\) \{\s*if \(!tabActive\) return false;[^\n]*\n\s*if \(!parkAll\(\)\) [^\n]*\n\s*sessionGen \+= 1;[\s\S]*?circleDrop\(\)/);
   });
 
   it("a_link_never_marks_anyone_by_itself_it_asks_first", () => {

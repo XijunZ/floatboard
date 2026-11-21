@@ -37,7 +37,7 @@ describe("phone queues: shared helpers", () => {
   });
 
   it("circle_queue_is_never_blocked_and_saved_durably", () => {
-    expect(CIRCLE_JS).toMatch(/QueueStore\(CIRCLE_QUEUE_KEY, load, storeDurable\)/);   // a tap is only shown once it is saved
+    expect(CIRCLE_JS).toMatch(/QueueStore\(CIRCLE_QUEUE_KEY, load, queueKeep\)/);   // a tap is only shown once it is saved
     expect(CIRCLE_JS).toMatch(/if \(!tabActive \|\| !circleShared\.save\(acc, next\)\) \{ toast\(/);
     expect(CIRCLE_JS).toMatch(/queueAfterRefusal\(circleQueue\.actions, e\.id\)/);   // a refused batch drops only the named one
     expect(CIRCLE_JS).toMatch(/tooBig/);                                    // one too big for any send is dropped with a message

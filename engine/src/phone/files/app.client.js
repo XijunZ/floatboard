@@ -98,14 +98,19 @@
 
   async function api(path, opts) {
     opts = opts || {};
+    // An answer reaching a tab that has stepped down since it asked goes nowhere: nothing after it runs (round 34).
+    var asked = activeGen;
+    var stale = function () { return asked !== activeGen || !tabActive; };
     var init = { method: opts.method || "GET", credentials: "same-origin", cache: "no-store", headers: {} };
     if (opts.body !== undefined) {
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(opts.body);
     }
-    var r = await fetch(path, init);
+    var r;
+    try { r = await fetch(path, init); } catch (e) { if (stale()) return new Promise(function () {}); throw e; }
     var data = null;
     try { data = await r.json(); } catch (e) { data = null; }
+    if (stale()) return new Promise(function () {});
     if (r.status === 401) throw new SignedOut();
     if (!r.ok) {
       var err = new Error((data && typeof data.error === "string" && data.error) || "Something went wrong. Please try again.");
@@ -526,7 +531,9 @@
   }
 
   // Only the active tab writes the queue (round 31); kept on each change, before anything is sent.
-  var boardQueue = QueueStore(QUEUE_KEY, load, storeDurable);
+  // Every queue write (save, park, load's merge) goes through here: only the active tab writes (round 34).
+  function queueKeep(key, value) { return tabActive && storeDurable(key, value); }
+  var boardQueue = QueueStore(QUEUE_KEY, load, queueKeep);
   function saveQueue() { return tabActive && queue.account ? boardQueue.save(queue.account, queue.actions) : false; }
 
   // Forget everything this phone holds for an account: its board, its queue and the ids it sent.
@@ -539,7 +546,8 @@
 
   // Every account's waiting changes set aside under it; true only once all of them are kept.
   function parkAll() {
-    var ok = !queue.account || !queue.actions.length || boardQueue.park(queue.account, queue.actions);
+    var ok = keepCaptureDraft();
+    ok = (!queue.account || !queue.actions.length || boardQueue.park(queue.account, queue.actions)) && ok;
     ok = jots.park() && ok;
     ok = (!circleQueue.account || !circleQueue.actions.length || circleShared.park(circleQueue.account, circleQueue.actions)) && ok;
     ok = (!decQueue.account || !decQueue.actions.length || decShared.park(decQueue.account, decQueue.actions)) && ok;
@@ -548,6 +556,7 @@
 
   // False (and nothing dropped) when the waiting changes couldn't be kept aside: the switch is refused.
   function dropAccountData() {
+    if (!tabActive) return false;   // a tab that stepped down never touches what the active tab keeps (round 34)
     if (!parkAll()) { toast("Couldn't keep this account's unsent changes on this phone; free some space and try again"); return false; }
     sessionGen += 1;   // first: every answer still on its way belongs to the old session
     closeSheet();      // and no sheet of the old account stays open (a form saved later would land in the new one)
@@ -571,6 +580,7 @@
       (queue.account && queue.account !== m.account);
     if (other && !dropAccountData()) return false;
     me = m;
+    restoreCaptureDraft(m.account);
     shownAccount = m.account;
     // This account's waiting changes, including any parked while another account was signed in.
     if (queue.account !== m.account || !queue.actions.length) queue = { account: m.account, actions: boardQueue.load(m.account) };
@@ -588,6 +598,7 @@
       shownAccount = b.account;
       queue = { account: b.account, actions: boardQueue.load(b.account) };
       jots.restore(); // Jots: bind to the new account at once
+      restoreCaptureDraft(b.account);
     }
     board = { updated: b.updated || null, cards: Array.isArray(b.cards) ? b.cards : [], pending: b.pending || 0 };
     if (Array.isArray(b.events)) board.events = b.events;   // absent from Macs before the calendar
@@ -803,6 +814,7 @@
   // ------------------------------------------------------------ sheets
 
   function closeSheet() {
+    openCapture = null;
     var s = document.querySelector(".scrim");
     if (s) s.remove();
     sheetOpen = false;
@@ -998,7 +1010,24 @@
     });
   }
 
-  function addSheet() {
+  // The add form while it is open: its words are kept as a draft for its account before a handover or account switch,
+  // and come back in the form when that account is next active here (round 34).
+  var openCapture = null;
+  var DRAFT_PREFIX = "floatboard.capturedraft:";
+  function keepCaptureDraft() {
+    if (!openCapture || !openCapture.account || !openCapture.title.value.trim()) return true;
+    return queueKeep(DRAFT_PREFIX + openCapture.account, { title: openCapture.title.value, group: openCapture.group.value });
+  }
+  function restoreCaptureDraft(account) {
+    var d = account ? load(DRAFT_PREFIX + account) : null;
+    if (!d || typeof d.title !== "string") return;
+    addSheet(d);
+    store(DRAFT_PREFIX + account, null);
+    toast("Unsaved capture recovered");
+  }
+
+  function addSheet(draft) {
+    draft = draft && typeof draft.title === "string" ? draft : null;
     openSheet(function (sheet) {
       sheet.appendChild(el("h3", null, "Add a task"));
       var form = el("form");
@@ -1021,6 +1050,8 @@
       var go = el("button", "btn", "Add");
       go.type = "submit";
       [tl, title, gl, group, go].forEach(function (x) { form.appendChild(x); });
+      if (draft) { title.value = draft.title; if (typeof draft.group === "string") group.value = draft.group; }
+      openCapture = { account: sessionAccount(), title: title, group: group };
       form.addEventListener("submit", function (e) {
         e.preventDefault();
         var t = title.value.trim();
@@ -1246,7 +1277,7 @@
 
   var jots = JotsScreen({
     $: $, el: el, api: api, openSheet: openSheet, closeSheet: closeSheet, toast: toast, store: store, load: load, newId: newId,
-    storeDurable: storeDurable,   // the queue is kept only when the phone really kept it
+    storeDurable: queueKeep,   // the queue is kept only when the phone really kept it, and only by the active tab
     offline: offline, SignedOut: SignedOut,
     account: sessionAccount,
     stamp: sessionStamp, sameSession: sameSession,   // the shared session check (late answers are dropped)
@@ -1335,7 +1366,7 @@
   $("refresh").addEventListener("click", function () { failures = 0; sync(); });
   $("undo-btn").addEventListener("click", undoLast);
   $("close-settings").addEventListener("click", function () { show("board"); render(); });
-  $("add").addEventListener("click", addSheet);
+  $("add").addEventListener("click", function () { addSheet(); });
   $("notif-on").addEventListener("click", turnOn);
   $("notif-test").addEventListener("click", sendTest);
   $("notif-off").addEventListener("click", turnOff);
@@ -1371,11 +1402,12 @@
 
   // ---- One active tab (round 31; Web Locks only since round 33): this tab runs the app only while it holds the lock.
   var tabActive = false, wasActive = false;
-  try { localStorage.removeItem("floatboard.activeTab"); } catch (e) { /* the old lease (rounds 31-32), no longer used */ }
+  var activeGen = 0;   // bumped whenever this tab steps down: answers asked for before then are dropped (api())
   // A handover: every queue kept first, or none of it happens (this tab stays the owner and says why).
   function keepAll() {
     var ok = [
-      !queue.account || saveQueue(), jots.keep(), !decQueue.account || saveDecQueue(), !circleQueue.account || circleSave()
+      !queue.account || saveQueue(), jots.keep(), !decQueue.account || saveDecQueue(), !circleQueue.account || circleSave(),
+      keepCaptureDraft()   // an open add form's words (round 34)
     ].every(Boolean);
     if (!ok) toast("Couldn't save on this phone: storage full");
     return ok;
@@ -1389,10 +1421,13 @@
       $("elsewhere").hidden = true;
       if (wasActive) { location.reload(); return; }   // back from another tab: start fresh from what that tab kept
       tabActive = true; wasActive = true;
+      // The old lease (rounds 31-32) goes only once this tab holds the lock: no tab of that version can still need it.
+      if (leader.viaLock()) { try { localStorage.removeItem("floatboard.activeTab"); } catch (e) { /* storage off */ } }
       start();
     },
     onInactive: function () {
       tabActive = false;
+      activeGen += 1;
       clearTimeout(retryTimer);
       closeSheet();
       document.querySelectorAll("main.screen").forEach(function (m) { m.hidden = m.id !== "elsewhere"; });

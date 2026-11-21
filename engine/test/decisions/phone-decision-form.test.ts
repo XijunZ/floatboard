@@ -42,6 +42,7 @@ function harness(opts: { me?: { account: string } | null; shown?: string | null;
     var SignedOut = function () {};
     ${SYNC_JS}
     ${DECISIONS_LOGIC_JS}
+    function queueKeep(k, v) { return tabActive && storeDurable(k, v); }
     function sessionAccount() { return me ? me.account : shownAccount; }
     function sessionStamp() { return { gen: sessionGen, account: sessionAccount() }; }
     function sameSession(stamp, respAccount) { return sessionAccepts(stamp, sessionStamp(), respAccount); }

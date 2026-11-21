@@ -208,7 +208,8 @@
         o.locks.request("floatboard-active", { signal: asking.signal }, hold).catch(function () { /* cancelled by a refusal */ });
         if (o.channel) o.channel.postMessage({ type: "step-down", from: id });
       },
-      isActive: function () { return active; }
+      isActive: function () { return active; },
+      viaLock: function () { return !!o.locks; }
     };
   }
 

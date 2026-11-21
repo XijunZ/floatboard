@@ -23,7 +23,7 @@
   }
 
   // Written only by the active tab (round 31); kept (read back) on each change.
-  var decShared = QueueStore(DEC_QUEUE_KEY, load, storeDurable);
+  var decShared = QueueStore(DEC_QUEUE_KEY, load, queueKeep);
   function saveDecQueue() { return tabActive && decQueue.account ? decShared.save(decQueue.account, decQueue.actions) : false; }
 
   // Signing out or another account: drop what this phone holds for Decisions.

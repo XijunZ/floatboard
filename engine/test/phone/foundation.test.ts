@@ -336,7 +336,7 @@ describe("integration: one session check for every area's phone sync", () => {
 
   it("jots_circle_and_decisions_all_use_it", async () => {
     const { APP_JS } = await import("../../src/phone/client");
-    expect(APP_JS).toMatch(/function dropAccountData\(\) \{\s*if \(!parkAll\(\)\) [^\n]*\n\s*sessionGen \+= 1;/);
+    expect(APP_JS).toMatch(/function dropAccountData\(\) \{\s*if \(!tabActive\) return false;[^\n]*\n\s*if \(!parkAll\(\)\) [^\n]*\n\s*sessionGen \+= 1;/);
     expect(APP_JS).toContain("stamp: sessionStamp, sameSession: sameSession");          // Jots (through its helpers)
     expect(APP_JS).toContain("return sameSession(asked, respAccount);");                // Circle
     expect(APP_JS.match(/var stamp = sessionStamp\(\)/g)?.length).toBeGreaterThanOrEqual(2);   // Decisions: send and fetch
