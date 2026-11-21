@@ -44,10 +44,12 @@ public enum CardLinks {
 /// Every task is the same kind: a feature shows when the task has what it needs, whatever created it.
 /// (The UI asks these, never `connector` / `source` / `externalID` directly.)
 extension Card {
-    /// Where the task came from (the email, the meeting notes): the source link, when it parses with a scheme.
-    public var sourceURL: URL? {
-        URL(string: sourceLink.trimmingCharacters(in: .whitespaces)).flatMap { $0.scheme == nil ? nil : $0 }
-    }
+    /// Where the task came from (the email, the meeting notes): the source link, only as a web address (http/https). It can
+    /// come from an engine, and another scheme (file:, smb:, an app's own) must never be handed to macOS (round 29, L5).
+    public var sourceURL: URL? { CardLinks.web(sourceLink) }
+
+    /// The reply draft's link (Open draft).
+    public var replyDraftURL: URL? { CardLinks.web(replyDraftLink) }   // web addresses only (round 29, L5)
 
     /// The source link when it opens an email (Open email).
     public var emailLink: URL? { sourceURL.flatMap { CardLinks.kind($0) == .email ? $0 : nil } }

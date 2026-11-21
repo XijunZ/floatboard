@@ -89,7 +89,7 @@ struct EditCardView: View {
                 .help(notesEmpty ? "Write what to say in Notes first." : "Turn your Notes into a reply draft")
                 if notesEmpty && card.replyDraftState == nil {
                     Text("Write what to say in Notes first").foregroundStyle(.secondary)
-                } else if card.replyDraftState == .ready, let u = URL(string: card.replyDraftLink) {
+                } else if card.replyDraftState == .ready, let u = card.replyDraftURL {
                     Text("Draft ready").foregroundStyle(.secondary)
                     Button { NSWorkspace.shared.open(u) } label: { Label("Open draft", systemImage: "arrow.up.forward.square") }
                 } else if waiting {

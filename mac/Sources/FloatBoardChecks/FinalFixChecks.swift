@@ -415,3 +415,18 @@ final class FakeGoogle: @unchecked Sendable {
     let m = EventPanelEdit.changes(event: ev, opened: opened, now: now).move
     check(m?.start == at(9) && m?.end == at(11), "an_end_set_by_hand_is_saved_even_when_it_equals_the_old_end")
 }
+
+/// Round 29 (security review L5): links that come from an engine (a task's source, a reply draft) open only as web
+/// addresses; any other scheme (file:, smb:, an app's own) is never handed to macOS.
+@MainActor func engineLinkSchemeChecks() {
+    func card(source: String = "", draft: String = "") -> Card {
+        var c = Card(id: 1, title: "t", notes: "", area: "Work", importance: .medium, due: nil, status: .todo, created: Date(), started: nil, done: nil)
+        c.sourceLink = source; c.replyDraftLink = draft
+        return c
+    }
+    check(card(source: "https://mail.google.com/mail/u/0/#inbox/abc").emailLink != nil, "a_web_mail_link_still_opens")
+    check(card(source: "smb://mail.google.com/share").emailLink == nil && card(source: "file:///etc/hosts").sourceURL == nil
+          && card(source: "someapp://open").sourceURL == nil, "a_source_link_of_another_scheme_never_opens")
+    check(card(draft: "https://mail.google.com/mail/#drafts/1").replyDraftURL != nil && card(draft: "file:///Applications/Calculator.app").replyDraftURL == nil,
+          "a_reply_draft_link_opens_only_as_a_web_address")
+}
