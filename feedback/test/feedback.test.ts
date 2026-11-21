@@ -9,7 +9,7 @@ let githubUp = true;
 
 beforeEach(async () => {
   github = []; ntfy = []; githubUp = true;
-  await env.DB.batch([env.DB.prepare("DELETE FROM feedback"), env.DB.prepare("DELETE FROM meta")]);
+  await env.DB.batch([env.DB.prepare("DELETE FROM feedback"), env.DB.prepare("DELETE FROM meta"), env.DB.prepare("DELETE FROM allowance")]);
   setFetches(
     (async (url: RequestInfo | URL, init?: RequestInit) => {
       github.push({ url: String(url), body: JSON.parse(String(init?.body)), auth: new Headers(init?.headers).get("Authorization") });
@@ -118,11 +118,11 @@ describe("feedback: abuse limits", () => {
   });
 
   it("a_daily_cap_on_issues_then_messages_are_only_stored", async () => {
-    await env.DB.prepare("UPDATE meta SET value=value WHERE 1=0").run();
-    for (let i = 0; i < GLOBAL_PER_DAY; i++) {
-      await env.DB.prepare("INSERT INTO feedback(id,install_id,received,text,issue_url,filed_at) VALUES(?,?,?,?,?,?)")
-        .bind(`old-${i}`, "cccccccc-0000-0000-0000-000000000000", new Date().toISOString(), "x", "https://github.com/x/y/issues/0", new Date().toISOString()).run();
-    }
+    const day = new Date().toISOString().slice(0, 10);
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR REPLACE INTO allowance(kind,day,n) VALUES('issue',?,?)").bind(day, GLOBAL_PER_DAY),
+      env.DB.prepare("INSERT OR REPLACE INTO allowance(kind,day,n) VALUES('ntfy',?,?)").bind(day, GLOBAL_PER_DAY),
+    ]);
     const r = await send(msg({ install_id: "dddddddd-0000-0000-0000-000000000001" }), undefined, "192.0.2.9");
     expect(r.status).toBe(200);
     expect(github).toHaveLength(0);
@@ -143,6 +143,40 @@ describe("feedback: abuse limits", () => {
     const big = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"text":"' + "x".repeat(200_000) + '"}')); c.close(); } });
     const r = await worker.fetch(new Request(BASE + "/feedback", { method: "POST", body: big, duplex: "half" } as any), env as any);
     expect(r.status).toBe(413);
+  });
+});
+
+// Round 31 (Codex 21): the allowances are taken before anything happens, in one statement each, so requests arriving
+// together (or a retry) can never pass the caps; a notification counts whether or not GitHub took the issue.
+describe("feedback: caps hold under concurrency", () => {
+  it("concurrent_requests_from_one_address_never_pass_its_cap", async () => {
+    const all = await Promise.all(Array.from({ length: 12 }, (_, i) =>
+      send(msg({ install_id: `eeeeeeee-0000-0000-0000-0000000000${String(i).padStart(2, "0")}` }), undefined, "203.0.113.50")));
+    expect(all.filter((r) => r.status === 200)).toHaveLength(PER_IP_PER_DAY);
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM feedback WHERE install_id LIKE 'eeeeeeee%'").first<any>()).n).toBe(PER_IP_PER_DAY);
+  });
+
+  it("concurrent_requests_never_pass_the_daily_issue_and_notification_caps", async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR REPLACE INTO allowance(kind,day,n) VALUES('issue',?,?)").bind(day, GLOBAL_PER_DAY - 2),
+      env.DB.prepare("INSERT OR REPLACE INTO allowance(kind,day,n) VALUES('ntfy',?,?)").bind(day, GLOBAL_PER_DAY - 2),
+    ]);
+    await Promise.all(Array.from({ length: 8 }, (_, i) =>
+      send(msg({ install_id: `ffffffff-0000-0000-0000-0000000000${i}0` }), undefined, `198.51.100.${100 + i}`)));
+    expect(github).toHaveLength(2);
+    expect(ntfy).toHaveLength(2);
+    await retry(env as any);
+    expect(github).toHaveLength(2);
+  });
+
+  it("a_github_failure_still_uses_up_a_notification", async () => {
+    githubUp = false;
+    const day = new Date().toISOString().slice(0, 10);
+    await env.DB.prepare("INSERT OR REPLACE INTO allowance(kind,day,n) VALUES('ntfy',?,?)").bind(day, GLOBAL_PER_DAY - 1).run();
+    await send(msg({ install_id: "abababab-0000-0000-0000-000000000001" }), undefined, "192.0.2.77");
+    await send(msg({ install_id: "abababab-0000-0000-0000-000000000002" }), undefined, "192.0.2.78");
+    expect(ntfy.filter((n) => n.title === "FloatBoard feedback")).toHaveLength(1);
   });
 });
 

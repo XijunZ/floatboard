@@ -68,10 +68,13 @@ async function readCapped(req: Request, limit: number): Promise<string | null> {
   return new TextDecoder().decode(all);
 }
 
-/** Issues filed in the last day (the daily cap). */
-async function filedToday(env: Env): Promise<number> {
-  const since = new Date(Date.now() - 86_400_000).toISOString();
-  return (await env.DB.prepare("SELECT COUNT(*) n FROM feedback WHERE filed_at>?").bind(since).first<{ n: number }>())?.n ?? 0;
+/** Takes one of today's `kind` allowance ("issue" or "ntfy") in a single statement, before the work is done (round 31): true
+ *  when there was one left. Requests arriving together are serialised by the database, so the cap holds. */
+export async function takeAllowance(env: Env, kind: "issue" | "ntfy"): Promise<boolean> {
+  const day = new Date().toISOString().slice(0, 10);
+  const r = await env.DB.prepare(`INSERT INTO allowance(kind, day, n) VALUES(?, ?, 1)
+      ON CONFLICT(kind, day) DO UPDATE SET n = n + 1 WHERE n < ?`).bind(kind, day, GLOBAL_PER_DAY).run();
+  return r.meta.changes > 0;
 }
 
 const ID = /^[a-z0-9-]{8,64}$/;
@@ -119,6 +122,8 @@ async function ntfy(env: Env, title: string, message: string): Promise<void> {
 
 /** Files one message on GitHub. Records the outcome; three failures in a row alert the maintainer once. */
 export async function file(env: Env, r: Row): Promise<boolean> {
+  // One of today's issues is taken first (a failed filing uses it too: a run of failures never floods GitHub).
+  if (!(await takeAllowance(env, "issue"))) return false;
   let error: string;
   try {
     const res = await githubFetch(`https://api.github.com/repos/${env.GITHUB_REPO}/issues`, {
@@ -166,18 +171,20 @@ async function receive(req: Request, env: Env, ctx?: ExecutionContext): Promise<
   const n = (await env.DB.prepare("SELECT COUNT(*) n FROM feedback WHERE install_id=? AND received>?").bind(read.m.install_id, since)
     .first<{ n: number }>())?.n ?? 0;
   if (n >= PER_DAY) return json({ error: `at most ${PER_DAY} messages a day; please try again tomorrow` }, 429);
-  // Per sending address too: install_id is the sender's to choose, the address is not.
+  // Per install and per sending address (install_id is the sender's to choose, the address is not), checked and stored in
+  // one statement (round 31): requests arriving together can never pass either limit.
   const ip = await ipHash(req);
-  const byIP = (await env.DB.prepare("SELECT COUNT(*) n FROM feedback WHERE ip_hash=? AND received>?").bind(ip, since)
-    .first<{ n: number }>())?.n ?? 0;
-  if (byIP >= PER_IP_PER_DAY) return json({ error: `at most ${PER_IP_PER_DAY} messages a day; please try again tomorrow` }, 429);
   const row: Row = { id: crypto.randomUUID(), received: new Date().toISOString(), attempts: 0, ip_hash: ip, ...read.m };
-  await env.DB.prepare("INSERT INTO feedback(id,install_id,received,text,app_version,os,diagnostics,ip_hash) VALUES(?,?,?,?,?,?,?,?)")
-    .bind(row.id, row.install_id, row.received, row.text, row.app_version, row.os, row.diagnostics, ip).run();
-  // Stored: the person gets "sent" even if GitHub is down (the hourly run files it later). Past the day's cap it is only
-  // stored (no issue, no ntfy), and filed on a later day.
-  if (await filedToday(env) >= GLOBAL_PER_DAY) return json({ ok: true, id: row.id });
-  await Promise.all([file(env, row), ntfy(env, "FloatBoard feedback", noMentions(row.text))]);
+  const kept = await env.DB.prepare(`INSERT INTO feedback(id,install_id,received,text,app_version,os,diagnostics,ip_hash)
+      SELECT ?,?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM feedback WHERE install_id=? AND received>?) < ?
+        AND (SELECT COUNT(*) FROM feedback WHERE ip_hash=? AND received>?) < ?`)
+    .bind(row.id, row.install_id, row.received, row.text, row.app_version, row.os, row.diagnostics, ip,
+      row.install_id, since, PER_DAY, ip, since, PER_IP_PER_DAY).run();
+  if (!kept.meta.changes) return json({ error: `at most ${PER_IP_PER_DAY} messages a day; please try again tomorrow` }, 429);
+  // Stored: the person gets "sent" even if GitHub is down (the hourly run files it later). The day's issue and push
+  // allowances are taken before each is used; past them the message is only stored, and filed on a later day.
+  const notify = async () => { if (await takeAllowance(env, "ntfy")) await ntfy(env, "FloatBoard feedback", noMentions(row.text)); };
+  await Promise.all([file(env, row), notify()]);
   // Older messages still waiting for GitHub get another try (in the background).
   ctx?.waitUntil(retry(env, row.id));
   return json({ ok: true, id: row.id });
@@ -185,10 +192,9 @@ async function receive(req: Request, env: Env, ctx?: ExecutionContext): Promise<
 
 /** Files what is still waiting, oldest first (`skip`: a message just tried). */
 export async function retry(env: Env, skip = ""): Promise<number> {
-  const room = GLOBAL_PER_DAY - await filedToday(env);   // the daily cap holds for waiting messages too
-  if (room <= 0) return 0;
-  const { results } = await env.DB.prepare("SELECT * FROM feedback WHERE issue_url IS NULL AND id<>? ORDER BY received LIMIT ?")
-    .bind(skip, Math.min(20, room)).all<Row>();
+  // Each filing takes one of the day's issues first (file), so the cap holds for waiting messages too.
+  const { results } = await env.DB.prepare("SELECT * FROM feedback WHERE issue_url IS NULL AND id<>? ORDER BY received LIMIT 20")
+    .bind(skip).all<Row>();
   let filed = 0;
   for (const r of results) if (await file(env, r)) filed++;
   return filed;
