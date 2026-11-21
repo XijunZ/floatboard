@@ -217,14 +217,18 @@
 
   // A new sign-in on this browser: forget the previous account's board and stop its notifications on this browser.
   // The queue stays until /app/api/me names the account: kept for the same account, dropped for another (acceptAccount).
+  // Push subscriptions belong to the whole browser: changed only while this tab is still the one that asked (round 36).
+  function stillOwner(gen) { return tabActive && gen === activeGen; }
+
   async function resetBrowser() {
+    var gen = activeGen;
     board = null;
     me = null;
     shownAccount = null;
     store(BOARD_KEY, null);
     try {
       var sub = await currentSubscription();
-      if (sub) await sub.unsubscribe();
+      if (sub && stillOwner(gen)) await sub.unsubscribe();
     } catch (e) { /* best effort */ }
   }
 
@@ -815,8 +819,9 @@
   // ------------------------------------------------------------ sheets
 
   // Any close that isn't the owner's own Close: an open add form's words stay kept as a draft (round 35).
+  // If those words can't be kept, the form stays open (with its words and account) and the owner is told (round 36).
   function closeSheet() {
-    if (openCapture) keepCaptureDraft();
+    if (openCapture && !keepCaptureDraft()) { toast("Couldn't save on this phone: storage full"); return false; }
     openCapture = null;
     if (draftWaiting) setTimeout(restoreWaitingDraft, 0);
     var s = document.querySelector(".scrim");
@@ -826,7 +831,7 @@
   }
 
   function openSheet(fill) {
-    closeSheet();
+    if (closeSheet() === false) return;   // an add form whose words couldn't be kept stays
     var scrim = el("div", "scrim");
     var sheet = el("div", "sheet");
     sheet.setAttribute("role", "dialog");
@@ -1160,17 +1165,20 @@
   // At start: notifications were allowed but the browser has no subscription any more (it can drop one): make a new one
   // quietly. Asking for permission needs a tap, so a phone that never allowed them is left to Settings.
   async function checkPush() {
+    var gen = activeGen;
     try {
       if (!pushSupported() || Notification.permission !== "granted" || (isIOS && !standalone())) return;
       var reg = await workerReady();
       if (!reg || await reg.pushManager.getSubscription()) return;
       var key = (await api("/app/api/push/key")).key;
+      if (!stillOwner(gen)) return;
       var sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromB64url(key) });
       await sendSubscription(sub);
     } catch (e) { /* Settings shows "Notifications are off on this phone" */ }
   }
 
   async function turnOn() {
+    var gen = activeGen;
     if (busy) return;
     busy = true;
     $("notif-on").disabled = true;
@@ -1185,8 +1193,10 @@
       var reg = await workerReady();
       if (!reg) throw new Error("The app is still starting. Close it, open it again and try once more.");
       var sub = await reg.pushManager.getSubscription();
+      if (!stillOwner(gen)) return;
       var old = sub && sub.options && sub.options.applicationServerKey;
       if (sub && (!old || toB64url(old) !== key)) { await sub.unsubscribe(); sub = null; }
+      if (!stillOwner(gen)) return;
       if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromB64url(key) });
       await sendSubscription(sub);
       toast("Notifications are on.");
@@ -1201,6 +1211,7 @@
   }
 
   async function sendTest() {
+    var gen = activeGen;
     if (busy) return;
     busy = true;
     $("notif-test").disabled = true;
@@ -1220,7 +1231,7 @@
       if (e instanceof SignedOut) { showSignIn(); return; }
       if (e.status === 410) {
         var gone = await currentSubscription().catch(function () { return null; });
-        if (gone) await gone.unsubscribe().catch(function () { /* already gone */ });
+        if (gone && stillOwner(gen)) await gone.unsubscribe().catch(function () { /* already gone */ });
       }
       toast(message(e));
     } finally {
@@ -1231,10 +1242,12 @@
   }
 
   async function turnOff() {
+    var gen = activeGen;
     if (busy) return;
     busy = true;
     try {
       var sub = await currentSubscription();
+      if (!stillOwner(gen)) return;
       if (sub) await sub.unsubscribe();
       await api("/app/api/push/subscribe", { method: "DELETE" });
       toast("Notifications are off.");
@@ -1464,6 +1477,7 @@
     onInactive: function () {
       tabActive = false;
       activeGen += 1;
+      openCapture = null;   // handed over: keepAll has already kept its words
       clearTimeout(retryTimer);
       closeSheet();
       document.querySelectorAll("main.screen").forEach(function (m) { m.hidden = m.id !== "elsewhere"; });

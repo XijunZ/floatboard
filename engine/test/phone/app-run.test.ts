@@ -152,4 +152,43 @@ describe("phone app run whole: tabs and accounts (round 34)", () => {
     expect(one.toasts).toContain("Unsaved capture recovered");
     one.stop();
   });
+
+  // Round 36 (Codex 26).
+  it("an_add_form_whose_words_cannot_be_kept_is_never_removed_on_a_sign_in_prompt", async () => {
+    const b = browser();
+    let full = false, signedOut = false;
+    const accept = (init: any) => ok({ ...board("acc-a").body, accepted: JSON.parse(init.body).actions.map((a: any) => a.id) });
+    const one = runApp({ ...b, storageFails: () => full, reply: (p, init) => (signedOut ? { status: 401, body: {} } : p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? accept(init) : board("acc-a")) });
+    await flush();
+    one.byId("add").fire("click");
+    one.find("add-title").value = "Words the phone can't keep yet";
+    full = true; signedOut = true;
+    one.byId("refresh").fire("click"); await flush();          // 401: the sign-in screen, while storage is full
+    expect(one.toasts).toContain("Couldn't save on this phone: storage full");
+    full = false;
+    // The form (and its words) is still there: a later handover keeps them as a draft.
+    const two = runApp({ ...b, reply: (p) => (p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : board("acc-a")) });
+    await flush();
+    two.byId("use-here").fire("click"); await flush();
+    expect(draftOf(b, "acc-a")).toContain("Words the phone can't keep yet");
+    one.stop(); two.stop();
+  });
+
+  it("a_tab_that_stepped_down_while_turning_notifications_off_leaves_the_subscription", async () => {
+    const b = browser();
+    let giveReg: (r: any) => void = () => {};
+    let unsubscribed = false;
+    const sub = { unsubscribe: async () => { unsubscribed = true; } };
+    const ready = new Promise((r) => { giveReg = r; });
+    const one = runApp({ ...b, push: { ready }, reply: (p) => (p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : board("acc-a")) });
+    await flush();
+    one.byId("notif-off").fire("click"); await flush();
+    const two = runApp({ ...b, reply: (p) => (p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : board("acc-a")) });
+    await flush();
+    two.byId("use-here").fire("click"); await flush();
+    expect(two.byId("elsewhere").hidden).toBe(true);
+    giveReg({ pushManager: { getSubscription: async () => sub, subscribe: async () => sub } }); await flush();
+    expect(unsubscribed).toBe(false);
+    one.stop(); two.stop();
+  });
 });
