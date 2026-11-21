@@ -217,6 +217,11 @@ const BODY = `${ICONS}
 <main id="loading" class="screen"><div class="center"><img class="logo" src="/app/icon.svg" alt=""><p id="loading-text" class="muted">Loading…</p>
 <button id="retry" class="btn secondary" hidden>Try again</button></div></main>
 
+<main id="elsewhere" class="screen" hidden><div class="center"><img class="logo" src="/app/icon.svg" alt="">
+<p>FloatBoard is open in another tab.</p>
+<p class="sub">Only one tab runs it at a time, so nothing you write is lost between them.</p>
+<button id="use-here" class="btn">Use here</button></div></main>
+
 <main id="pair" class="screen" hidden><div class="center">
 <img class="logo" src="/app/icon.svg" alt="">
 <h1>Set up this phone</h1>

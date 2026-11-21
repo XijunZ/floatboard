@@ -166,103 +166,109 @@
     return q.slice(1);
   }
 
-  // ---- One queue for every tab of this phone (rounds 28, 30). Tabs share the stored queue, but each keeps its own copy
-  // in memory. Every change of the stored queue (read, merge, write) runs under a lock (navigator.locks), so two tabs
-  // never interleave: what other tabs queued is kept, what this tab removed stays removed, and what another tab removed
-  // is never brought back. Markers that an action was sent only go from false to true. A queue of another account is
-  // parked under that account, never deleted or relabelled, and comes back when that account signs in again.
-
-  // `stored`: the queue as stored now; `mine`: this tab's copy; `known`: the ids this tab saw stored when it last read
-  // or wrote (an id it knew and no longer holds was removed here; one it never knew and holds is new here).
-  function queueReconcile(stored, mine, known) {
-    var mineById = {}, storedIds = {}, out = [];
-    (mine || []).forEach(function (a) { mineById[a.id] = a; });
-    (stored || []).forEach(function (a) {
-      storedIds[a.id] = true;
-      if (known[a.id] && !mineById[a.id]) return;   // removed in this tab
-      var m = mineById[a.id];
-      if (!m) { out.push(a); return; }
-      // This tab's copy, with the sent markers as either tab last knew them (once sent, always sent).
-      var both = Object.assign({}, a, m);
-      if (a.attempted || m.attempted) both.attempted = true;
-      if (a.sent || m.sent) both.sent = true;
-      out.push(both);
-    });
-    (mine || []).forEach(function (a) { if (!storedIds[a.id] && !known[a.id]) out.push(a); });   // new in this tab
-    return out;
-  }
-
-  // One holder at a time per queue across the tabs; where Web Locks don't exist the work runs as before (best effort).
-  function queueLock(name, fn) {
-    var locks = typeof navigator !== "undefined" && navigator && navigator.locks;
-    if (locks && typeof locks.request === "function") return locks.request("floatboard:" + name, function () { return fn(); });
-    return Promise.resolve().then(fn);
-  }
-
-  // A queue stored under `key` as { account, actions }, shared by the tabs. `save`, `update` and `park` run under the
-  // lock and resolve with the queue as stored (null when the phone couldn't keep it).
-  function SharedQueue(key, load, store, lock) {
-    var known = {};
-    var withLock = lock || queueLock;
-    function remember(list) { known = {}; list.forEach(function (a) { known[a.id] = true; }); return list; }
-    function parkedKey(account) { return key + ":parked:" + account; }
-    function read(account) {
-      var v = load(key);
-      return v && v.account === account && Array.isArray(v.actions) ? v.actions : [];
+  // ---- One active tab (round 31). Only one tab of this browser runs the app at a time: it alone reads, writes and sends
+  // the queues, so there is never a merge between tabs. Any other tab shows "FloatBoard is open in another tab" with
+  // "Use here", which asks the active tab to step down (it keeps what it holds first) and then takes over.
+  //
+  // `o`: { locks (navigator.locks or null), channel (a BroadcastChannel or null), lease: { load, store } (used only without
+  // locks), now(), every(fn, ms), wait(ms), onActive(), onInactive(), beforeStepDown() }.
+  function ActiveTab(o) {
+    var id = String(o.now()) + Math.random().toString(36).slice(2), active = false, release = null, decided = false;
+    var useLocks = !!o.locks;
+    var LEASE_MS = 6000, BEAT_MS = 2000;
+    function becomeActive() { decided = true; if (active) return; active = true; o.lease.store({ id: id, at: o.now() }); o.onActive(); }
+    function inactive() { decided = true; o.onInactive(); }
+    function stepDown() {
+      if (!active) return;
+      try { o.beforeStepDown(); } catch (e) { /* what it holds is already kept on each change */ }
+      active = false;
+      if (release) { var r = release; release = null; r(); }
+      o.onInactive();
     }
-    // The stored queue belongs to another account: this account's changes go to its parked queue instead.
-    function otherAccount(account) { var v = load(key); return !!(v && typeof v.account === "string" && v.account !== account && (v.actions || []).length); }
-    function addParked(account, list) {
-      var p = load(parkedKey(account)), have = p && Array.isArray(p.actions) ? p.actions : [];
-      var ids = {}; have.forEach(function (a) { ids[a.id] = true; });
-      var all = have.concat(list.filter(function (a) { return !ids[a.id]; }));
-      return store(parkedKey(account), all.length ? { account: account, actions: all } : null);
+    function takeLock(wait) {
+      return o.locks.request("floatboard-active", wait ? {} : { ifAvailable: true }, function (lock) {
+        if (!useLocks) return null;   // gave up waiting for the browser's answer: the lease decides
+        if (!lock) { inactive(); return null; }
+        return new Promise(function (r) { release = r; becomeActive(); });
+      });
     }
-    function write(account, out) {
-      if (otherAccount(account)) return addParked(account, out) === false ? null : out;
-      return store(key, out.length ? { account: account, actions: out } : null) === false ? null : out;
+    // Without Web Locks: a lease in storage, renewed every 2 seconds by the active tab. When unsure, stay inactive.
+    function lease() { var v = o.lease.load(); return v && typeof v.id === "string" && typeof v.at === "number" ? v : null; }
+    function leaseFresh(v) { return v && o.now() - v.at < LEASE_MS; }
+    // The active tab writes the lease in both modes (so a tab whose lock request never answers still sees it).
+    function beat() {
+      if (!active) return;
+      var v = lease();
+      if (!useLocks && v && v.id !== id) { stepDown(); return; }   // lease mode: another tab took over
+      o.lease.store({ id: id, at: o.now() });
     }
+    function leaseTake(force) {
+      var v = lease();
+      if (!force && v && v.id !== id && leaseFresh(v)) { inactive(); return Promise.resolve(); }
+      o.lease.store({ id: id, at: o.now() });
+      // Taken over from a live tab: wait one beat so it sees the lease is gone before this tab acts.
+      return (force ? o.wait(BEAT_MS + 500) : Promise.resolve()).then(function () {
+        var now = lease();
+        if (now && now.id === id) becomeActive(); else inactive();
+      });
+    }
+    if (o.channel) o.channel.onmessage = function (e) { if (e && e.data && e.data.type === "step-down" && e.data.from !== id) stepDown(); };
+    function leaseMode() { useLocks = false; }
+    o.every(beat, BEAT_MS);
     return {
-      // This account's queue: what is stored, plus anything parked for it (another account was signed in meanwhile).
-      load: function (account) {
-        var list = read(account).slice(), p = load(parkedKey(account));
-        if (p && Array.isArray(p.actions) && p.actions.length && !otherAccount(account)) {
-          var ids = {}; list.forEach(function (a) { ids[a.id] = true; });
-          list = list.concat(p.actions.filter(function (a) { return !ids[a.id]; }));
-          if (store(key, { account: account, actions: list }) !== false) store(parkedKey(account), null);
-        }
-        return remember(list);
+      start: function () {
+        if (!useLocks) return leaseTake(false);
+        // A browser that never answers the lock request (seen in some headless and embedded browsers) falls back to the
+        // lease after 3 seconds rather than staying on "Loading" for ever.
+        o.wait(3000).then(function () { if (!decided && useLocks) { leaseMode(); leaseTake(false); } });
+        return takeLock(false);
       },
-      merged: function (account, mine) { return remember(queueReconcile(read(account), mine, known)); },
-      save: function (account, mine) {
-        var snapshot = (mine || []).slice();
-        return withLock(key, function () {
-          var out = queueReconcile(read(account), snapshot, known);
-          return write(account, out) ? remember(out) : null;
-        });
+      useHere: function () {
+        if (o.channel) o.channel.postMessage({ type: "step-down", from: id });
+        return useLocks ? takeLock(true) : leaseTake(true);
       },
-      // A decision on the queue as it is stored now (Undo of a delete), made and written under the lock.
-      update: function (account, mine, change) {
-        var snapshot = (mine || []).slice();
-        return withLock(key, function () {
-          var out = change(queueReconcile(read(account), snapshot, known));
-          return write(account, out) ? remember(out) : null;
-        });
-      },
-      // Another account signs in: this account's changes are kept under its name (never deleted or relabelled).
-      park: function (account, mine) {
-        var snapshot = (mine || []).slice();
-        return withLock(key, function () {
-          var out = account ? queueReconcile(read(account), snapshot, known) : [];
-          if (account && out.length) addParked(account, out);
-          var v = load(key);
-          if (!v || v.account === account || !account) store(key, null);
-          known = {};
-          return out;
-        });
-      },
-      forget: function () { known = {}; }
+      isActive: function () { return active; }
     };
+  }
+
+  // A screen's queue, stored as { account, actions } (written only by the active tab). Another account's waiting changes
+  // are parked under that account and come back when it signs in again; nothing is ever deleted or relabelled, and the
+  // active copy is cleared only once its parked copy is kept.
+  function QueueStore(key, load, store) {
+    function parkedKey(account) { return key + ":parked:" + account; }
+    function list(v) { return v && Array.isArray(v.actions) ? v.actions : []; }
+    function addTo(k, account, actions) {
+      var have = list(load(k)), ids = {};
+      have.forEach(function (a) { ids[a.id] = true; });
+      var all = have.concat(actions.filter(function (a) { return !ids[a.id]; }));
+      return store(k, all.length ? { account: account, actions: all } : null) !== false;
+    }
+    var self = {
+      // Parks `actions` of `account`; true once the parked copy is kept (only then is the active copy cleared).
+      park: function (account, actions) {
+        if (!account || !(actions || []).length) { var v = load(key); if (!v || v.account === account || !list(v).length) store(key, null); return true; }
+        if (!addTo(parkedKey(account), account, actions)) return false;
+        var cur = load(key);
+        if (!cur || cur.account === account) store(key, null);
+        return true;
+      },
+      // This account's queue, with anything parked for it (the parked copy goes once it is kept in the active one).
+      load: function (account) {
+        var v = load(key);
+        if (v && v.account !== account && list(v).length && !self.park(v.account, list(v))) return [];   // never over another's
+        var mine = v && v.account === account ? list(v).slice() : [];
+        var p = list(load(parkedKey(account)));
+        if (p.length && addTo(key, account, mine.concat(p))) { store(parkedKey(account), null); return list(load(key)).slice(); }
+        return mine;
+      },
+      // Saves this account's queue; false when the phone couldn't keep it (or another account's queue couldn't be parked).
+      save: function (account, actions) {
+        var v = load(key);
+        if (v && v.account !== account && list(v).length && !self.park(v.account, list(v))) return false;
+        return store(key, actions.length ? { account: account, actions: actions } : null) !== false;
+      }
+    };
+    return self;
   }
 
   // Saves a queue and reads it back: false when this phone could not keep it (storage full or off), so a change is only

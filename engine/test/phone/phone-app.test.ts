@@ -129,8 +129,8 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
     expect(APP_JS).toContain('"Just delete"');
     expect(APP_JS).toMatch(/if \(a\.action === "delete" \|\| a\.action === "done"\) buzz\(\);/);
     expect(APP_JS).toContain("navigator.vibrate(30)");
-    // Round 30: decided on the queue as every tab has it, under the shared lock.
-    expect(APP_JS).toMatch(/boardQueue\.update\(acct, queue\.actions, function \(list\) \{\s*var step = undoDeleteStep\(u, list, sending, newId\(\), new Date\(\)\.toISOString\(\)\)/);
+    // Round 31: one active tab sends, so Undo decides on the queue it holds (its marks were kept before sending).
+    expect(APP_JS).toMatch(/undoDeleteStep\(u, queue\.actions, syncing, newId\(\), new Date\(\)\.toISOString\(\)\)/);
     expect(PAGE_HTML).toContain('<symbol id="i-trash"');
     expect(PAGE_HTML).toContain('<button id="undo-btn" class="undo-btn" type="button">Undo</button>');
   });
@@ -214,14 +214,3 @@ describe("phone app sync v2 (client text checks; logic is tested in phone-sync.t
     for (const text of [APP_JS, PAGE_HTML, SW_JS]) expect(text).not.toContain("—");
   });
 });
-
-describe("phone queues are shared by every tab (round 28)", () => {
-  it("the_board_decisions_and_circle_queues_save_through_the_shared_queue", () => {
-    expect(APP_JS).toContain("function SharedQueue(");
-    expect(APP_JS).toMatch(/var boardQueue = SharedQueue\(QUEUE_KEY/);
-    expect(APP_JS).toMatch(/function saveQueue\(\) \{[\s\S]{0,200}boardQueue\.save\(/);
-    expect(APP_JS).toMatch(/var decShared = SharedQueue\(DEC_QUEUE_KEY/);
-    expect(APP_JS).toMatch(/var circleShared = SharedQueue\(CIRCLE_QUEUE_KEY/);
-  });
-});
-

@@ -37,85 +37,124 @@ describe("phone queues: shared helpers", () => {
   });
 
   it("circle_queue_is_never_blocked_and_saved_durably", () => {
-    expect(CIRCLE_JS).toMatch(/SharedQueue\(CIRCLE_QUEUE_KEY, load, storeDurable\)/);   // a tap is only shown once it is saved (round 28: merged across tabs)
-    expect(CIRCLE_JS).toMatch(/if \(!kept\) \{ toast\(/);
+    expect(CIRCLE_JS).toMatch(/QueueStore\(CIRCLE_QUEUE_KEY, load, storeDurable\)/);   // a tap is only shown once it is saved
+    expect(CIRCLE_JS).toMatch(/if \(!tabActive \|\| !circleShared\.save\(acc, next\)\) \{ toast\(/);
     expect(CIRCLE_JS).toMatch(/queueAfterRefusal\(circleQueue\.actions, e\.id\)/);   // a refused batch drops only the named one
     expect(CIRCLE_JS).toMatch(/tooBig/);                                    // one too big for any send is dropped with a message
   });
 });
 
-// Round 30 (Codex 20): the queue every tab shares is changed one tab at a time (a lock around read, merge and write),
-// markers only ever go from false to true, and a queue of another account is parked, never deleted.
-describe("phone queues: one tab at a time", () => {
-  // A storage shared by two "tabs"; `during` runs once, inside the next read (another tab acting between a read and a write).
-  function world() {
-    const data: Record<string, any> = {};
-    let during: (() => void) | null = null;
-    const load = (k: string) => { const v = data[k] ?? null; if (during) { const f = during; during = null; f(); } return v ? JSON.parse(JSON.stringify(v)) : null; };
-    const store = (k: string, v: any) => { if (v == null) delete data[k]; else data[k] = JSON.parse(JSON.stringify(v)); return true; };
-    // A lock as navigator.locks gives it: one holder at a time, the others wait in order.
-    let tail: Promise<unknown> = Promise.resolve();
-    const lock = (_name: string, fn: () => unknown) => { const run = tail.then(fn); tail = run.catch(() => {}); return run; };
-    return { data, load, store, lock, between: (f: () => void) => { during = f; } };
+// Round 31 (Codex 21, controller's ruling): one active tab. Only one tab of a browser runs the app; it alone reads,
+// writes and sends the queues (no merging between tabs). "Use here" hands over after the active tab keeps what it holds.
+describe("phone: one active tab", () => {
+  // Web Locks as a browser gives them: one holder per name; ifAvailable answers null when held; others wait in order.
+  function fakeLocks() {
+    const held: Record<string, boolean> = {}, waiting: Record<string, (() => void)[]> = {};
+    return {
+      request(name: string, opts: any, fn: (l: any) => any) {
+        const run = () => { held[name] = true; return Promise.resolve(fn({ name })).finally(() => { held[name] = false; const next = (waiting[name] ?? []).shift(); if (next) next(); }); };
+        if (!held[name]) return run();
+        if (opts && opts.ifAvailable) return Promise.resolve(fn(null));
+        return new Promise((resolve) => { (waiting[name] ??= []).push(() => resolve(run())); });
+      },
+    };
+  }
+  function bus() {
+    const tabs: any[] = [];
+    return { channel: () => { const c: any = { onmessage: null, postMessage(d: any) { tabs.filter((t) => t !== c).forEach((t) => t.onmessage && t.onmessage({ data: d })); } }; tabs.push(c); return c; } };
+  }
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  function tab(locks: any, b: any, storage: Record<string, any>, name: string, log: string[]) {
+    const state = { active: false, held: [] as string[] };
+    const t = S.ActiveTab({
+      locks, channel: b.channel(), lease: { load: () => storage.lease ?? null, store: (v: any) => { storage.lease = v; } },
+      now: () => Date.now(), every: () => {}, wait: () => Promise.resolve(),
+      onActive: () => { state.active = true; log.push(name + " active"); },
+      onInactive: () => { state.active = false; log.push(name + " inactive"); },
+      beforeStepDown: () => { storage.queue = (storage.queue ?? []).concat(state.held); state.held = []; log.push(name + " kept"); },
+    });
+    return { t, state };
   }
 
-  it("two_tabs_saving_at_once_keep_both_captures", async () => {
-    const w = world();
-    const t1 = S.SharedQueue("q", w.load, w.store, w.lock), t2 = S.SharedQueue("q", w.load, w.store, w.lock);
-    t1.load("A"); t2.load("A");
-    let second: Promise<unknown> | null = null;
-    w.between(() => { second = t2.save("A", [{ id: "b" }]); });   // tab two saves while tab one is between its read and write
-    await t1.save("A", [{ id: "a" }]);
-    await second;
-    expect(w.data.q.actions.map((x: any) => x.id).sort()).toEqual(["a", "b"]);
+  it("a_second_tab_is_inactive_while_the_first_is_open", async () => {
+    const locks = fakeLocks(), b = bus(), storage: Record<string, any> = {}, log: string[] = [];
+    const one = tab(locks, b, storage, "one", log), two = tab(locks, b, storage, "two", log);
+    one.t.start(); await flush();
+    two.t.start(); await flush();
+    expect([one.state.active, two.state.active]).toEqual([true, false]);
+    expect(two.t.isActive()).toBe(false);
   });
 
-  it("an_ack_in_another_tab_is_never_undone", async () => {
-    const w = world();
-    w.store("q", { account: "A", actions: [{ id: "a" }, { id: "b" }] });
-    const t1 = S.SharedQueue("q", w.load, w.store, w.lock), t2 = S.SharedQueue("q", w.load, w.store, w.lock);
-    t1.load("A"); t2.load("A");
-    let ack: Promise<unknown> | null = null;
-    w.between(() => { ack = t2.save("A", [{ id: "b" }]); });       // tab two: the engine took a
-    await t1.save("A", [{ id: "a" }, { id: "b" }, { id: "c" }]);   // tab one, still holding a, adds c
-    await ack;
-    expect(w.data.q.actions.map((x: any) => x.id).sort()).toEqual(["b", "c"]);
+  it("use_here_hands_over_after_the_active_tab_keeps_what_it_holds", async () => {
+    const locks = fakeLocks(), b = bus(), storage: Record<string, any> = {}, log: string[] = [];
+    const one = tab(locks, b, storage, "one", log), two = tab(locks, b, storage, "two", log);
+    one.t.start(); await flush();
+    two.t.start(); await flush();
+    one.state.held.push("capture made in tab one");
+    two.t.useHere(); await flush(); await flush();
+    expect([one.state.active, two.state.active]).toEqual([false, true]);
+    expect(storage.queue).toEqual(["capture made in tab one"]);
+    expect(log.indexOf("one kept")).toBeLessThan(log.indexOf("two active"));
   });
 
-  it("a_sent_marker_set_in_another_tab_stays_so_undo_sends_a_restore", async () => {
-    const w = world();
-    const del = { id: "d", op: "delete", key: "J-1" };
-    w.store("q", { account: "A", actions: [del] });
-    const t1 = S.SharedQueue("q", w.load, w.store, w.lock), t2 = S.SharedQueue("q", w.load, w.store, w.lock);
-    t1.load("A"); t2.load("A");
-    await t2.save("A", [{ ...del, attempted: true }]);              // tab two sent it (its answer may be lost)
-    await t1.save("A", [del]);                                       // a stale copy in tab one never clears the marker
-    expect(w.data.q.actions[0].attempted).toBe(true);
-    // Undo decides on the shared state, under the lock.
-    const out = await t1.update("A", [del], (list: any[]) => {
-      const cur = list.find((x) => x.id === "d");
-      return cur.attempted ? list.concat([{ id: "r", op: "restore", key: "J-1" }]) : list.filter((x) => x.id !== "d");
-    });
-    expect(out.map((x: any) => x.id)).toEqual(["d", "r"]);
+  it("without_web_locks_a_fresh_lease_keeps_a_second_tab_inactive_until_use_here", async () => {
+    const b = bus(), storage: Record<string, any> = {}, log: string[] = [];
+    const one = tab(null, b, storage, "one", log), two = tab(null, b, storage, "two", log);
+    await one.t.start();
+    await two.t.start();
+    expect([one.state.active, two.state.active]).toEqual([true, false]);
+    await two.t.useHere();
+    expect([one.state.active, two.state.active]).toEqual([false, true]);
   });
 
-  it("another_accounts_queue_is_parked_and_comes_back_when_it_signs_in_again", async () => {
-    const w = world();
-    const t = S.SharedQueue("q", w.load, w.store, w.lock);
-    t.load("A");
-    await t.save("A", [{ id: "a1" }, { id: "a2" }]);
-    await t.park("A", [{ id: "a1" }, { id: "a2" }]);                // another account signed in: A's changes are kept apart
-    t.load("B");
-    await t.save("B", [{ id: "b1" }]);
-    expect(JSON.stringify(w.data)).toContain("a1");                   // never deleted or relabelled
-    expect(w.data.q.actions.map((x: any) => x.id)).toEqual(["b1"]);
-    await t.park("B", [{ id: "b1" }]);
-    expect(t.load("A").map((x: any) => x.id)).toEqual(["a1", "a2"]); // A signs in again: its changes are back, to be sent
+  it("a_browser_that_never_answers_the_lock_falls_back_to_the_lease", async () => {
+    const silent = { request: () => new Promise(() => {}) };   // seen in headless Chrome: no answer at all
+    const b = bus(), storage: Record<string, any> = {}, log: string[] = [];
+    const one = tab(silent, b, storage, "one", log);
+    one.t.start(); await flush(); await flush();
+    expect(one.state.active).toBe(true);
+    const two = tab(silent, b, storage, "two", log);
+    two.t.start(); await flush(); await flush();
+    expect(two.state.active).toBe(false);   // the first tab's lease is fresh: never two active tabs
   });
 
-  it("the_board_handles_409_by_keeping_the_changes_and_saying_so", () => {
-    expect(APP_JS).toMatch(/e\.status === 409/);
-    expect(APP_JS).toContain("Signed in as another account in another tab");
-    expect(APP_JS).not.toMatch(/store\(QUEUE_KEY, null\)/);           // a queue is parked, never deleted
+  it("a_parked_queue_that_cannot_be_kept_leaves_the_queue_where_it_was", () => {
+    const data: Record<string, any> = { q: { account: "A", actions: [{ id: "a1" }] } };
+    const store = (k: string, v: any) => { if (k.includes(":parked:")) return false; if (v == null) delete data[k]; else data[k] = v; return true; };
+    const qs = S.QueueStore("q", (k: string) => data[k] ?? null, store);
+    expect(qs.park("A", [{ id: "a1" }])).toBe(false);
+    expect(data.q.actions.map((a: any) => a.id)).toEqual(["a1"]);           // never cleared before the parked copy is kept
+    expect(qs.save("B", [{ id: "b1" }])).toBe(false);                       // nor overwritten by another account
+    expect(data.q.account).toBe("A");
+  });
+
+  it("an_account_switch_parks_and_restores_each_accounts_queue", () => {
+    const data: Record<string, any> = {};
+    const store = (k: string, v: any) => { if (v == null) delete data[k]; else data[k] = JSON.parse(JSON.stringify(v)); return true; };
+    const qs = S.QueueStore("q", (k: string) => data[k] ?? null, store);
+    expect(qs.save("A", [{ id: "a1" }])).toBe(true);
+    expect(qs.park("A", [{ id: "a1" }])).toBe(true);
+    expect(qs.load("B")).toEqual([]);
+    expect(qs.save("B", [{ id: "b1" }])).toBe(true);
+    expect(qs.park("B", [{ id: "b1" }])).toBe(true);
+    expect(qs.load("A").map((a: any) => a.id)).toEqual(["a1"]);
+    expect(qs.load("B").map((a: any) => a.id)).toEqual(["b1"]);             // B back: A's is parked again, never lost
+    expect(data["q:parked:A"].actions.map((a: any) => a.id)).toEqual(["a1"]);
+  });
+
+  it("circle_parks_the_outgoing_account_before_clearing_it", () => {
+    const drop = /function circleDrop\(\) \{([\s\S]*?)\n  \}/.exec(CIRCLE_JS)?.[1] ?? "";
+    expect(drop.indexOf("circleShared.park(circleQueue.account, circleQueue.actions)")).toBeGreaterThan(-1);
+    expect(drop.indexOf("circleShared.park(")).toBeLessThan(drop.indexOf("circleQueue = { account: null"));
+  });
+
+  it("a_delete_is_marked_and_kept_before_it_is_sent_so_undo_always_restores_it", () => {
+    const sync = /async function sync\(\) \{([\s\S]*?)\n  \}\n/.exec(APP_JS)?.[1] ?? "";
+    expect(sync).toMatch(/queue\.actions = markAttempted\(queue\.actions, body\);\s*saveQueue\(\);[\s\S]*await sendBatch\(/);
+    expect(APP_JS).toMatch(/if \(!tabActive\) return;   \/\/ another tab is the active one/);
+    // The decision itself: a delete marked as sent gets a restore.
+    const u = { del_id: "d1", card_id: 4, made_at: "2026-11-21T10:00:00.000Z" };
+    const step = S.undoDeleteStep ? S.undoDeleteStep(u, [{ id: "d1", attempted: true }], false, "r1", "2026-11-21T10:00:05.000Z") : null;
+    if (step) expect(step.restore).toBeTruthy();
   });
 });

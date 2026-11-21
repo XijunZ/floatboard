@@ -6,7 +6,7 @@ import { APP_JS } from "../../src/phone/client";
 import { SYNC_JS } from "../../src/phone/sync-logic";
 
 // The phone's Jots screen (design §5): the same text the phone runs, tested on its own.
-const L: any = new Function(SYNC_JS + JOTS_JS + "\nreturn {" + JOTS_EXPORTS.concat(["queueReconcile"]).join(",") + "};")();
+const L: any = new Function(SYNC_JS + JOTS_JS + "\nreturn {" + JOTS_EXPORTS.join(",") + "};")();
 const DAY = 86400_000;
 const now = Date.parse("2026-11-17T12:00:00Z");
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -225,27 +225,6 @@ describe("jots on the phone: the draft and the undo bar belong to one account (C
     expect(toasts.some((t) => /too long/i.test(t))).toBe(true);
     expect(toasts).not.toContain("Saved");
     expect(JOTS_JS).not.toMatch(/slice\(0, 20000\)/);   // no save, edit or share cuts the text any more
-  });
-
-  it("two_tabs_offline_keep_both_captures_and_an_ack_in_one_never_brings_a_change_back", async () => {
-    // Two tabs of the same phone share one storage (round 28, Codex 18).
-    const p = page(() => "A");
-    const durable = (k: string, v: any) => { p.h.store(k, v); return true; };
-    (p.h as any).storeDurable = durable;
-    const tab1 = L.JotsScreen(p.h), tab2 = L.JotsScreen(p.h);
-    tab1.restore(); tab2.restore();
-    expect(await tab1.add("captured in tab one")).toBeTruthy();
-    expect(await tab2.add("captured in tab two")).toBeTruthy();
-    expect(p.stored["floatboard.jotqueue"].actions.map((a: any) => a.text).sort()).toEqual(["captured in tab one", "captured in tab two"]);
-  });
-
-  it("shared_queue_reconcile_keeps_other_tabs_changes_and_this_tabs_removals", () => {
-    const k = (ids: string[]) => Object.fromEntries(ids.map((i) => [i, true]));
-    // stored has a (known) and c (another tab's); this tab removed a and added b.
-    const out = L.queueReconcile([{ id: "a" }, { id: "c" }], [{ id: "b" }], k(["a"]));
-    expect(out.map((x: any) => x.id)).toEqual(["c", "b"]);
-    // another tab removed a (acked) while this tab still holds it: not brought back.
-    expect(L.queueReconcile([{ id: "c" }], [{ id: "a" }, { id: "c" }], k(["a", "c"])).map((x: any) => x.id)).toEqual(["c"]);
   });
 
   it("a_draft_typed_under_one_account_is_never_shown_to_another", () => {

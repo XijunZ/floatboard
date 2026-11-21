@@ -19,17 +19,20 @@
     decisions = c && typeof c.account === "string" && (!acc || c.account === acc) ? c : null;
     // This account's queue: what is stored for it, and anything parked for it while another account was signed in.
     var qa = acc || (q && typeof q.account === "string" ? q.account : null) || (decisions ? decisions.account : null);
-    decQueue = { account: qa, actions: qa ? decShared.load(qa) : [] };
+    decQueue = { account: qa, actions: qa && tabActive ? decShared.load(qa) : [] };
   }
 
-  // Shared by every tab of this phone (rounds 28, 30): saved merged with what other tabs queued, one tab at a time.
-  var decShared = SharedQueue(DEC_QUEUE_KEY, load, storeDurable);
-  function saveDecQueue() { if (decQueue.account) decShared.save(decQueue.account, decQueue.actions); }
+  // Written only by the active tab (round 31); kept (read back) on each change.
+  var decShared = QueueStore(DEC_QUEUE_KEY, load, storeDurable);
+  function saveDecQueue() { return tabActive && decQueue.account ? decShared.save(decQueue.account, decQueue.actions) : false; }
 
   // Signing out or another account: drop what this phone holds for Decisions.
   function dropDecisions() {
-    // Waiting changes are parked under their account, never deleted (round 30): they go when it signs in again.
-    if (decQueue.account) decShared.park(decQueue.account, decQueue.actions);
+    // Waiting changes are parked under their account, never deleted: they go when it signs in again. If the phone can't
+    // keep the parked copy, they stay where they are (nothing lost) and the owner is told.
+    if (decQueue.account && tabActive && decQueue.actions.length && !decShared.park(decQueue.account, decQueue.actions)) {
+      toast("Couldn't set your waiting decision changes aside on the phone; they are kept. Free some space, then try again.");
+    }
     decisions = null;
     decQueue = { account: null, actions: [] };
     store(DEC_KEY, null);
@@ -55,7 +58,7 @@
   // it stores them (409 for another account: the queue is held, never sent elsewhere). One send at a time.
   var decSending = false;
   async function sendDecisionQueue() {
-    if (decQueue.account) decQueue.actions = decShared.merged(decQueue.account, decQueue.actions);   // what other tabs queued goes too
+    if (!tabActive) return;   // only the active tab sends (round 31)
     var body = decisionSendBody(decQueue, confirmedAccount());
     if (body && body.tooBig) {   // could never be sent (over the engine's size limit): dropped, said once, the rest go on
       decQueue.actions = decQueue.actions.filter(function (a) { return a.id !== body.tooBig; });
@@ -113,7 +116,7 @@
 
   // Queues an action under `account` (the account its form or sheet was opened in; otherwise the confirmed one or the cached
   // copy's). True only once it is kept on this phone; false: nothing was queued (the caller keeps its form open).
-  // Resolves true once the change is kept on this phone (merged with other tabs' under the shared lock), false if not.
+  // Resolves true once the change is kept on this phone (read back), false if not (or this tab isn't the active one).
   function queueDecision(a, account) {
     if (!a) return Promise.resolve(false);
     var acc = account || confirmedAccount() || (decisions && decisions.account) || null;
@@ -121,14 +124,13 @@
     if (decQueue.account !== acc) loadDecisionCache();   // a queue this phone already holds (screen not opened yet) is kept
     var next = decisionEnqueue(decQueue, a, acc);
     if (!next) { toast("Changes of another account are still waiting on this phone. Sign in to it, or sign out, first."); return Promise.resolve(false); }
-    return decShared.save(next.account, next.actions).then(function (kept) {
-      if (!kept) return false;
-      if (decQueue.account === next.account || !decQueue.account) decQueue = { account: next.account, actions: kept };
-      renderDecisions();
-      syncDecisions();
-      return true;
-    });
+    if (!tabActive || !decShared.save(next.account, next.actions)) return Promise.resolve(false);
+    decQueue = next;
+    renderDecisions();
+    syncDecisions();
+    return Promise.resolve(true);
   }
+
 
   function renderDecisions() {
     var box = $("decisions-list");

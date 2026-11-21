@@ -153,26 +153,28 @@
     // Which account the cache and queue belong to. An answer to a request sent before a sign-out or an account change is
     // thrown away (never cached under the new account): the app's shared session check (h.stamp / h.sameSession).
     var heldBy = null;
-    var shared = SharedQueue(QUEUE_KEY, h.load, function (k, v) { return (h.storeDurable || function (k2, v2) { h.store(k2, v2); return true; })(k, v); });
+    // Written only by the active tab (round 31); kept (read back) on each change, before anything is sent.
+    var shared = QueueStore(QUEUE_KEY, h.load, function (k, v) { return (h.storeDurable || function (k2, v2) { h.store(k2, v2); return true; })(k, v); });
+    function active() { return !h.active || h.active(); }
 
     function restore() {
       var acct = h.account();
       var c = h.load(CACHE_KEY), q = h.load(QUEUE_KEY);
       if (acct !== heldBy) { heldBy = acct; syncing = false; }
       cache = c && c.account === acct && Array.isArray(c.jots) ? c.jots : [];
-      queue = acct ? shared.load(acct) : [];   // the queue every tab of this phone shares (round 28)
+      queue = acct && active() ? shared.load(acct) : [];   // with anything parked for this account
       // The writing box: this account's own draft, or nothing (a draft of another account, or one from before drafts named
       // their account, is never shown).
       var box = h.$("jot-text"), d = h.load(DRAFT_KEY);
       if (box && !box.value) box.value = d && typeof d === "object" && d.account && d.account === acct && typeof d.text === "string" ? d.text : "";
     }
     function saveDraft(text) { h.store(DRAFT_KEY, text && heldBy ? { account: heldBy, text: text } : null); }
-    // Saved merged with what other tabs stored (a capture another tab made is never wiped).
-    function saveQueue() { if (heldBy) shared.save(heldBy, queue); }   // merged with other tabs', one tab at a time (round 30)
+    function saveQueue() { return heldBy && active() ? shared.save(heldBy, queue) : false; }
 
     function drop() {
-      // The account's waiting changes are parked under it, never deleted (round 30): they go when it signs in again.
-      if (heldBy) shared.park(heldBy, queue);
+      // The account's waiting changes are parked under it, never deleted: they go when it signs in again. If the phone
+      // can't keep the parked copy, they stay where they are (nothing lost) and the owner is told.
+      if (heldBy && active() && queue.length && !shared.park(heldBy, queue)) h.toast("Couldn't set your waiting jots aside on the phone; they are kept. Free some space, then try again.");
       heldBy = null; syncing = false; cache = []; queue = []; h.store(CACHE_KEY, null);
       h.store(DRAFT_KEY, null);
       var box = h.$("jot-text");
@@ -192,33 +194,31 @@
       return true;
     }
 
-    // Queues one change, kept on this phone first (read back, merged with other tabs' under the shared lock). Resolves
-    // with the change, or null when it couldn't be kept (storage full or off, or no account): then nothing is cleared or
-    // called saved; the caller keeps the words on screen.
+    // Queues one change, kept on this phone first (read back): the change, or null when it couldn't be kept (storage
+    // full or off, no account, or this tab isn't the active one); then nothing is cleared or called saved, and the
+    // caller keeps the words on screen. Returned as a promise, so callers read the same either way.
     function queueAction(a) {
       bound();
       a.id = a.id || h.newId();
       a.made_at = a.made_at || new Date().toISOString();
-      var failed = function () { h.toast("Couldn't save on this phone (storage full?). Your text is still here; try again."); return null; };
-      if (!heldBy) return Promise.resolve(failed());
-      var acct = heldBy;
-      return shared.save(acct, queue.concat([a])).then(function (saved) {
-        if (!saved) return failed();
-        if (heldBy === acct) queue = saved;
-        render();
-        pull();
-        return a;
-      });
+      var next = queue.concat([a]);
+      if (!heldBy || !active() || !shared.save(heldBy, next)) {
+        h.toast("Couldn't save on this phone (storage full?). Your text is still here; try again.");
+        return Promise.resolve(null);
+      }
+      queue = next;
+      render();
+      pull();
+      return Promise.resolve(a);
     }
 
     async function pull() {
-      if (syncing || !h.account() || !(h.modules() || {}).jots) return;
+      if (syncing || !active() || !h.account() || !(h.modules() || {}).jots) return;   // only the active tab sends (round 31)
       syncing = true;
       var stamp = h.stamp(), acct = stamp.account;
       var current = function () { return h.sameSession(stamp); };
       try {
         var r;
-        if (heldBy) queue = shared.merged(heldBy, queue);   // what other tabs queued goes too
         var body = queue.length && heldBy ? takeJotBatch(queue, new Date().toISOString()) : null;
         while (body && body.tooBig) {   // too big for any send: dropped with a message, never holding up the queue
           queue = queueWithout(queue, [body.tooBig]); saveQueue();
@@ -433,23 +433,14 @@
       bar.hidden = false;
       var btn = h.$("undo-btn");
       if (cancelUndo) cancelUndo();
-      // Undo decides on the queue as every tab has it now (under the shared lock): a delete any tab has sent (or is
-      // sending) is answered with a restore; one never sent is just taken out (round 30).
+      // Undo: a delete sent (or being sent: its mark was kept before it went) gets a restore; one never sent is taken
+      // out. This tab is the only one that sends, so the queue it holds is the truth (round 31).
       var undo = function () {
         cancel();
-        if (!heldBy) return;
-        var acct = heldBy, sending = syncing;
-        shared.update(acct, queue, function (list) {
-          var cur = list.filter(function (x) { return x.id === a.id; })[0] || a;
-          var step = undoJotDelete(list, jotAttempted(cur) || sending ? Object.assign({}, cur, { attempted: true }) : cur);
-          if (!step.restore) return step.queue;
-          return list.concat([{ id: h.newId(), made_at: new Date().toISOString(), op: "restore", key: j.key, jot_added: j.added }]);
-        }).then(function (out) {
-          if (!out || heldBy !== acct) return;
-          queue = out;
-          render();
-          pull();
-        });
+        var cur = queue.filter(function (x) { return x.id === a.id; })[0] || a;
+        var step = undoJotDelete(queue, jotAttempted(cur) || syncing ? Object.assign({}, cur, { attempted: true }) : cur);
+        if (step.restore) queueAction({ op: "restore", key: j.key, jot_added: j.added });
+        else { queue = step.queue; saveQueue(); render(); }
       };
       var cancel = function () { btn.removeEventListener("click", undo, true); bar.hidden = true; clearTimeout(undoTimer); cancelUndo = null; };
       cancelUndo = cancel;
@@ -502,5 +493,6 @@
 
     return { restore: restore, drop: drop, sync: pull, remove: remove, render: render, wire: wire, shareSheet: shareSheet, cleanup: cleanup,
       add: function (text) { return queueAction({ op: "add", text: text }); },
+      keep: function () { saveQueue(); },   // stepping down: the last word (each change is already kept)
       focus: function () { setTimeout(function () { h.$("jot-text").focus(); }, 80); } };
   }

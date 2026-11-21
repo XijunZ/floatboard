@@ -7,9 +7,9 @@
   var CIRCLE_KEY = "floatboard.circle";        // { account, copy, at }
   var CIRCLE_QUEUE_KEY = "floatboard.circleq"; // { account, actions: [...] }
   var CIRCLE_SEND_BYTES = 30000;
-  // Shared by every tab of this phone (round 28): saved merged with what other tabs queued.
-  var circleShared = SharedQueue(CIRCLE_QUEUE_KEY, load, storeDurable);
-  function circleSave() { if (circleQueue.account) circleShared.save(circleQueue.account, circleQueue.actions); }
+  // Written only by the active tab (round 31); kept (read back) on each change.
+  var circleShared = QueueStore(CIRCLE_QUEUE_KEY, load, storeDurable);
+  function circleSave() { return tabActive && circleQueue.account ? circleShared.save(circleQueue.account, circleQueue.actions) : false; }
   // The tiers' names, closest first; a tier not listed (a newer Mac) shows no label.
   var CIRCLE_TIERS = { family: "Family", close: "Close friend", friend: "Friend", network: "Network" };               // under the engine's 32 KB cap for /app/api/circle/action
   var circleCopy = null;
@@ -24,7 +24,7 @@
     var c = load(CIRCLE_KEY), q = load(CIRCLE_QUEUE_KEY);
     circleCopy = c && c.account === acc ? c.copy : null;
     // This account's queue, with anything parked for it while another account was signed in (round 30).
-    circleQueue = { account: acc, actions: acc ? circleShared.load(acc) : [] };
+    circleQueue = { account: acc, actions: acc && tabActive ? circleShared.load(acc) : [] };
   }
 
   // Sign-out or another account: everything Circle kept on this phone goes. (The session and account a screen or sheet was
@@ -32,18 +32,21 @@
   function circleDrop() {
     // A Circle sheet left open (a person, a draft, a link's confirm) belongs to the account that is going: closed.
     if (document.querySelector(".sheet[data-circle]")) closeSheet();
+    // The outgoing account's waiting changes are parked under it first (never deleted; they go when it signs in again).
+    // If the phone can't keep the parked copy, they stay where they are and the owner is told (round 31: the order was wrong).
+    if (circleQueue.account && tabActive && circleQueue.actions.length && !circleShared.park(circleQueue.account, circleQueue.actions)) {
+      toast("Couldn't set your waiting Circle changes aside on the phone; they are kept. Free some space, then try again.");
+    }
     circleCopy = null;
     circleQueue = { account: null, actions: [] };
     store(CIRCLE_KEY, null);
-    // Waiting changes are parked under their account, never deleted (round 30).
-    if (circleQueue.account) circleShared.park(circleQueue.account, circleQueue.actions);
-    circleQueue = { account: null, actions: [] };
     if (navigator.clearAppBadge) navigator.clearAppBadge().catch(function () { /* no badge support */ });
   }
 
   // After each board sync: send the queue, then fetch the copy. Quiet on failure (the board's status line covers it).
   var circleSyncing = false;
   async function circleSync() {
+    if (!tabActive) return;   // only the active tab sends (round 31)
     if (!board || !board.modules || !board.modules.circle || circleSyncing) return;
     if (circleQueue.account !== circleAccount()) circleLoad();
     if (circleHash(location.hash)) circleFromHash();   // asks first; acts only on a tap
@@ -51,7 +54,6 @@
     var asked = sessionStamp();   // the shared session check (app.client.js): a sign-out or another account meanwhile drops the answer
     var still = function (respAccount) { return sameSession(asked, respAccount); };
     try {
-      if (circleQueue.account) circleQueue.actions = circleShared.merged(circleQueue.account, circleQueue.actions);   // other tabs' too
       if (circleQueue.actions.length && circleQueue.account) {
         var t = queueTake(circleQueue.actions, 50, CIRCLE_SEND_BYTES, byteLength(JSON.stringify({ account: circleQueue.account, actions: [] })));
         if (t.tooBig) {   // too big for any send: dropped with a message, never holding up the queue
@@ -95,12 +97,11 @@
     var a = circleAction(person, action, newId(), new Date().toISOString());
     var acc = circleAccount();
     if (!acc) { toast("Couldn't save that on this phone. Try again."); return; }
-    // Merged with what other tabs queued (one tab at a time), then read back: shown as done only once this phone kept it.
-    circleShared.save(acc, (circleQueue.account === acc ? circleQueue.actions : []).concat([a])).then(function (kept) {
-      if (!kept) { toast("Couldn't save that on this phone. Try again."); return; }
-      if (circleAccount() === acc) circleQueue = { account: acc, actions: kept };
-      circleActDone(action);
-    });
+    // Kept on this phone first (read back): shown as done only once it is.
+    var next = (circleQueue.account === acc ? circleQueue.actions : []).concat([a]);
+    if (!tabActive || !circleShared.save(acc, next)) { toast("Couldn't save that on this phone. Try again."); return; }
+    circleQueue = { account: acc, actions: next };
+    circleActDone(action);
   }
 
   function circleActDone(action) {

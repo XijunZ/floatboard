@@ -12,6 +12,7 @@
   var MOVE = { todo: "Move to To do", doing: "Move to Doing", watch: "Move to Watch", done: "Mark as done" };
   var MOVED = { todo: "Moved to To do", doing: "Moved to Doing", watch: "Moved to Watch", done: "Done" };
   var BOARD_KEY = "floatboard.board";   // { account, board, at }: the last board and when it was synced
+  var ACTIVE_KEY = "floatboard.activeTab";   // { id, at }: the active tab's lease, only where Web Locks don't exist
   var QUEUE_KEY = "floatboard.queue";   // { account, actions: [{ id, made_at, card_id?, action, title?, group? }] }
   var SENT_KEY = "floatboard.sent";     // ids this phone sent lately, to notice when the engine reports one not applied
   var REFRESH_MS = 60000;
@@ -525,10 +526,9 @@
     noteTimer = setTimeout(function () { n.hidden = true; }, 6000);
   }
 
-  // Saved merged with what other tabs of this phone stored (round 28): a change another tab queued is never wiped.
-  var boardQueue = SharedQueue(QUEUE_KEY, load, storeDurable);
-  // Under the shared lock, one tab at a time (round 30); a queue with no account yet is not written (never over another's).
-  function saveQueue() { if (queue.account) boardQueue.save(queue.account, queue.actions); }
+  // Only the active tab writes the queue (round 31); kept on each change, before anything is sent.
+  var boardQueue = QueueStore(QUEUE_KEY, load, storeDurable);
+  function saveQueue() { return tabActive && queue.account ? boardQueue.save(queue.account, queue.actions) : false; }
 
   // Forget everything this phone holds for an account: its board, its queue and the ids it sent.
   // The session generation shared by Jots, Circle and Decisions (`sessionAccepts` in files/sync.client.js): it goes up
@@ -543,8 +543,11 @@
     closeSheet();      // and no sheet of the old account stays open (a form saved later would land in the new one)
     board = null;
     shownAccount = null;
-    // Waiting changes are parked under their account, never deleted or relabelled (round 30): they go when it signs in again.
-    if (queue.account) boardQueue.park(queue.account, queue.actions);
+    // Waiting changes are parked under their account, never deleted or relabelled: they go when it signs in again. If
+    // the phone can't keep the parked copy, the queue stays where it is (nothing lost) and the owner is told.
+    if (queue.account && tabActive && !boardQueue.park(queue.account, queue.actions)) {
+      toast("Couldn't set this account's waiting changes aside on the phone; they are kept. Free some space, then try again.");
+    }
     queue = { account: null, actions: [] };
     sentIds = [];
     store(BOARD_KEY, null);
@@ -620,6 +623,7 @@
 
   // Send the queue (if any) and get the latest board. Never shows an error: the status line says how things stand.
   async function sync() {
+    if (!tabActive) return;   // another tab is the active one: this one never sends or writes (round 31)
     if (current === "pair" || current === "signin") return;
     if (syncing) { syncAgain = true; return; } // a tap during a sync: go again once this one is done
     syncing = true;
@@ -631,7 +635,6 @@
     try {
       if (!me) acceptAccount(await api("/app/api/me"));
       var got = false;
-      if (queue.account) queue.actions = boardQueue.merged(queue.account, queue.actions);   // what other tabs queued goes too
       while (queue.actions.length) {
         var body = takeBatch(queue.actions, new Date().toISOString());
         if (!body.actions.length) break;
@@ -751,21 +754,14 @@
     hideUndo();
     if (!undoLive(u, Date.now())) return;
     if (u.deleted) {
-      // Not sent yet: taken out of the queue, nothing is sent. Sent (or being sent, by any tab): a restore brings it back
-      // on the Mac. Decided on the queue as every tab has it now, under the shared lock (round 30).
-      var acct = queue.account, sending = syncing, restore = null;
-      if (!acct) return;
-      boardQueue.update(acct, queue.actions, function (list) {
-        var step = undoDeleteStep(u, list, sending, newId(), new Date().toISOString());
-        restore = step.restore || null;
-        return step.restore ? list.concat([step.restore]) : step.actions;
-      }).then(function (out) {
-        if (!out || queue.account !== acct) return;
-        queue.actions = out;
-        render();
-        toast(restore ? "Bringing it back" : "Not deleted");
-        if (restore) sync();
-      });
+      // Not sent yet: taken out of the queue, nothing is sent. Sent (or being sent: its mark was kept before it went): a
+      // restore brings it back on the Mac. This tab is the only one that sends, so the queue it holds is the truth.
+      var step = undoDeleteStep(u, queue.actions, syncing, newId(), new Date().toISOString());
+      if (step.restore) { act(step.restore, "Bringing it back"); return; }
+      queue.actions = step.actions;
+      saveQueue();
+      render();
+      toast("Not deleted");
       return;
     }
     act(undoAction(u, newId(), new Date().toISOString()), "Moved back to " + STEP_NAMES[u.from]);
@@ -1239,6 +1235,7 @@
     offline: offline, SignedOut: SignedOut,
     account: sessionAccount,
     stamp: sessionStamp, sameSession: sameSession,   // the shared session check (late answers are dropped)
+    active: function () { return tabActive; },   // only the active tab writes or sends its queue (round 31)
     modules: function () { return board && board.modules; },
     zone: function () { return board && board.time_zone; },
     makeDecision: function (text, source, context) { decisionForm(text, source, context); },   // Decisions (files/decisions.client.js)
@@ -1267,6 +1264,7 @@
   }
 
   async function start() {
+    if (!tabActive) return;   // only the active tab starts (round 31)
     var m = /[#&]pair=([A-Za-z0-9_-]{10,200})/.exec(location.hash);
     if (m) {
       // Keep the code for this tab only and take it out of the address, so a Home Screen copy never carries it.
@@ -1356,5 +1354,33 @@
     navigator.serviceWorker.register("/app/sw.js", { scope: "/app/" }).catch(function () { /* the app still works without it */ });
   }
 
-  start();
+  // ---- One active tab (round 31): this tab runs the app only while it holds the "active" lock.
+  var tabActive = false, wasActive = false;
+  var tabChannel = null;
+  try { tabChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("floatboard-tabs") : null; } catch (e) { tabChannel = null; }
+  var leader = ActiveTab({
+    locks: navigator.locks && typeof navigator.locks.request === "function" ? navigator.locks : null,
+    channel: tabChannel,
+    lease: { load: function () { return load(ACTIVE_KEY); }, store: function (v) { store(ACTIVE_KEY, v); } },
+    now: function () { return Date.now(); },
+    every: function (fn, ms) { setInterval(fn, ms); },
+    wait: function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); },
+    onActive: function () {
+      $("elsewhere").hidden = true;
+      if (wasActive) { location.reload(); return; }   // back from another tab: start fresh from what that tab kept
+      tabActive = true; wasActive = true;
+      start();
+    },
+    onInactive: function () {
+      tabActive = false;
+      clearTimeout(retryTimer);
+      closeSheet();
+      document.querySelectorAll("main.screen").forEach(function (m) { m.hidden = m.id !== "elsewhere"; });
+      $("elsewhere").hidden = false;
+    },
+    // Stepping down: what this tab holds is kept first (each change is already kept; this is the last word).
+    beforeStepDown: function () { saveQueue(); jots.keep(); saveDecQueue(); circleSave(); }
+  });
+  $("use-here").addEventListener("click", function () { $("use-here").disabled = true; leader.useHere(); });
+  leader.start();
 })();
