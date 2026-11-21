@@ -1021,7 +1021,15 @@
   var openCapture = null;
   var draftWaiting = false;
   var DRAFT_PREFIX = "floatboard.capturedraft:";
-  function draftsOf(account) { var d = load(DRAFT_PREFIX + account); return Array.isArray(d) ? d : []; }
+  function draftsOf(account) {
+    var d = load(DRAFT_PREFIX + account);
+    if (Array.isArray(d)) return d;
+    if (!d || typeof d.title !== "string") return [];
+    // Round 34 kept one draft as { title, group }: read as a one-item list and stored as one (kept as it was if that fails).
+    var list = [{ id: "round34", title: d.title, group: typeof d.group === "string" ? d.group : "" }];
+    putDrafts(account, list);
+    return list;
+  }
   function putDrafts(account, list) { return queueKeep(DRAFT_PREFIX + account, list.length ? list : null); }
   function keepCaptureDraft() {
     var c = openCapture;

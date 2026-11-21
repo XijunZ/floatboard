@@ -139,4 +139,17 @@ describe("phone app run whole: tabs and accounts (round 34)", () => {
     expect(unsubscribed).toBe(false);
     one.stop(); two.stop();
   });
+
+  it("a_round_34_single_draft_is_read_as_a_list_and_comes_back", async () => {
+    const b = browser();
+    b.storage.set("floatboard.capturedraft:acc-a", JSON.stringify({ title: "Words from the older version", group: "" }));
+    const one = runApp({ ...b, reply: (p, init) => (p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : board("acc-a")) });
+    await flush();
+    expect(one.find("add-title")?.value).toBe("Words from the older version");
+    expect(JSON.parse(draftOf(b, "acc-a")).map((d: any) => d.title)).toEqual(["Words from the older version"]);   // now a list
+    [...one.created].reverse().find((e) => e.tagName === "FORM").fire("submit");   // queued: the draft goes
+    expect(JSON.parse(draftOf(b, "acc-a") || "null")).toBeNull();
+    expect(one.toasts).toContain("Unsaved capture recovered");
+    one.stop();
+  });
 });
