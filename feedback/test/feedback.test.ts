@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
-import worker, { ALERT_AFTER, MAX_TEXT, PER_DAY, issueFor, retry, setFetches } from "../src/index";
+import worker, { ALERT_AFTER, GLOBAL_PER_DAY, MAX_TEXT, PER_DAY, PER_IP_PER_DAY, issueFor, retry, setFetches } from "../src/index";
 
 const BASE = "https://feedback.test";
 let github: { url: string; body: any; auth: string | null }[] = [];
@@ -23,8 +23,9 @@ beforeEach(async () => {
   );
 });
 
-const send = (body: unknown, raw?: string) =>
-  worker.fetch(new Request(BASE + "/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: raw ?? JSON.stringify(body) }), env as any);
+const send = (body: unknown, raw?: string, ip = "203.0.113.7") =>
+  worker.fetch(new Request(BASE + "/feedback", { method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip },
+    body: raw ?? JSON.stringify(body) }), env as any);
 const msg = (over: Record<string, unknown> = {}) =>
   ({ install_id: "0f1e2d3c-aaaa-bbbb-cccc-000000000001", text: "The bar hides my dock\nsteps: …", app_version: "0.1.0", os: "macOS 26.1", ...over });
 const rows = async () => (await env.DB.prepare("SELECT * FROM feedback ORDER BY received").all<any>()).results;
@@ -67,8 +68,8 @@ describe("feedback", () => {
     for (let i = 0; i < PER_DAY; i++) expect((await send(msg({ text: `n${i}` }))).status).toBe(200);
     const over = await send(msg({ text: "one more" }));
     expect(over.status).toBe(429);
-    // Another install is not affected.
-    expect((await send(msg({ install_id: "0f1e2d3c-aaaa-bbbb-cccc-000000000002" }))).status).toBe(200);
+    // Another install (from another address: round 29 also limits each address) is not affected.
+    expect((await send(msg({ install_id: "0f1e2d3c-aaaa-bbbb-cccc-000000000002" }), undefined, "198.51.100.20")).status).toBe(200);
   });
 
   it("kept_when_github_is_down_retried_hourly_and_alerted_once_after_three", async () => {
@@ -84,7 +85,7 @@ describe("feedback", () => {
     expect((await rows()).every((r) => r.issue_url?.startsWith("https://github.com/"))).toBe(true);
     // A new run of failures alerts again.
     githubUp = false;
-    for (let i = 0; i < ALERT_AFTER; i++) await send(msg({ install_id: "0f1e2d3c-aaaa-bbbb-cccc-00000000000" + (i + 3), text: `k${i}` }));
+    for (let i = 0; i < ALERT_AFTER; i++) await send(msg({ install_id: "0f1e2d3c-aaaa-bbbb-cccc-00000000000" + (i + 3), text: `k${i}` }), undefined, `198.51.100.${30 + i}`);
     expect(alerts()).toHaveLength(2);
   });
 
@@ -107,3 +108,41 @@ describe("retry without a cron", () => {
     expect((await rows()).every((r) => r.issue_url?.startsWith("https://github.com/"))).toBe(true);
   });
 });
+
+// Round 29 (security review M1): the endpoint can't be used to flood the maintainer's repository or phone.
+describe("feedback: abuse limits", () => {
+  it("one_address_is_limited_whatever_install_id_it_claims", async () => {
+    for (let i = 0; i < PER_IP_PER_DAY; i++) expect((await send(msg({ install_id: `aaaaaaaa-0000-0000-0000-00000000000${i}` }))).status).toBe(200);
+    expect((await send(msg({ install_id: "bbbbbbbb-0000-0000-0000-000000000099" }))).status).toBe(429);
+    expect((await send(msg({ install_id: "bbbbbbbb-0000-0000-0000-000000000099" }), undefined, "198.51.100.1")).status).toBe(200);
+  });
+
+  it("a_daily_cap_on_issues_then_messages_are_only_stored", async () => {
+    await env.DB.prepare("UPDATE meta SET value=value WHERE 1=0").run();
+    for (let i = 0; i < GLOBAL_PER_DAY; i++) {
+      await env.DB.prepare("INSERT INTO feedback(id,install_id,received,text,issue_url,filed_at) VALUES(?,?,?,?,?,?)")
+        .bind(`old-${i}`, "cccccccc-0000-0000-0000-000000000000", new Date().toISOString(), "x", "https://github.com/x/y/issues/0", new Date().toISOString()).run();
+    }
+    const r = await send(msg({ install_id: "dddddddd-0000-0000-0000-000000000001" }), undefined, "192.0.2.9");
+    expect(r.status).toBe(200);
+    expect(github).toHaveLength(0);
+    expect(ntfy).toHaveLength(0);
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM feedback WHERE issue_url IS NULL").first<any>()).n).toBe(1);
+    expect(await retry(env as any)).toBe(0);   // the hourly run respects the cap too
+  });
+
+  it("mentions_never_notify_anyone", async () => {
+    await send(msg({ text: "Hi @octocat and @github/team, see also email a@b.c" }));
+    const body: string = github[0].body.body, title: string = github[0].body.title;
+    expect(body).not.toMatch(/@[A-Za-z0-9]/);
+    expect(title).not.toMatch(/@[A-Za-z0-9]/);
+    expect(body).toContain("octocat");
+  });
+
+  it("a_body_without_length_is_still_capped", async () => {
+    const big = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"text":"' + "x".repeat(200_000) + '"}')); c.close(); } });
+    const r = await worker.fetch(new Request(BASE + "/feedback", { method: "POST", body: big, duplex: "half" } as any), env as any);
+    expect(r.status).toBe(413);
+  });
+});
+

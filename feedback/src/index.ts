@@ -22,6 +22,10 @@ export const MAX_TEXT = 5000;
 export const MAX_DIAGNOSTICS = 50_000;
 export const MAX_BODY = 64 * 1024;
 export const PER_DAY = 5;
+/** Per sending address (whatever install_id it claims), a day. */
+export const PER_IP_PER_DAY = 5;
+/** Issues filed (and ntfy pushes) a day across everyone; past it messages are only stored, and filed on a later day. */
+export const GLOBAL_PER_DAY = 100;
 export const ALERT_AFTER = 3;
 
 let githubFetch: typeof fetch = (...a) => fetch(...a);
@@ -33,7 +37,42 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
 type Row = { id: string; install_id: string; received: string; text: string; app_version: string | null; os: string | null;
-  diagnostics: string | null; attempts: number };
+  diagnostics: string | null; attempts: number; ip_hash?: string | null };
+
+/** "@name" never mentions anyone from the maintainer's account: a zero-width joiner goes after every "@". */
+export const noMentions = (s: string) => s.replace(/@/g, "@\u200d");
+
+/** The sending address, as a hash (never stored as is). Cloudflare sets CF-Connecting-IP. */
+async function ipHash(req: Request): Promise<string> {
+  const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("floatboard-feedback:" + ip));
+  return [...new Uint8Array(d)].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The body, read up to `limit` bytes (a body with no length is cut off there too); null when longer. */
+async function readCapped(req: Request, limit: number): Promise<string | null> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > limit) { await reader.cancel(); return null; }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const c of chunks) { all.set(c, at); at += c.byteLength; }
+  return new TextDecoder().decode(all);
+}
+
+/** Issues filed in the last day (the daily cap). */
+async function filedToday(env: Env): Promise<number> {
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  return (await env.DB.prepare("SELECT COUNT(*) n FROM feedback WHERE filed_at>?").bind(since).first<{ n: number }>())?.n ?? 0;
+}
 
 const ID = /^[a-z0-9-]{8,64}$/;
 const short = (s: unknown, n: number) => (typeof s === "string" ? s.trim().slice(0, n) : null);
@@ -54,9 +93,9 @@ export function readMessage(b: unknown): { ok: true; m: Omit<Row, "id" | "receiv
 
 /** The GitHub issue for one message. The title is the message's first line. */
 export function issueFor(r: Row): { title: string; body: string } {
-  const first = r.text.split("\n")[0].trim();
+  const first = noMentions(r.text.split("\n")[0].trim());
   const title = "Feedback: " + (first.length > 70 ? first.slice(0, 67) + "…" : first);
-  let body = `${r.text}\n\n---\nApp ${r.app_version ?? "?"} · ${r.os ?? "?"} · install ${r.install_id.slice(0, 8)} · received ${r.received} · id ${r.id}`;
+  let body = `${noMentions(r.text)}\n\n---\nApp ${r.app_version ?? "?"} · ${r.os ?? "?"} · install ${r.install_id.slice(0, 8)} · received ${r.received} · id ${r.id}`;
   if (r.diagnostics) body += `\n\n<details><summary>Diagnostics</summary>\n\n\`\`\`json\n${r.diagnostics}\n\`\`\`\n</details>`;
   return { title, body };
 }
@@ -91,7 +130,8 @@ export async function file(env: Env, r: Row): Promise<boolean> {
     if (res.ok) {
       const out = await res.json<{ html_url?: string }>();
       await env.DB.batch([
-        env.DB.prepare("UPDATE feedback SET issue_url=?, attempts=attempts+1, last_error=NULL WHERE id=?").bind(out.html_url ?? "filed", r.id),
+        env.DB.prepare("UPDATE feedback SET issue_url=?, attempts=attempts+1, last_error=NULL, filed_at=? WHERE id=?")
+          .bind(out.html_url ?? "filed", new Date().toISOString(), r.id),
         env.DB.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('github_failures','0')"),
         env.DB.prepare("DELETE FROM meta WHERE key='alerted'"),
       ]);
@@ -116,8 +156,8 @@ export async function file(env: Env, r: Row): Promise<boolean> {
 async function receive(req: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const len = Number(req.headers.get("Content-Length") ?? "0");
   if (len > MAX_BODY) return json({ error: "the message is too large" }, 413);
-  const raw = await req.text();
-  if (raw.length > MAX_BODY) return json({ error: "the message is too large" }, 413);
+  const raw = await readCapped(req, MAX_BODY);   // a body sent without a length is capped too
+  if (raw === null) return json({ error: "the message is too large" }, 413);
   let body: unknown;
   try { body = JSON.parse(raw); } catch { return json({ error: "send a JSON object" }, 400); }
   const read = readMessage(body);
@@ -126,11 +166,18 @@ async function receive(req: Request, env: Env, ctx?: ExecutionContext): Promise<
   const n = (await env.DB.prepare("SELECT COUNT(*) n FROM feedback WHERE install_id=? AND received>?").bind(read.m.install_id, since)
     .first<{ n: number }>())?.n ?? 0;
   if (n >= PER_DAY) return json({ error: `at most ${PER_DAY} messages a day; please try again tomorrow` }, 429);
-  const row: Row = { id: crypto.randomUUID(), received: new Date().toISOString(), attempts: 0, ...read.m };
-  await env.DB.prepare("INSERT INTO feedback(id,install_id,received,text,app_version,os,diagnostics) VALUES(?,?,?,?,?,?,?)")
-    .bind(row.id, row.install_id, row.received, row.text, row.app_version, row.os, row.diagnostics).run();
-  // Stored: the person gets "sent" even if GitHub is down (the hourly run files it later).
-  await Promise.all([file(env, row), ntfy(env, "FloatBoard feedback", row.text)]);
+  // Per sending address too: install_id is the sender's to choose, the address is not.
+  const ip = await ipHash(req);
+  const byIP = (await env.DB.prepare("SELECT COUNT(*) n FROM feedback WHERE ip_hash=? AND received>?").bind(ip, since)
+    .first<{ n: number }>())?.n ?? 0;
+  if (byIP >= PER_IP_PER_DAY) return json({ error: `at most ${PER_IP_PER_DAY} messages a day; please try again tomorrow` }, 429);
+  const row: Row = { id: crypto.randomUUID(), received: new Date().toISOString(), attempts: 0, ip_hash: ip, ...read.m };
+  await env.DB.prepare("INSERT INTO feedback(id,install_id,received,text,app_version,os,diagnostics,ip_hash) VALUES(?,?,?,?,?,?,?,?)")
+    .bind(row.id, row.install_id, row.received, row.text, row.app_version, row.os, row.diagnostics, ip).run();
+  // Stored: the person gets "sent" even if GitHub is down (the hourly run files it later). Past the day's cap it is only
+  // stored (no issue, no ntfy), and filed on a later day.
+  if (await filedToday(env) >= GLOBAL_PER_DAY) return json({ ok: true, id: row.id });
+  await Promise.all([file(env, row), ntfy(env, "FloatBoard feedback", noMentions(row.text))]);
   // Older messages still waiting for GitHub get another try (in the background).
   ctx?.waitUntil(retry(env, row.id));
   return json({ ok: true, id: row.id });
@@ -138,7 +185,10 @@ async function receive(req: Request, env: Env, ctx?: ExecutionContext): Promise<
 
 /** Files what is still waiting, oldest first (`skip`: a message just tried). */
 export async function retry(env: Env, skip = ""): Promise<number> {
-  const { results } = await env.DB.prepare("SELECT * FROM feedback WHERE issue_url IS NULL AND id<>? ORDER BY received LIMIT 20").bind(skip).all<Row>();
+  const room = GLOBAL_PER_DAY - await filedToday(env);   // the daily cap holds for waiting messages too
+  if (room <= 0) return 0;
+  const { results } = await env.DB.prepare("SELECT * FROM feedback WHERE issue_url IS NULL AND id<>? ORDER BY received LIMIT ?")
+    .bind(skip, Math.min(20, room)).all<Row>();
   let filed = 0;
   for (const r of results) if (await file(env, r)) filed++;
   return filed;
