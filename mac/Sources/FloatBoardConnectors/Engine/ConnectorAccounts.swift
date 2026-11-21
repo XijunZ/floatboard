@@ -120,3 +120,44 @@ public enum ConnectorAccounts {
         }
     }
 }
+
+/// What a floatboard://connect link asks before joining (round 29, security L4): the engine's address, and a warning when
+/// it would replace an engine already connected under that name. A link fired again within a few seconds (a page
+/// re-firing it to wear the owner down) is ignored rather than asked again.
+@MainActor public enum ConnectPrompt {
+    public struct Text: Equatable { public let message: String; public let info: String; public let replaces: Bool }
+
+    /// "https://host" or "http://localhost:8787": scheme, host and any port, taken from the URL itself.
+    public static func address(_ url: URL?) -> String {
+        guard let url, let host = url.host else { return url?.absoluteString ?? "" }
+        return "\(url.scheme ?? "https")://\(host)" + (url.port.map { ":\($0)" } ?? "")
+    }
+
+    /// The dialog's words for a link (nil when the link can't be used).
+    public static func confirmation(_ link: URL, store: Store) -> Text? {
+        guard let parts = ConnectLink.parse(link) else { return nil }
+        let name = parts.name, id = ConnectLink.id(forName: name)
+        let replaced = store.connectors.first { $0.id == id && !$0.baseURL.isEmpty && !ConnectorInfo.sameAddress($0.baseURL, parts.url.absoluteString) }
+        var info = "Address: \(address(parts.url))\n\nIt will suggest tasks for your board and hear back what you do with them. Only join addresses you trust."
+        let current = store.connectors.filter { !$0.baseURL.isEmpty }.map { "“\($0.name)” (\(address(URL(string: $0.baseURL))))" }
+        if !current.isEmpty { info += "\n\nCurrently connected: " + current.joined(separator: ", ") + "." }
+        if let replaced {
+            info += "\n\nThis REPLACES “\(replaced.name)” at \(address(URL(string: replaced.baseURL))). Its tasks stay on your board."
+                + " Unsent changes and your settings (including what FloatBoard has learned about you) will go to the new address."
+        }
+        return Text(message: "Connect “\(name)”?", info: info, replaces: replaced != nil)
+    }
+
+    /// The same link again within `window` seconds is not asked again.
+    public struct RepeatGate {
+        var last: [String: Date] = [:]
+        public let window: TimeInterval
+        public init(window: TimeInterval = 10) { self.window = window }
+        public mutating func allows(_ link: URL, at now: Date = Date()) -> Bool {
+            let k = link.absoluteString
+            if let t = last[k], now.timeIntervalSince(t) < window { return false }
+            last[k] = now
+            return true
+        }
+    }
+}

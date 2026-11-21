@@ -57,6 +57,7 @@ enum ConnectorHealth {
 /// Adding a connector from a connect link: confirm the address with the user, then save it.
 @MainActor
 enum ConnectFlow {
+    static var repeatGate = ConnectPrompt.RepeatGate()
     /// Returns true when the connector was added.
     @discardableResult
     static func confirmAndAdd(_ link: URL, store: Store) -> Bool {
@@ -67,25 +68,18 @@ enum ConnectFlow {
                   "It needs an https:// address (or http://localhost for one running on this Mac) and a key. Copy it again from the connector's setup page.")
             return false
         }
-        let address = Self.address(parts.url)
         let name = parts.name // already reduced to a plain one-line label by ConnectLink.parse
         let id = ConnectLink.id(forName: name)
-        let replaced = store.connectors.first {
-            $0.id == id && !$0.baseURL.isEmpty && !ConnectorInfo.sameAddress($0.baseURL, parts.url.absoluteString)
-        }
+        // The words are ConnectPrompt's (checked): the engine's address, and a warning when it replaces one.
+        guard let text = ConnectPrompt.confirmation(link, store: store) else { return false }
+        // The same link fired again within seconds (a page re-firing it) is ignored, not asked again.
+        guard repeatGate.allows(link) else { return false }
         let a = NSAlert()
-        a.messageText = "Connect “\(name)”?"
-        var info = "Address: \(address)\n\nIt will suggest tasks for your board and hear back what you do with them. Only join addresses you trust."
-        let current = store.connectors.filter { !$0.baseURL.isEmpty }.map { "“\($0.name)” (\(Self.address(URL(string: $0.baseURL))))" }
-        if !current.isEmpty { info += "\n\nCurrently connected: " + current.joined(separator: ", ") + "." }
-        if let replaced {
-            info += "\n\nThis REPLACES “\(replaced.name)” at \(Self.address(URL(string: replaced.baseURL))). Its tasks stay on your board."
-                + " Unsent changes and your settings (including what FloatBoard has learned about you) will go to the new address."
-        }
-        a.informativeText = info
+        a.messageText = text.message
+        a.informativeText = text.info
         let join = a.addButton(withTitle: "Join")
         let cancel = a.addButton(withTitle: "Cancel")
-        if replaced != nil {
+        if text.replaces {
             // Return must not confirm a replacement, so Join loses it. Cancel keeps Escape: a button has only one key
             // equivalent, and giving Cancel Return would take Escape away from it.
             join.keyEquivalent = ""
@@ -105,10 +99,7 @@ enum ConnectFlow {
     }
 
     /// "https://host" or "http://localhost:8787": scheme, host and any port, taken from the URL itself.
-    static func address(_ url: URL?) -> String {
-        guard let url, let host = url.host else { return url?.absoluteString ?? "" }
-        return "\(url.scheme ?? "https")://\(host)" + (url.port.map { ":\($0)" } ?? "")
-    }
+    static func address(_ url: URL?) -> String { ConnectPrompt.address(url) }
 
     static func alert(_ title: String, _ text: String) {
         let a = NSAlert(); a.messageText = title; a.informativeText = text

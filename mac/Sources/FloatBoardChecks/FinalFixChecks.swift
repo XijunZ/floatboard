@@ -430,3 +430,23 @@ final class FakeGoogle: @unchecked Sendable {
     check(card(draft: "https://mail.google.com/mail/#drafts/1").replyDraftURL != nil && card(draft: "file:///Applications/Calculator.app").replyDraftURL == nil,
           "a_reply_draft_link_opens_only_as_a_web_address")
 }
+
+/// Round 29 (security review L4): a floatboard://connect link from anywhere asks first: the dialog names the engine's
+/// address, says so when it would replace an engine already connected, and a link fired again within a few seconds
+/// (a page re-firing it) is ignored instead of asking again.
+@MainActor func connectLinkConfirmChecks() {
+    let root = checkFolder("fb-connect")
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    guard let s = checkStore(root, "cl.sqlite") else { return }
+    try? s.upsertConnector(id: ConnectLink.id(forName: "Email"), name: "Email", baseURL: "https://engine.mine.example") // try?-ok: the check below fails without it
+    let link = URL(string: "floatboard://connect?url=https://evil.example&key=k&name=Email")!
+    let text = ConnectPrompt.confirmation(link, store: s)
+    check(text?.message.contains("Email") == true && text?.info.contains("https://evil.example") == true && text?.info.contains("REPLACES") == true
+          && text?.replaces == true, "connect_link_dialog_names_the_address_and_the_replacement")
+    let fresh = ConnectPrompt.confirmation(URL(string: "floatboard://connect?url=https://new.example&key=k&name=Other")!, store: s)
+    check(fresh?.replaces == false && fresh?.info.contains("https://new.example") == true, "connect_link_dialog_for_a_new_engine")
+    var gate = ConnectPrompt.RepeatGate()
+    let t0 = Date()
+    check(gate.allows(link, at: t0) && !gate.allows(link, at: t0.addingTimeInterval(3)) && gate.allows(link, at: t0.addingTimeInterval(30)),
+          "a_connect_link_fired_again_within_seconds_is_ignored")
+}
