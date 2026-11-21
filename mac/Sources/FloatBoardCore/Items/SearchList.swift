@@ -46,6 +46,9 @@ public struct SearchList {
         highlight = max(0, min(n - 1, (highlight ?? (by > 0 ? -1 : 0)) + by))
     }
 
+    /// The first result highlighted (new results while typing, round 37); none when there are none.
+    public mutating func highlightTop() { highlight = rows.firstIndex { $0.hit != nil } }
+
     /// "Show all N": the group's every result; the highlight stays on the row that was the group's last one shown.
     public mutating func expand(_ kind: ItemKind) { expanded.insert(kind) }
 }

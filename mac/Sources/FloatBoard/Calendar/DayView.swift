@@ -299,7 +299,8 @@ private struct EventBlock: View {
     /// the current one; the request is acknowledged only then. A newer pick (for another event) or leaving the page in
     /// the meantime cancels it (round 25).
     private func revealIfAsked() {
-        guard !placeholder, let r = ui.revealEvent, r.id == event.shortID else { reveal.cancel(); return }
+        // A preview from the search list's highlight (round 37) scrolls to it but never opens the panel.
+        guard !placeholder, let r = ui.revealEvent, r.id == event.shortID, ui.reveals.opens else { reveal.cancel(); return }
         reveal.schedule(r, delay: 0.35, current: { ui.revealEvent }, open: { open = true }, acknowledge: { ui.revealEvent = nil })
     }
 
@@ -361,6 +362,8 @@ private struct EventBlock: View {
             }
         }
         .frame(height: h, alignment: .top)
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: 2)
+            .opacity(ui.revealEvent?.id == event.shortID && !ui.reveals.opens ? 1 : 0))   // previewed from search
         .offset(drag)
         .opacity(drag == .zero ? 1 : 0.8)
         .modifier(HoverDetail(suppressed: open || showRefusal || drag != .zero || grow != 0) { CalendarItemDetail(content: .event(event), calendar: calendar) })

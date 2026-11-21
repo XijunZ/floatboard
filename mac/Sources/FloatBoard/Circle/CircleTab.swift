@@ -7,6 +7,7 @@ struct CircleTab: View {
     enum Sort: String, CaseIterable { case due = "Due date", lastTalked = "Last talked", name = "Name" }
     @EnvironmentObject var store: Store
     @ObservedObject private var nav = CircleNav.shared
+    @EnvironmentObject var ui: UIState
     @State private var query = ""
     @State private var tiers = CircleTierFilter()
     @State private var tiersLoaded = false
@@ -112,6 +113,7 @@ struct CircleTab: View {
     // MARK: List
 
     private func list(_ people: [Person], clocks: [Int64: Clocks], dueIDs: Set<Int64>) -> some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 if people.isEmpty {
@@ -142,11 +144,23 @@ struct CircleTab: View {
                     }
                     .padding(.horizontal, 8).padding(.vertical, 5)
                     .background(RoundedRectangle(cornerRadius: 6).fill(nav.selected == p.id ? Color.accentColor.opacity(0.15) : .clear))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor, lineWidth: 1.5)
+                        .opacity(ui.reveals.item == p.shortID ? 1 : 0))   // shown from search (round 37)
                     .contentShape(Rectangle())
                     .onTapGesture { nav.selected = p.id }
+                    .id(p.id)
                 }
             }
         }
+        .onAppear { scrollToShown(proxy) }
+        .onChange(of: ui.reveals.item) { _, _ in scrollToShown(proxy) }
+        }
+    }
+
+    /// A person shown from search (round 37): scrolled into view, never opened.
+    private func scrollToShown(_ proxy: ScrollViewProxy) {
+        guard let id = ui.reveals.item, id.kind == .person else { return }
+        withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(id.number, anchor: .center) }
     }
 
     private func bulkBar(_ c: CircleStore) -> some View {

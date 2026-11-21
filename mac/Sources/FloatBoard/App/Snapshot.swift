@@ -11,6 +11,7 @@ enum Snapshot {
         if ProcessInfo.processInfo.environment["FLOATBOARD_CLOCKSHOT"] != nil { ClockShot.run(dir: dir); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_CIRCLESHOTS"] != nil { CircleShots.run(dir: dir, store: store, ui: ui, google: google); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND11SHOTS"] != nil { Round8Shots.run(dir: dir, store: store, ui: ui, google: google, round11: true); return }
+        if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND37SHOTS"] != nil { Round37Shots.run(dir: dir, store: store, ui: ui, google: google); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND24SHOTS"] != nil { Round24Shots.run(dir: dir, store: store, ui: ui, google: google); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND23SHOTS"] != nil { Round23Shots.run(dir: dir, store: store, ui: ui, google: google); return }
         if ProcessInfo.processInfo.environment["FLOATBOARD_ROUND22SHOTS"] != nil { Round22Shots.run(dir: dir); return }

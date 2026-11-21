@@ -26,6 +26,10 @@ struct ExpandedView: View {
     @State private var listOpen = false
     @State private var searching = false
     @StateObject private var outside = OutsideClickMonitor()
+    /// Round 37: the highlighted result shown live on its tab; Esc goes back.
+    @StateObject private var previewer = SearchPreviewer<SearchPlace>()
+    /// The tab a preview just switched to (that switch keeps the list open).
+    @State private var previewTab: UIState.Tab?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -78,7 +82,9 @@ struct ExpandedView: View {
             let r = await SearchRun.results(ui.search, store: store)
             guard !Task.isCancelled else { return }
             searchList = SearchList(results: r)
+            searchList.highlightTop()   // round 37: the top result, shown on its tab once typing has stopped
             searching = false
+            if listOpen { previewer.typedTop(searchList.highlighted?.hit) }
         }
         .overlay(alignment: .bottom) { UndoDeleteBar() }
         .overlay(alignment: .bottom) { UndoUnlinkBar() }
@@ -90,12 +96,14 @@ struct ExpandedView: View {
         .toolbar { toolbarContent }
         // No switching tabs while typing (round 22): the list shows where things are; the board still highlights its matches.
         .onChange(of: ui.search) { _, q in
+            previewer.keystroke()
             listOpen = !q.trimmingCharacters(in: .whitespaces).isEmpty
             ui.currentMatch = orderedMatches.first
         }
-        .onChange(of: ui.tab) { _, _ in listOpen = false }   // another tab picked in the toolbar: the list closes
+        // Another tab picked in the toolbar: the list closes (a preview's own switch keeps it open).
+        .onChange(of: ui.tab) { _, t in if t == previewTab { previewTab = nil } else { listOpen = false } }
         .onChange(of: listOpen) { _, open in
-            if open { outside.onOutside = { listOpen = false }; outside.start() } else { outside.stop() }
+            if open { outside.onOutside = { listOpen = false }; outside.start() } else { outside.stop(); previewer.settle() }
         }
         .onDisappear { outside.stop() }
         .onChange(of: searchFocused) { _, on in if on && !ui.search.trimmingCharacters(in: .whitespaces).isEmpty { listOpen = true } }
@@ -109,6 +117,7 @@ struct ExpandedView: View {
             nav = nil
         }
         .onAppear {
+            wirePreviewer()
             newArea = store.resolve(newArea)
             focusIfWanted()
         }
@@ -143,10 +152,11 @@ struct ExpandedView: View {
                         else if ui.tab == .board { stepMatch(NSEvent.modifierFlags.contains(.shift) ? -1 : 1) }
                         else if let first = searchList.rows.first(where: { $0.hit != nil }) { activate(first) }
                     }
-                    .onKeyPress(.downArrow) { listOpen = true; searchList.move(1); return .handled }
-                    .onKeyPress(.upArrow) { searchList.move(-1); return .handled }
-                    // Esc: the list closes; a second Esc clears the search.
-                    .onExitCommand { if listOpen { listOpen = false } else { endSearch() } }
+                    // ↑/↓: the highlighted result shows on its tab at once (round 37); the focus stays here.
+                    .onKeyPress(.downArrow) { listOpen = true; searchList.move(1); previewer.highlighted(searchList.highlighted?.hit); return .handled }
+                    .onKeyPress(.upArrow) { searchList.move(-1); previewer.highlighted(searchList.highlighted?.hit); return .handled }
+                    // Esc: the list closes and the tab goes back to where it was before the previews; a second Esc clears the search.
+                    .onExitCommand { if listOpen { previewer.escape(); listOpen = false } else { endSearch() } }
                     .simultaneousGesture(TapGesture().onEnded { if !ui.search.isEmpty { listOpen = true } })   // a click shows the list again
                 if !ui.search.trimmingCharacters(in: .whitespaces).isEmpty {
                     // "2 of 5" (or "none") inside the field, then ✕ to exit the search.
@@ -190,7 +200,26 @@ struct ExpandedView: View {
         if let k = r.showAll { searchList.expand(k); return }
         guard let h = r.hit else { return }
         listOpen = false
-        SearchRun.open(h, ui: ui)
+        previewer.commit(h)
+    }
+
+    /// Round 37: previews go to the result's tab (the list stays open); Enter or a click opens as before; Esc goes back.
+    private func wirePreviewer() {
+        previewer.here = { [weak ui] in ui.map { SearchPlace(tab: $0.tab, match: $0.currentMatch) } }
+        previewer.goBack = { [weak ui] p in
+            guard let ui else { return }
+            ui.reveals = PendingReveals()
+            ui.tab = p.tab
+            ui.currentMatch = p.match
+            if p.tab == .board, let m = p.match { ui.reveals.pick(task: m, opens: false) }   // the board scrolls back to it
+        }
+        previewer.show = { [weak ui] h, opens in
+            guard let ui else { return }
+            if opens { SearchRun.open(h, ui: ui); return }
+            let t = SearchRun.tab(SearchDestination.of(h.id.kind))
+            if t != ui.tab { previewTab = t }
+            SearchRun.preview(h, ui: ui)
+        }
     }
 
     /// Esc / ✕: clear the search and leave the search box entirely (cursor out of it).

@@ -892,3 +892,52 @@ func integrationRebindingLiveChecks() async {
     check(people.count == 25 && people.allSatisfy { c.details($0.id).company == "Company \($0.id)" && c.details($0.id).taskArea == nil },
           "upgrade_18_to_19_keeps_every_person_and_their_details")
 }
+
+/// Round 37 (owner): moving the search list's highlight onto a result shows it on its tab, scrolled to and highlighted,
+/// without opening it; Enter opens it; Esc goes back to where the owner was; typing never hops tabs before the debounce.
+@MainActor func searchPreviewChecks() async {
+    func hit(_ k: ItemKind, _ n: Int64) -> SearchHit { SearchHit(id: ShortID(kind: k, number: n), title: "x", detail: "", date: nil) }
+    var tab = SearchDestination.board
+    var reveals = PendingReveals()
+    var opened: [ShortID] = []
+    let p = SearchPreviewer<SearchDestination>(debounce: 0.25)
+    p.here = { tab }
+    p.goBack = { tab = $0; reveals = PendingReveals() }
+    p.show = { h, opens in
+        tab = SearchPreviewApply.apply(h, opens: opens, reveals: &reveals)
+        if opens { opened.append(h.id) }
+    }
+    let senaka = hit(.person, 8)
+    p.highlighted(senaka)
+    check(tab == .circle && reveals.item == senaka.id && !reveals.opens && opened.isEmpty,
+          "highlighting_a_circle_result_shows_circle_and_reveals_the_person_without_opening_it")
+    p.highlighted(hit(.task, 12))
+    check(tab == .board && reveals.task?.id == 12 && reveals.item == nil && !reveals.opens, "a_newer_highlight_replaces_the_preview")
+    p.highlighted(senaka)
+    p.commit(senaka)
+    check(tab == .circle && opened == [senaka.id] && reveals.opens && p.origin == nil, "enter_opens_the_highlighted_result")
+    // Esc after previews: back to the tab the owner was on before the first one.
+    tab = .jots; reveals = PendingReveals(); opened = []
+    p.highlighted(hit(.event, 3)); p.highlighted(senaka)
+    check(tab == .circle, "previews_move_through_tabs")
+    p.escape()
+    check(tab == .jots && reveals == PendingReveals() && opened.isEmpty, "esc_goes_back_to_the_tab_before_the_previews")
+    // Typing: the top result is shown only once typing has stopped for the debounce.
+    tab = .board
+    p.keystroke()
+    p.typedTop(senaka)
+    try? await Task.sleep(nanoseconds: 100_000_000) // try?-ok: only waits
+    check(tab == .board, "typing_never_switches_tabs_before_the_debounce")
+    p.keystroke()                                   // another key: the wait starts again
+    p.typedTop(hit(.jot, 5))
+    try? await Task.sleep(nanoseconds: 150_000_000) // try?-ok: only waits
+    check(tab == .board, "each_keystroke_restarts_the_debounce")
+    try? await Task.sleep(nanoseconds: 300_000_000) // try?-ok: only waits past the debounce
+    check(tab == .jots && reveals.item == ShortID(kind: .jot, number: 5) && !reveals.opens, "the_top_result_is_shown_once_typing_stops")
+    p.escape()
+    check(tab == .board, "esc_after_a_typed_preview_goes_back_too")
+    // An event preview never asks for the event's panel.
+    p.highlighted(SearchHit(id: ShortID(kind: .event, number: 9), title: "e", detail: "", date: Date()))
+    check(tab == .calendar && reveals.event?.id == 9 && !reveals.opens, "an_event_preview_never_opens_its_panel")
+    p.settle()
+}

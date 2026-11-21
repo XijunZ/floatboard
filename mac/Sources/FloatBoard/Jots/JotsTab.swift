@@ -18,13 +18,19 @@ struct JotsTab: View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 header
+                ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         if showMeetings { TodaysMeetings(selected: $selected) }
                         ForEach(groups(rows), id: \.0) { day, items in
                             Text(day).font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary).textCase(.uppercase)
                                 .padding(.top, 8).padding(.leading, 4)
-                            ForEach(items) { r in JotRowView(row: r, selected: selected == r.id) { selected = r.id } }
+                            ForEach(items) { r in
+                                JotRowView(row: r, selected: selected == r.id) { selected = r.id }
+                                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor, lineWidth: 1.5)
+                                        .opacity(ui.reveals.item == ShortID(kind: .jot, number: r.id) ? 1 : 0))   // shown from search (round 37)
+                                    .id(r.id)
+                            }
                         }
                         if rows.isEmpty {
                             Text(isFiltered ? "No jots match." : "No jots yet. Press ⌃⌥J anywhere, or ✎ on the bar, to write one.")
@@ -32,6 +38,10 @@ struct JotsTab: View {
                         }
                     }
                     .padding(.bottom, 40)
+                }
+                // A jot shown from search (round 37): scrolled into view and outlined; it opens only on Enter or a click.
+                .onAppear { if let id = ui.reveals.item, id.kind == .jot { proxy.scrollTo(id.number, anchor: .center) } }
+                .onChange(of: ui.reveals.item) { _, id in if let id, id.kind == .jot { proxy.scrollTo(id.number, anchor: .center) } }
                 }
             }
             .frame(width: 330)

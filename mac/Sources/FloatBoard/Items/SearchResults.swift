@@ -3,8 +3,9 @@ import SwiftUI
 
 /// The toolbar search (round 22): one box for every tab. As soon as it has text a list shows under it, grouped by where
 /// each result lives (Tasks, Calendar, Jots, Circle, Decisions, Goals, only areas that are on), at most 5 a group with
-/// "Show all N". Clicking a row, or Enter on the highlighted one, opens it on its tab; there is no switching tabs while
-/// typing. On the Board the board itself still filters and highlights matching tasks as before.
+/// "Show all N". Clicking a row, or Enter on the highlighted one, opens it on its tab. Moving the highlight with the
+/// keyboard shows the result on its tab without opening it (round 37); typing switches tabs only once it has stopped.
+/// On the Board the board itself still filters and highlights matching tasks as before.
 @MainActor enum SearchRun {
     /// Every kind's matches for `q` (an id finds exactly that item); people are matched off the main thread.
     static func results(_ q: String, store: Store) async -> [(ItemKind, [SearchHit])] {
@@ -39,6 +40,25 @@ import SwiftUI
                 NSPasteboard.general.setString(h.id.text, forType: .string)
             }
         }
+    }
+}
+
+/// Round 37: a result previewed from the list's highlight, and where the owner was before (for Esc).
+struct SearchPlace { let tab: UIState.Tab; let match: Int64? }
+
+extension SearchRun {
+    static func tab(_ d: SearchDestination) -> UIState.Tab {
+        switch d { case .board: .board; case .calendar: .calendar; case .jots: .jots; case .circle: .circle; case .decisions: .decisions; case .resolutions: .resolutions }
+    }
+
+    /// Shows a result on its tab without opening it: a task outlined and scrolled to on the board, an event's day in the
+    /// Calendar scrolled to it (its panel stays shut), anything else scrolled to and highlighted in its list.
+    static func preview(_ h: SearchHit, ui: UIState) {
+        let d = SearchPreviewApply.apply(h, opens: false, reveals: &ui.reveals)
+        if h.id.kind == .task { ui.currentMatch = h.id.number }
+        if h.id.kind == .event { ui.calendarFocus = h.date }
+        if h.id.kind == .resolution { ui.focusGoal = h.id }   // its quarter, the goal expanded
+        ui.tab = tab(d)
     }
 }
 
@@ -302,5 +322,86 @@ struct SearchResultsPanel: View {
         }
         say("ROUND24 evening event: request \(ui.revealEvent == nil ? "acknowledged" : "still pending"), new windows (panel) \(popovers)")
         cw.close()
+    }
+}
+
+/// Round 37 check in a real window (`FLOATBOARD_ROUND37SHOTS=1`, scratch database only), printed as ROUND37 lines: the
+/// board window as the app builds it (toolbar search included); "senaka" typed into the search box, then ↓ through the
+/// results with real key events. The highlight on the Circle row shows Circle with the person outlined (not opened) and
+/// the cursor still in the search box; Esc goes back to the Board; Enter on the row opens the person.
+@MainActor enum Round37Shots {
+    static func say(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
+
+    static func run(dir: String, store: Store, ui: UIState, google: Google) {
+        guard LocalData.isScratchDatabase else { say("Round37Shots: scratch database only"); return }
+        NSApp.setActivationPolicy(.accessory)
+        _ = store.setModule(.circle, on: true)
+        let area = store.areas.first?.name ?? "Work"
+        store.add(title: "Call Senaka about the offsite", area: area, importance: .medium, due: nil)
+        store.add(title: "Send Senaka the notes", area: area, importance: .medium, due: nil)
+        for i in 1...30 { _ = PeopleStore(store: store).create(name: String(format: "Person %02d", i)) }
+        guard let senaka = PeopleStore(store: store).create(name: "Senaka R") else { say("ROUND37 no person"); return }
+        CircleNav.shared.selected = nil
+        // Circle's opening, as CircleRunner registers it at launch (not running in a snapshot).
+        GlobalSearchOpen.handlers[.person] = { id in ui.tab = .circle; CircleNav.shared.selected = id.number }
+        ui.tab = .board
+        let host = NSHostingView(rootView: AnyView(ExpandedView().background(Color(nsColor: .windowBackgroundColor))
+            .environmentObject(store).environmentObject(ui).environmentObject(google)))
+        host.sizingOptions = []
+        host.sceneBridgingOptions = [.toolbars]
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1300, height: 640), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        w.titleVisibility = .hidden; w.toolbarStyle = .unifiedCompact
+        w.isReleasedWhenClosed = false; w.contentView = host
+        w.setFrameOrigin(NSPoint(x: -30000, y: -30000)); w.makeKeyAndOrderFront(nil)
+        func wait(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
+        func key(_ chars: String, _ code: UInt16) {
+            for t in [NSEvent.EventType.keyDown, .keyUp] {
+                if let e = NSEvent.keyEvent(with: t, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: w.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                                            isARepeat: false, keyCode: code) { w.sendEvent(e) }
+            }
+        }
+        func inSearch() -> Bool { (w.firstResponder as? NSText)?.delegate is NSTextField }
+        func shot(_ name: String) {
+            guard let frame = w.contentView?.superview else { return }
+            if let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) {
+                frame.cacheDisplay(in: frame.bounds, to: rep)
+                let file = URL(fileURLWithPath: dir).appendingPathComponent("round37-\(name).png")
+                do { try rep.representation(using: .png, properties: [:])?.write(to: file) } catch { say("ERR: \(error)") }
+            }
+        }
+        let down = String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)), up = String(Character(UnicodeScalar(NSUpArrowFunctionKey)!))
+        wait(0.6)
+        NotificationCenter.default.post(name: .floatBoardFocusSearch, object: nil)
+        wait(0.4)
+        // A window off screen in a background run doesn't become key, so the focus request can't land: the toolbar's
+        // search field is made first responder directly (as a click on it would).
+        func fields(_ v: NSView) -> [NSTextField] { (v as? NSTextField).map { [$0] } ?? [] + v.subviews.flatMap(fields) }
+        if !inSearch(), let root = w.contentView?.superview, let f = fields(root).first(where: { $0.placeholderString == "Search" }) {
+            w.makeFirstResponder(f)
+            wait(0.2)
+        }
+        say("ROUND37 step: search focused \(inSearch())")
+        for (i, c) in "senaka".enumerated() { key(String(c), [1, 14, 45, 0, 40, 0][i]); wait(0.05) }
+        wait(0.15)
+        say("ROUND37 typing: tab \(ui.tab) right after typing (no hop)")
+        wait(0.8)
+        say("ROUND37 typed: search \"\(ui.search)\", tab \(ui.tab), top result shown \(ui.reveals.task != nil || ui.currentMatch != nil)")
+        // ↓ onto the second task, then onto Senaka R in Circle.
+        key(down, 125); wait(0.3)
+        key(down, 125); wait(0.8)
+        let circleShown = ui.tab == .circle && ui.reveals.item == senaka.shortID && !ui.reveals.opens
+        say("ROUND37 highlight-circle: tab \(ui.tab), person revealed \(circleShown), opened \(CircleNav.shared.selected != nil), cursor in search \(inSearch())")
+        shot("circle-preview")
+        key("\u{1b}", 53); wait(0.6)
+        say("ROUND37 esc: tab \(ui.tab), cursor in search \(inSearch())")
+        shot("after-esc")
+        // Back into the list and onto the person again; Enter opens it.
+        key(down, 125); wait(0.3); key(down, 125); wait(0.3); key(up, 126); wait(0.3); key(down, 125); wait(0.6)
+        say("ROUND37 again: tab \(ui.tab)")
+        key("\r", 36); wait(0.8)
+        say("ROUND37 enter: tab \(ui.tab), opened \(CircleNav.shared.selected == senaka.id)")
+        shot("enter-opens")
+        w.close()
     }
 }

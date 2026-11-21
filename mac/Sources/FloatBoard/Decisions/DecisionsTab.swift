@@ -6,6 +6,7 @@ import SwiftUI
 struct DecisionsTab: View {
     @EnvironmentObject var store: Store
     @ObservedObject var dui = DecisionsUI.shared
+    @EnvironmentObject var ui: UIState
     @State private var filter = DecisionFilter()
 
     var body: some View {
@@ -18,10 +19,15 @@ struct DecisionsTab: View {
                 if list.isEmpty {
                     Text(emptyText).font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 6)
                 }
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(list) { d in row(d) }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(list) { d in row(d).id(d.id) }
+                        }
                     }
+                    // A decision shown from search (round 37): scrolled into view and outlined, never opened.
+                    .onAppear { if let id = ui.reveals.item, id.kind == .decision { proxy.scrollTo(id.number, anchor: .center) } }
+                    .onChange(of: ui.reveals.item) { _, id in if let id, id.kind == .decision { proxy.scrollTo(id.number, anchor: .center) } }
                 }
                 Text(screenedLine).font(.system(size: 10)).foregroundStyle(.tertiary)
             }
@@ -96,6 +102,7 @@ struct DecisionsTab: View {
             .padding(.vertical, 5).padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 6).fill(dui.selected == d.id ? Color.accentColor.opacity(0.15) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor, lineWidth: 1.5).opacity(ui.reveals.item == d.shortID ? 1 : 0))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
