@@ -34,6 +34,7 @@ import {
 } from "@simplewebauthn/server";
 import { randomToken, sha256Hex } from "../lib/auth";
 import { type Env, json, nowISO } from "../env";
+import { clientIP } from "../lib/client-ip";
 import { readCappedJSON } from "../lib/http";
 import { route } from "../lib/router";
 
@@ -361,10 +362,11 @@ async function pairFinish(req: Request, env: Env, body: any): Promise<Response> 
 
 async function loginOptions(req: Request, env: Env): Promise<Response> {
   const now = nowISO();
-  const ipHash = await sha256Hex(`ip:${req.headers.get("CF-Connecting-IP") ?? ""}`);
+  const ip = clientIP(req, env);   // the platform's own client address (never a header the client invents)
+  const ipHash = await sha256Hex(`ip:${ip ?? ""}`);
   await env.DB.prepare("DELETE FROM app_challenges WHERE expires <= ?").bind(now).run();
   const live = await env.DB.prepare("SELECT COUNT(*) n, COALESCE(SUM(ip_hash=?), 0) mine FROM app_challenges").bind(ipHash).first<{ n: number; mine: number }>();
-  if ((live?.n ?? 0) >= MAX_LIVE_CHALLENGES || (live?.mine ?? 0) >= MAX_LIVE_CHALLENGES_PER_IP) {
+  if ((live?.n ?? 0) >= MAX_LIVE_CHALLENGES || (ip !== null && (live?.mine ?? 0) >= MAX_LIVE_CHALLENGES_PER_IP)) {
     return appJSON({ error: "Too many sign-ins right now. Try again in a few minutes." }, 429);
   }
   const options = await generateAuthenticationOptions({

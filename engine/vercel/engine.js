@@ -14,7 +14,7 @@ function setup() {
     const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
     await migrate(client, MIGRATIONS);
     for (const k of ["ENC_KEY", "ADMIN_KEY"]) if (!process.env[k]) throw new Error(`${k} is not set in this Vercel project's environment variables`);
-    return { DB: d1(client), ENC_KEY: process.env.ENC_KEY, ADMIN_KEY: process.env.ADMIN_KEY };
+    return { DB: d1(client), ENC_KEY: process.env.ENC_KEY, ADMIN_KEY: process.env.ADMIN_KEY, PLATFORM: "vercel" };
   })().catch((e) => { ready = null; throw e; });
   return ready;
 }

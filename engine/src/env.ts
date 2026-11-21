@@ -4,6 +4,8 @@ export interface Env {
   ADMIN_KEY: string;
   /** "1" when the engine runs inside the Mac app and Apple's on-device model is available there. */
   ON_DEVICE?: string;
+  /** "vercel" when the engine runs on Vercel (vercel/engine.js): which header carries the client's address (lib/client-ip). */
+  PLATFORM?: string;
 }
 
 export type User = { id: string; name: string };

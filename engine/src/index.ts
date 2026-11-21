@@ -3,6 +3,8 @@ import { type Env, json, nowISO } from "./env";
 import { logEvent } from "./lib/runlog";
 import { routes } from "./lib/router";
 import { readJSON } from "./lib/http";
+import { clientIP } from "./lib/client-ip";
+import { attempt, tooManyFailures } from "./setup/routes";
 import { decrypt } from "./lib/crypto";
 import { processRecap } from "./triage/recap";
 import { fathomSignatureProblem, fathomToMessage, meetingMeta, recordMeeting } from "./sources/fathom";
@@ -51,7 +53,12 @@ export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/admin/users" && req.method === "POST") {
-      return isAdmin(req, env) ? createUser(req, env) : json({ error: "unauthorized" }, 401);
+      // Wrong admin keys are counted like the setup sign-in's (round 29, L1): ten in 15 minutes from one address and
+      // even the right key waits.
+      const ip = clientIP(req, env);
+      if (await tooManyFailures(env, ip)) return json({ error: "too many tries; try again in 15 minutes" }, 429);
+      if (!isAdmin(req, env)) { await attempt(env, ip, false, "admin_api"); return json({ error: "unauthorized" }, 401); }
+      return createUser(req, env);
     }
     if (url.pathname === "/setup" || url.pathname.startsWith("/setup/")) return handleSetup(req, env);
     if (url.pathname === "/ingest/outlook" && req.method === "POST") {

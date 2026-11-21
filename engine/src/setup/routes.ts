@@ -9,6 +9,7 @@
  * are never logged or shown again.
  */
 import { dbSizeBytes } from "../routes/archive";
+import { clientIP } from "../lib/client-ip";
 import { insertUser, randomToken, sameSecret, sha256Hex, userByKey } from "../lib/auth";
 import { decrypt, encrypt } from "../lib/crypto";
 import { type Env, nowISO } from "../env";
@@ -32,7 +33,8 @@ const RATE_MAX_FAILURES = 10;
 
 type Session = { kind: "user" | "admin"; user_id: string | null; csrf: string; key_enc: string | null; idHash: string };
 
-const ipOf = (req: Request) => req.headers.get("CF-Connecting-IP") ?? "unknown";
+/** Failures a day of requests with no known address may add up to, all together (never a bucket of ten anyone fills). */
+const RATE_MAX_UNKNOWN = 200;
 const inSeconds = (s: number) => new Date(Date.now() + s * 1000).toISOString();
 const sessionCookie = (sid: string) => `${COOKIE}=${sid}; HttpOnly; Secure; SameSite=Strict; Path=/setup; Max-Age=${SESSION_SECONDS}`;
 const clearCookie = `${COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/setup; Max-Age=0`;
@@ -44,7 +46,7 @@ const clearNonceCookie = `${NONCE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path
 async function record(env: Env, req: Request, action: string, ok: boolean, userId: string | null, detail?: string) {
   try {
     await env.DB.prepare("INSERT INTO setup_log(at,user_id,ip,action,ok,detail) VALUES(?,?,?,?,?,?)")
-      .bind(nowISO(), userId, ipOf(req), action, ok ? 1 : 0, detail ? detail.slice(0, 500) : null).run();
+      .bind(nowISO(), userId, clientIP(req, env) ?? "unknown", action, ok ? 1 : 0, detail ? detail.slice(0, 500) : null).run();
   } catch (e) {
     console.warn(JSON.stringify({ event: "setup_log_failed", action, ok, error: (e as Error)?.message }));
   }
@@ -111,14 +113,16 @@ async function readForm(req: Request): Promise<Record<string, string>> {
   return Object.fromEntries(new URLSearchParams(text));
 }
 
-async function tooManyFailures(env: Env, ip: string): Promise<boolean> {
+/** Failures from this address in the window (no address known: everyone's unknown-address failures, with a much higher
+ *  threshold, so a stranger can't lock the owner out by filling a shared bucket). */
+export async function tooManyFailures(env: Env, ip: string | null): Promise<boolean> {
   const since = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
-  const r = await env.DB.prepare("SELECT COUNT(*) n FROM setup_attempts WHERE ip=? AND ok=0 AND at > ?").bind(ip, since).first<{ n: number }>();
-  return (r?.n ?? 0) >= RATE_MAX_FAILURES;
+  const r = await env.DB.prepare("SELECT COUNT(*) n FROM setup_attempts WHERE ip=? AND ok=0 AND at > ?").bind(ip ?? "", since).first<{ n: number }>();
+  return (r?.n ?? 0) >= (ip ? RATE_MAX_FAILURES : RATE_MAX_UNKNOWN);
 }
 
-const attempt = (env: Env, ip: string, ok: boolean, kind: string) =>
-  env.DB.prepare("INSERT INTO setup_attempts(ip,at,ok,kind) VALUES(?,?,?,?)").bind(ip, nowISO(), ok ? 1 : 0, kind).run();
+export const attempt = (env: Env, ip: string | null, ok: boolean, kind: string) =>
+  env.DB.prepare("INSERT INTO setup_attempts(ip,at,ok,kind) VALUES(?,?,?,?)").bind(ip ?? "", nowISO(), ok ? 1 : 0, kind).run();
 
 // ---------------------------------------------------------------- user pages
 
@@ -164,7 +168,7 @@ async function unclaimed(env: Env): Promise<boolean> {
 
 /** The first visit to a new engine makes its owner: name + the admin key chosen at deploy time. Only while unclaimed. */
 async function claim(req: Request, env: Env): Promise<Response> {
-  const ip = ipOf(req);
+  const ip = clientIP(req, env);
   if (crossSite(req)) {
     await record(env, req, "claim", false, null, "cross-site claim refused");
     return htmlResponse(claimPage({ error: "That didn't come from this page." }), 403);
@@ -190,7 +194,7 @@ async function claim(req: Request, env: Env): Promise<Response> {
 }
 
 async function signIn(req: Request, env: Env, admin: boolean): Promise<Response> {
-  const ip = ipOf(req);
+  const ip = clientIP(req, env);
   const action = admin ? "admin_signin" : "signin";
   if (crossSite(req)) {
     await record(env, req, action, false, null, "cross-site sign-in refused");
