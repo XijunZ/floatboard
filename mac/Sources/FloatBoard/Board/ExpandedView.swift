@@ -286,6 +286,8 @@ struct ExpandedView: View {
             FocusButton(title: "Add", enabled: !newTitle.trimmingCharacters(in: .whitespaces).isEmpty,
                         nav: chain, navID: "add", action: add)
         }
+        // Esc anywhere in the row leaves it; the typed title is kept (round 38).
+        .leavesOnEsc { addField = nil; nav = nil }
         // Keep the shared ← → position and the title/importance/group focus in step.
         .onChange(of: nav) { _, n in if let f = AddField(rawValue: n ?? "") { addField = f } }
         .onChange(of: addField) { _, f in if let f { nav = f.rawValue } }

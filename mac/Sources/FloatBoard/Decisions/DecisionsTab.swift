@@ -15,6 +15,7 @@ struct DecisionsTab: View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Search decisions: words, or D-12", text: $filter.query).textFieldStyle(.roundedBorder)
+                    .leavesOnEsc()
                 filters
                 if list.isEmpty {
                     Text(emptyText).font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 6)

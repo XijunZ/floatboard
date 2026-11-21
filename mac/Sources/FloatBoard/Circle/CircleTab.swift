@@ -71,6 +71,7 @@ struct CircleTab: View {
                     Label("Due this week \(due.count)", systemImage: "clock").font(.system(size: 12, weight: dueOnly ? .semibold : .regular))
                 }.buttonStyle(.bordered).tint(due.contains(where: \.overdue) ? .orange : nil).fixedSize()
                 TextField("Search names, companies, handles", text: $query).textFieldStyle(.roundedBorder).frame(width: 220)
+                    .leavesOnEsc()
                 TierToggles(filter: $tiers)
                 Menu(tagFilter.isEmpty ? "All tags" : tagFilter.sorted().joined(separator: ", ")) {
                     ForEach(store.tags.map(\.name), id: \.self) { t in

@@ -164,3 +164,15 @@ struct FlowLayout: Layout {
 }
 
 
+
+extension View {
+    /// Esc leaves a single-line field (round 38): the cursor and its focus ring go and the keyboard shortcuts work again;
+    /// the typed text stays, so clicking back continues it. Not for the toolbar search (its own Esc), sheets or panels.
+    func leavesOnEsc(_ also: @escaping () -> Void = {}) -> some View {
+        onExitCommand {
+            also()
+            let w = NSApp.keyWindow ?? NSApp.windows.first { ($0.firstResponder as? NSTextView)?.isFieldEditor == true }
+            w?.makeFirstResponder(nil)
+        }
+    }
+}

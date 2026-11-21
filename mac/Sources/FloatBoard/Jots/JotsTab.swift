@@ -76,6 +76,7 @@ struct JotsTab: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search jots (words or J-12)", text: $query.text).textFieldStyle(.plain)
+                    .leavesOnEsc()
                 Button { CaptureController.shared?.show(task: nil) } label: { Label("New jot", systemImage: "square.and.pencil") }
                     .buttonStyle(.borderless).help("Write a jot (⌃⌥J)")
             }

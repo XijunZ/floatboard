@@ -405,3 +405,61 @@ struct SearchResultsPanel: View {
         w.close()
     }
 }
+
+/// Round 38 check in a real window (`FLOATBOARD_ROUND38SHOTS=1`, scratch database only), printed as ROUND38 lines: in the
+/// board window as the app builds it, text typed into the Board's "Add a task" field and into Circle's and Jots' search
+/// fields with real key events, then Esc: the field is left (no cursor, no ring) and its text is still there.
+@MainActor enum Round38Shots {
+    static func say(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
+
+    static func run(dir: String, store: Store, ui: UIState, google: Google) {
+        guard LocalData.isScratchDatabase else { say("Round38Shots: scratch database only"); return }
+        NSApp.setActivationPolicy(.accessory)
+        _ = store.setModule(.circle, on: true)
+        _ = store.setModule(.jots, on: true)
+        ui.tab = .board
+        let host = NSHostingView(rootView: AnyView(ExpandedView().background(Color(nsColor: .windowBackgroundColor))
+            .environmentObject(store).environmentObject(ui).environmentObject(google)))
+        host.sizingOptions = []
+        host.sceneBridgingOptions = [.toolbars]
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1300, height: 640), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        w.titleVisibility = .hidden; w.toolbarStyle = .unifiedCompact
+        w.isReleasedWhenClosed = false; w.contentView = host
+        w.setFrameOrigin(NSPoint(x: -30000, y: -30000)); w.makeKeyAndOrderFront(nil)
+        func wait(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
+        func key(_ chars: String, _ code: UInt16) {
+            for t in [NSEvent.EventType.keyDown, .keyUp] {
+                if let e = NSEvent.keyEvent(with: t, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: w.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                                            isARepeat: false, keyCode: code) { w.sendEvent(e) }
+            }
+        }
+        func fields(_ v: NSView) -> [NSTextField] { (v as? NSTextField).map { [$0] } ?? [] + v.subviews.flatMap(fields) }
+        func field(_ placeholder: String) -> NSTextField? { w.contentView?.superview.flatMap { fields($0).first { $0.placeholderString == placeholder } } }
+        func editing(_ f: NSTextField) -> Bool { (w.firstResponder as? NSText)?.delegate as? NSTextField === f }
+        func trial(_ name: String, _ placeholder: String) {
+            guard let f = field(placeholder) else { say("ROUND38 \(name): field not found"); return }
+            w.makeFirstResponder(f); wait(0.2)
+            for (c, code) in [("d", UInt16(2)), ("r", 15), ("a", 0), ("f", 3), ("t", 17)] { key(c, code); wait(0.03) }
+            wait(0.2)
+            let before = editing(f)
+            key("\u{1b}", 53); wait(0.4)
+            let left = !editing(f), text = f.stringValue
+            w.makeFirstResponder(f); wait(0.2)
+            say("ROUND38 \(name): editing before Esc \(before), left after Esc \(left), text kept \"\(text)\", text on return \"\(f.stringValue)\"")
+            w.makeFirstResponder(nil); wait(0.1)
+        }
+        wait(0.6)
+        trial("add-a-task", "Add a task: ↑↓ group, → importance, Enter to add")
+        if let frame = w.contentView?.superview, let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) {
+            w.makeFirstResponder(nil); wait(0.2)
+            frame.cacheDisplay(in: frame.bounds, to: rep)
+            do { try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("round38-add-row-after-esc.png")) } catch { say("ERR: \(error)") }
+        }
+        ui.tab = .circle; wait(0.6)
+        trial("circle-search", "Search names, companies, handles")
+        ui.tab = .jots; wait(0.6)
+        trial("jots-search", "Search jots (words or J-12)")
+        w.close()
+    }
+}

@@ -941,3 +941,25 @@ func integrationRebindingLiveChecks() async {
     check(tab == .calendar && reveals.event?.id == 9 && !reveals.opens, "an_event_preview_never_opens_its_panel")
     p.settle()
 }
+
+/// Round 38 (owner): Esc in a single-line field on the Board, Jots, Circle or Decisions leaves it (the ring goes, the
+/// text stays). Each field's modifier chain, up to the next view, must carry `.leavesOnEsc`; the search box keeps its
+/// own Esc (round 37) and sheets and panels are left alone.
+func escLeavesFieldChecks() {
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("FloatBoard")
+    func source(_ f: String) -> String { (try? String(contentsOf: root.appendingPathComponent(f), encoding: .utf8)) ?? "" } // try?-ok: empty fails the check
+    /// The code from the field to the next blank-line-free view start (enough to hold its modifiers).
+    func chain(_ text: String, after marker: String, lines: Int) -> String {
+        guard let r = text.range(of: marker) else { return "" }
+        return text[r.lowerBound...].split(separator: "\n", omittingEmptySubsequences: false).prefix(lines).joined(separator: "\n")
+    }
+    let board = source("Board/ExpandedView.swift")
+    // The add row: Esc leaves any of its controls (the title field and the chips), the typed title is kept.
+    let addRow = chain(board, after: "private var addRow: some View {", lines: 60)
+    check(addRow.contains(".leavesOnEsc"), "esc_leaves_the_add_a_task_field_and_keeps_its_text")
+    for (file, placeholder) in [("Jots/JotsTab.swift", "Search jots (words or J-12)"), ("Circle/CircleTab.swift", "Search names, companies, handles"),
+                                ("Decisions/DecisionsTab.swift", "Search decisions: words, or D-12")] {
+        check(chain(source(file), after: "TextField(\"\(placeholder)\"", lines: 2).contains(".leavesOnEsc"), "esc_leaves_the_field_\(placeholder)")
+    }
+    check(!chain(board, after: "TextField(\"Search\", text: $ui.search)", lines: 16).contains(".leavesOnEsc"), "the_search_box_keeps_its_own_esc")
+}
