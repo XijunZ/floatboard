@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 19
+    public static let schemaVersion = 20
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -234,6 +234,10 @@ public final class DB {
             // 18 -> 19: a person's own board group for their "Message <name>" tasks (nullable; nil = automatic).
             sql += v19Columns
         }
+        if version < 20 {
+            // 19 -> 20: a calendar change's send attempt is recorded before it goes; restoring an old task note keeps newer notes.
+            sql += v20Changes
+        }
         return sql
     }
 
@@ -337,6 +341,30 @@ public final class DB {
     END;
     CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN
         UPDATE cards SET notes=CASE WHEN NEW.deleted=1 THEN '' ELSE NEW.text END, updated=NEW.updated WHERE id=NEW.task_id;
+    END;
+
+    """
+
+    /// Version 20 (round 39):
+    /// - `cal_outbox.attempted`: when the change was first handed to Google (set before it is sent). A delete attempted but not
+    ///   confirmed may have happened, so Undo makes the event again rather than only dropping the row.
+    /// - Restoring a deleted task note never overwrites the task's newer notes: with another live task note it comes back as
+    ///   an ordinary jot; with newer notes of the task's own, its old text goes to its history and it takes them. Only with
+    ///   no notes on the task does it become the task's notes again. One task note per task stays authoritative.
+    static let v20Changes = """
+    ALTER TABLE cal_outbox ADD COLUMN attempted REAL;
+    DROP TRIGGER jots_task_note_deleted;
+    CREATE TRIGGER jots_task_note_deleted AFTER UPDATE OF deleted ON jots WHEN NEW.task_id IS NOT NULL AND NEW.kind='task_note' AND NEW.deleted<>OLD.deleted BEGIN
+        UPDATE cards SET notes='', updated=NEW.updated WHERE NEW.deleted=1 AND id=NEW.task_id;
+        UPDATE jots SET kind='jot' WHERE NEW.deleted=0 AND id=NEW.id
+            AND EXISTS (SELECT 1 FROM jots o WHERE o.task_id=NEW.task_id AND o.kind='task_note' AND o.deleted=0 AND o.id<>NEW.id);
+        INSERT INTO jot_history(jot_id, text, at) SELECT NEW.id, NEW.text, NEW.updated
+            WHERE NEW.deleted=0 AND (SELECT kind FROM jots WHERE id=NEW.id)='task_note'
+            AND COALESCE((SELECT notes FROM cards WHERE id=NEW.task_id), '') NOT IN ('', NEW.text);
+        UPDATE jots SET text=(SELECT notes FROM cards WHERE id=NEW.task_id) WHERE NEW.deleted=0 AND id=NEW.id AND kind='task_note'
+            AND COALESCE((SELECT notes FROM cards WHERE id=NEW.task_id), '') NOT IN ('', NEW.text);
+        UPDATE cards SET notes=NEW.text, updated=NEW.updated WHERE NEW.deleted=0 AND id=NEW.task_id AND notes=''
+            AND (SELECT kind FROM jots WHERE id=NEW.id)='task_note';
     END;
 
     """
@@ -587,7 +615,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq + v18Tables + v19Columns
+    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq + v18Tables + v19Columns + v20Changes
 
     /// The tables Circle adds in version 14 (the same text for a new board and an upgraded one).
     static let v14Tables = """

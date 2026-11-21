@@ -682,7 +682,7 @@ func integrationRebindingLiveChecks() async {
     // Back to the version 17 shape: no jot_pushed, no screen_seq, the v17 triggers.
     let down = """
         DROP TABLE jot_pushed; DROP TRIGGER jots_seq_insert; DROP TRIGGER jots_seq_update; DROP TRIGGER jots_seq_task;
-        DROP INDEX jots_screen_seq; ALTER TABLE jots DROP COLUMN screen_seq; ALTER TABLE circle_people DROP COLUMN task_area;
+        DROP INDEX jots_screen_seq; ALTER TABLE jots DROP COLUMN screen_seq; ALTER TABLE circle_people DROP COLUMN task_area; ALTER TABLE cal_outbox DROP COLUMN attempted;
         CREATE TRIGGER jots_seq_insert AFTER INSERT ON jots BEGIN UPDATE jots SET change_seq = \(seq) WHERE id = NEW.id; END;
         CREATE TRIGGER jots_seq_update AFTER UPDATE OF text, kind, deleted, task_id ON jots WHEN NEW.change_seq = OLD.change_seq BEGIN
             UPDATE jots SET change_seq = \(seq) WHERE id = NEW.id; END;
@@ -876,7 +876,7 @@ func integrationRebindingLiveChecks() async {
     do { _ = try DB(url: url) } catch { check(false, "v18 setup: \(error)"); return }
     var h: OpaquePointer?
     guard sqlite3_open(url.path, &h) == SQLITE_OK else { check(false, "v18 open"); return }
-    var sql = "ALTER TABLE circle_people DROP COLUMN task_area; PRAGMA user_version = 18;"
+    var sql = "ALTER TABLE circle_people DROP COLUMN task_area; ALTER TABLE cal_outbox DROP COLUMN attempted; PRAGMA user_version = 18;"
     for i in 1...25 {
         sql += "INSERT INTO people(name, aliases, tier, source, added, updated) VALUES('Person \(i)', '[]', 'network', 'typed', 1, 1);"
         sql += "INSERT INTO circle_people(person_id, company) VALUES(\(i), 'Company \(i)');"

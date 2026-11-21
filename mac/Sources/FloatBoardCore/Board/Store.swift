@@ -301,7 +301,13 @@ public final class Store: ObservableObject {
     public func undoDelete(now: Date = Date()) {
         guard let d = lastDeleted else { return }
         let memo = deleteMemos[d.id]
-        perform { _ = try restoreCardRow(d.id, memo: memo, now: now) }
+        // Cleared only once the restore is saved (round 39): a failed one keeps the Undo bar and Edit → Undo Delete.
+        do { _ = try performThrowing { try restoreCardRow(d.id, memo: memo, now: now) } } catch {
+            activity("store", .error, "Undo Delete could not be saved", detail: "\(error)")
+            lastError = "Undo didn't work (\(error)). The task is still deleted; try Undo again."
+            lastDeleted = DeletedTask(id: d.id, title: d.title, at: now)   // the bar again, with a fresh wait
+            return
+        }
         lastDeleted = nil; deleteMemos[d.id] = nil
     }
 

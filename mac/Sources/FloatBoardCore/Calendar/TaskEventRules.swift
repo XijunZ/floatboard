@@ -209,11 +209,12 @@ extension Store {
         return (t, row)
     }
 
-    /// Delete undone. A delete that has not reached Google is taken back: its outbox row is removed and the task keeps its link,
-    /// so the event stays exactly as it is (guests, Meet link, description; nobody is sent a cancellation). Only a delete that
-    /// was sent, or is being sent right now, is followed by a new event.
+    /// Delete undone. A delete never handed to Google is taken back: its outbox row is removed and the task keeps its link,
+    /// so the event stays exactly as it is (guests, Meet link, description; nobody is sent a cancellation). A delete that was
+    /// sent, is being sent right now, or was tried without a confirmed answer (it may have happened, round 39) is followed by
+    /// a new event.
     func undoCalendarDelete(cardID: Int64, target: EventLink, row: String, now: Date) throws {
-        let unsent = try db.query("SELECT count(*) FROM cal_outbox WHERE uuid=? AND sent IS NULL", [row]) { DB.int($0, 0) }.first ?? 0
+        let unsent = try db.query("SELECT count(*) FROM cal_outbox WHERE uuid=? AND sent IS NULL AND attempted IS NULL", [row]) { DB.int($0, 0) }.first ?? 0
         if unsent > 0 && !calendarInFlight.contains(row) {
             try db.run("DELETE FROM cal_outbox WHERE uuid=?", [row])
             activity("calendar", .info, "Task \(cardID) is back; its calendar event was not deleted after all", trace: row)

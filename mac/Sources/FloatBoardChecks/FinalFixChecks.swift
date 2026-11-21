@@ -450,3 +450,86 @@ final class FakeGoogle: @unchecked Sendable {
     check(gate.allows(link, at: t0) && !gate.allows(link, at: t0.addingTimeInterval(3)) && gate.allows(link, at: t0.addingTimeInterval(30)),
           "a_connect_link_fired_again_within_seconds_is_ignored")
 }
+
+/// Round 39 (Codex 29): delete and Undo recovery on the board.
+/// 1. A calendar delete whose answer was lost (Google may have deleted it) is never mistaken for an unsent one: Undo
+///    then makes the event again instead of only dropping the row.
+/// 2. Restoring an old task-note jot never overwrites newer notes on its task; the displaced text is kept.
+/// 3. An Undo Delete that fails keeps the Undo (bar and memo) and says so; a second try works.
+@MainActor func boardRecoveryChecks() async {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-r39-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let acct = "me@example.com"
+    let day = AppTime.calendar.date(byAdding: .day, value: 4, to: AppTime.calendar.startOfDay(for: Date()))!
+    let noon = AppTime.calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day)!
+    func q(_ store: Store, _ sql: String) -> [String] { (try? store.db.query(sql) { DB.text($0, 0) }) ?? [] } // try?-ok: empty fails the check
+
+    // 1. Lost DELETE answer.
+    do {
+        let store = Store(db: try DB(url: root.appendingPathComponent("cal.sqlite")))
+        let cache = CalendarCache(store: store), outbox = CalendarOutbox(store: store)
+        cache.upsertCalendars(account: acct, [CalCalendar(account: acct, calendarID: acct, name: "Me", color: "#112233", owned: true, shown: true, primary: true)])
+        store.add(title: "Team lunch", area: store.areas.first?.name ?? "Work", importance: .medium, due: noon, dueHasTime: true)
+        let id = store.cards.last?.id ?? 0
+        store.performForTest("UPDATE cards SET gcal_account='\(acct)', gcal_calendar='\(acct)', gcal_event='lost1' WHERE id=\(id)")
+        cache.apply(account: acct, calendarID: acct, changes: [GoogleEventChange(eventID: "lost1", cancelled: false,
+            fields: CalEventFields(start: noon, end: noon.addingTimeInterval(1800), title: "Team lunch", googleUpdated: Date(), fbCard: id))], nextToken: nil)
+        guard let c = store.card(id) else { check(false, "lost delete setup"); return }
+        store.delete(c)
+        // The sender claims it and sends; Google deletes it but the answer never arrives (the send fails, no sent mark).
+        let later = Date().addingTimeInterval(Store.calendarDeleteDelay + 1)
+        guard let row = outbox.claimNext(now: later, skip: { _ in false }) else { check(false, "lost delete: nothing claimed"); return }
+        outbox.markFailed(uuid: row.uuid, error: "The network connection was lost.")
+        outbox.setInFlight(row.uuid, false)
+        store.undoDelete()
+        let kinds = outbox.rows(unsent: true).compactMap { r in r.write.map { w -> String in switch w { case .create: "create"; case .patch: "patch"; case .delete: "delete" } } }
+        check(kinds.contains("create") && store.card(id) != nil, "an_undo_after_a_lost_delete_answer_makes_the_event_again")
+        check(!store.recentActivity(limit: 20).contains { $0.message.contains("was not deleted after all") }, "a_lost_delete_answer_is_never_reported_as_not_deleted")
+    } catch { check(false, "lost delete checks: \(error)") }
+
+    // 2. Restoring an old task note.
+    do {
+        let store = Store(db: try DB(url: root.appendingPathComponent("notes.sqlite")))
+        let jots = JotStore(store: store)
+        func noteJots(_ task: Int64) -> [Jot] { q(store, "SELECT id FROM jots WHERE task_id=\(task) ORDER BY id").compactMap { Int64($0).flatMap(jots.jot) } }
+        // a) Short newer notes (no jot of their own).
+        store.add(title: "Quarterly report", area: store.areas.first?.name ?? "Work", importance: .medium, due: nil)
+        let a = store.cards.last?.id ?? 0
+        if var c = store.card(a) { c.notes = "Old long notes about the report"; store.update(c) }
+        guard let old = noteJots(a).first else { check(false, "task note setup: no jot"); return }
+        jots.delete(old.id)
+        if var c = store.card(a) { c.notes = "Call Ann"; store.update(c) }
+        jots.undoDelete(old.id)
+        let hist = jots.history(old.id).map(\.text)
+        check(store.card(a)?.notes == "Call Ann" && hist.contains("Old long notes about the report"), "restoring_an_old_task_note_keeps_newer_short_notes_and_the_old_text")
+        // b) Long newer notes (a new task note): one task note stays authoritative, the restored one comes back as a jot.
+        store.add(title: "Budget", area: store.areas.first?.name ?? "Work", importance: .medium, due: nil)
+        let b = store.cards.last?.id ?? 0
+        if var c = store.card(b) { c.notes = "First version of the budget notes"; store.update(c) }
+        guard let first = noteJots(b).first else { check(false, "task note setup b: no jot"); return }
+        jots.delete(first.id)
+        if var c = store.card(b) { c.notes = "Second version, written after the delete"; store.update(c) }
+        jots.undoDelete(first.id)
+        let live = q(store, "SELECT text FROM jots WHERE task_id=\(b) AND kind='task_note' AND deleted=0")
+        check(store.card(b)?.notes == "Second version, written after the delete" && live == ["Second version, written after the delete"]
+              && jots.jot(first.id)?.text == "First version of the budget notes" && jots.jot(first.id)?.deleted == false,
+              "restoring_an_old_task_note_never_overwrites_a_newer_one_and_keeps_both_texts")
+    } catch { check(false, "task note checks: \(error)") }
+
+    // 3. A failed Undo Delete.
+    do {
+        let store = Store(db: try DB(url: root.appendingPathComponent("undo.sqlite")))
+        store.add(title: "Pay invoice", area: store.areas.first?.name ?? "Work", importance: .medium, due: nil)
+        let id = store.cards.last?.id ?? 0
+        guard let c = store.card(id) else { check(false, "undo failure setup"); return }
+        store.delete(c)
+        store.performForTest("CREATE TEMP TRIGGER r39_fail BEFORE UPDATE OF deleted ON cards BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END")
+        store.undoDelete()
+        check(store.card(id) == nil && store.lastDeleted?.id == id && store.lastDeleted?.barShown == true && (store.lastError ?? "").contains("Undo"),
+              "a_failed_undo_keeps_the_undo_bar_and_says_so")
+        store.performForTest("DROP TRIGGER r39_fail")
+        store.undoDelete()
+        check(store.card(id) != nil && store.lastDeleted == nil, "undo_works_on_a_second_try")
+    } catch { check(false, "undo failure checks: \(error)") }
+}

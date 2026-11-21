@@ -135,8 +135,14 @@ public final class CalendarOutbox {
     /// Takes the next change to send, skipping those `skip` says no to: read again from the database right now (so a change
     /// Undo removed, or one no longer due, is never sent from an old list) and, in the same step, marked as on its way, so
     /// Undo leaves it alone from here on. The sender clears the mark when Google has answered. Nil when nothing is due.
+    /// The attempt is recorded in the database before the change goes (round 39): a change whose answer is lost may have
+    /// happened in Google, and Undo must know that. If that record can't be written, nothing is sent.
     public func claimNext(now: Date, skip: (CalOutboxRow) -> Bool) -> CalOutboxRow? {
         guard let row = due(now: now).first(where: { !skip($0) }) else { return nil }
+        do { try db.run("UPDATE cal_outbox SET attempted=COALESCE(attempted, ?) WHERE uuid=?", [now, row.uuid]) } catch {
+            store.activity("calendar", .error, "Could not record a calendar change as being sent; it waits for the next run", detail: "\(error)", trace: row.uuid)
+            return nil
+        }
         setInFlight(row.uuid, true)
         return row
     }
