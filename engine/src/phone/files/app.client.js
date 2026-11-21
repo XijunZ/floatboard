@@ -101,6 +101,7 @@
     // An answer reaching a tab that has stepped down since it asked goes nowhere: nothing after it runs (round 34).
     var asked = activeGen;
     var stale = function () { return asked !== activeGen || !tabActive; };
+    if (stale()) return new Promise(function () {});   // a tab that stepped down sends nothing (round 35)
     var init = { method: opts.method || "GET", credentials: "same-origin", cache: "no-store", headers: {} };
     if (opts.body !== undefined) {
       init.headers["Content-Type"] = "application/json";
@@ -813,8 +814,11 @@
 
   // ------------------------------------------------------------ sheets
 
+  // Any close that isn't the owner's own Close: an open add form's words stay kept as a draft (round 35).
   function closeSheet() {
+    if (openCapture) keepCaptureDraft();
     openCapture = null;
+    if (draftWaiting) setTimeout(restoreWaitingDraft, 0);
     var s = document.querySelector(".scrim");
     if (s) s.remove();
     sheetOpen = false;
@@ -830,10 +834,10 @@
     sheet.appendChild(el("div", "grab"));
     fill(sheet);
     var close = el("button", "btn secondary", "Close");
-    close.addEventListener("click", closeSheet);
+    close.addEventListener("click", cancelSheet);
     sheet.appendChild(close);
     scrim.appendChild(sheet);
-    scrim.addEventListener("click", function (e) { if (e.target === scrim) closeSheet(); });
+    scrim.addEventListener("click", function (e) { if (e.target === scrim) cancelSheet(); });
     document.body.appendChild(scrim);
     sheetOpen = true;
   }
@@ -1012,18 +1016,39 @@
 
   // The add form while it is open: its words are kept as a draft for its account before a handover or account switch,
   // and come back in the form when that account is next active here (round 34).
+  // Round 35: an account's drafts are a list ({ id, title, group }); one goes only once it is queued or the owner closes
+  // its form, and one is brought back only when no sheet is open (never over a form being written).
   var openCapture = null;
+  var draftWaiting = false;
   var DRAFT_PREFIX = "floatboard.capturedraft:";
+  function draftsOf(account) { var d = load(DRAFT_PREFIX + account); return Array.isArray(d) ? d : []; }
+  function putDrafts(account, list) { return queueKeep(DRAFT_PREFIX + account, list.length ? list : null); }
   function keepCaptureDraft() {
-    if (!openCapture || !openCapture.account || !openCapture.title.value.trim()) return true;
-    return queueKeep(DRAFT_PREFIX + openCapture.account, { title: openCapture.title.value, group: openCapture.group.value });
+    var c = openCapture;
+    if (!c || !c.account || !c.title.value.trim()) return true;
+    var item = { id: c.id, title: c.title.value, group: c.group.value };
+    return putDrafts(c.account, draftsOf(c.account).filter(function (d) { return d.id !== c.id; }).concat([item]));
+  }
+  function dropDraft(account, id) {
+    var rest = draftsOf(account).filter(function (d) { return d.id !== id; });
+    putDrafts(account, rest);
+    if (rest.length) draftWaiting = true;
   }
   function restoreCaptureDraft(account) {
-    var d = account ? load(DRAFT_PREFIX + account) : null;
+    var d = account ? draftsOf(account)[0] : null;
     if (!d || typeof d.title !== "string") return;
+    if (sheetOpen) { draftWaiting = true; return; }   // later, once the open sheet is closed
+    draftWaiting = false;
     addSheet(d);
-    store(DRAFT_PREFIX + account, null);
     toast("Unsaved capture recovered");
+  }
+  function restoreWaitingDraft() { if (draftWaiting && tabActive && me && !sheetOpen) restoreCaptureDraft(me.account); }
+  // The owner's own Close (button or outside the sheet): an add form's draft goes with it.
+  function cancelSheet() {
+    var c = openCapture;
+    openCapture = null;
+    if (c && c.account) dropDraft(c.account, c.id);
+    closeSheet();
   }
 
   function addSheet(draft) {
@@ -1051,13 +1076,15 @@
       go.type = "submit";
       [tl, title, gl, group, go].forEach(function (x) { form.appendChild(x); });
       if (draft) { title.value = draft.title; if (typeof draft.group === "string") group.value = draft.group; }
-      openCapture = { account: sessionAccount(), title: title, group: group };
+      var capture = openCapture = { account: sessionAccount(), id: draft && draft.id ? draft.id : newId(), title: title, group: group };
       form.addEventListener("submit", function (e) {
         e.preventDefault();
         var t = title.value.trim();
         if (!t) { title.focus(); return; }
         tab = "todo";
-        act({ action: "add", title: t.slice(0, 200), group: group.value }, "Added. It will show on your Mac shortly.");
+        if (act({ action: "add", title: t.slice(0, 200), group: group.value }, "Added. It will show on your Mac shortly.") && capture.account) {
+          dropDraft(capture.account, capture.id);   // queued: its draft (if any) goes
+        }
       });
       sheet.appendChild(form);
       setTimeout(function () { title.focus(); }, 50);
@@ -1250,11 +1277,12 @@
       // A signed-out phone should not keep getting alerts.
       try {
         var sub = await currentSubscription();
-        if (sub) {
+        if (sub && tabActive) {
           await api("/app/api/push/subscribe", { method: "DELETE" }).catch(function () { /* best effort */ });
           await sub.unsubscribe();
         }
       } catch (e) { /* best effort */ }
+      if (!tabActive) return;   // stepped down while waiting on the browser: the other tab's session is left alone
       // Changes still waiting get one last chance to go before the queue is dropped with the rest of this account's data.
       if (queue.actions.length && me) await sync();
       await api("/app/api/logout", { method: "POST", body: {} });

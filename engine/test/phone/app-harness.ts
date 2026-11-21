@@ -67,7 +67,7 @@ export type Reply = { status: number; body: any } | Promise<{ status: number; bo
 
 // One tab of the app. `storage` is the browser's localStorage, shared by the tabs of one test; `reply(path, init)` answers
 // fetch (a Promise held back by the test is a slow answer).
-export function runApp(o: { storage: Map<string, string>; locks: any; Channel: any; reply: (path: string, init: any) => Reply; storageFails?: () => boolean }) {
+export function runApp(o: { storage: Map<string, string>; locks: any; Channel: any; reply: (path: string, init: any) => Reply; storageFails?: () => boolean; push?: { ready: Promise<any> } }) {
   const els: Record<string, any> = {};
   const created: any[] = [];
   const byId = (id: string) => (els[id] ??= fakeElement());
@@ -98,14 +98,20 @@ export function runApp(o: { storage: Map<string, string>; locks: any; Channel: a
   };
   const navigator: any = { userAgent: "test", platform: "test", maxTouchPoints: 0, locks: o.locks, onLine: true, vibrate: () => true };
   const window: any = { addEventListener: () => {}, scrollTo: () => {}, matchMedia: () => ({ matches: false }), innerHeight: 800, innerWidth: 400 };
+  if (o.push) {   // a browser with push: the service worker's registration comes when the test lets it
+    navigator.serviceWorker = { ready: o.push.ready, controller: null, addEventListener: () => {}, register: () => Promise.resolve() };
+    window.PushManager = function () {};
+    window.Notification = { permission: "granted" };
+  }
   const timers: any[] = [];
   const g: Record<string, any> = {
     window, document, navigator, localStorage, sessionStorage, location, fetch,
     history: { replaceState: () => {} }, BroadcastChannel: o.Channel, crypto: (globalThis as any).crypto,
     setInterval: () => 0, clearInterval: () => {},
-    setTimeout: (f: () => void, ms: number) => { const t = setTimeout(f, Math.min(ms ?? 0, 5)); timers.push(t); return t; },
+    // Short waits run at once; a wait of a second or more (retries, give-ups, undo windows) never comes during a test.
+    setTimeout: (f: () => void, ms: number) => { if ((ms ?? 0) >= 1000) return 0; const t = setTimeout(f, Math.min(ms ?? 0, 5)); timers.push(t); return t; },
     clearTimeout: (t: any) => clearTimeout(t),
-    matchMedia: window.matchMedia, PublicKeyCredential: undefined, Notification: undefined, requestAnimationFrame: (f: () => void) => setTimeout(f, 0),
+    matchMedia: window.matchMedia, PublicKeyCredential: undefined, Notification: window.Notification, requestAnimationFrame: (f: () => void) => setTimeout(f, 0),
     getComputedStyle: () => ({}), performance: (globalThis as any).performance, alert: () => {}, confirm: () => true,
   };
   const names = Object.keys(g);

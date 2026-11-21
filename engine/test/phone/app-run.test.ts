@@ -58,7 +58,7 @@ describe("phone app run whole: tabs and accounts (round 34)", () => {
     two.find("add-title").value = "Call the venue back, again";
     boardAccount = "acc-b";
     two.byId("refresh").fire("click"); await flush();
-    expect(JSON.parse(b.storage.get("floatboard.capturedraft:acc-a") ?? "null")?.title).toBe("Call the venue back, again");
+    expect(JSON.parse(b.storage.get("floatboard.capturedraft:acc-a") ?? "[]").map((d: any) => d.title)).toEqual(["Call the venue back, again"]);
     one.stop(); two.stop();
   });
 
@@ -75,5 +75,68 @@ describe("phone app run whole: tabs and accounts (round 34)", () => {
     expect(two.byId("elsewhere").hidden).toBe(true);
     expect(b.storage.has("floatboard.activeTab")).toBe(false);
     two.stop();
+  });
+
+  // Round 35 (Codex 25).
+  const draftOf = (b: { storage: Map<string, string> }, account: string) => b.storage.get("floatboard.capturedraft:" + account) ?? "";
+
+  // Tab one has words in its Add form when tab two takes over: they become a draft for tab two.
+  async function handOverWithDraft(b: ReturnType<typeof browser>, twoReply: (p: string, init: any) => any) {
+    const one = runApp({ ...b, reply: (p) => (p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : board("acc-a")) });
+    await flush();
+    one.byId("add").fire("click");
+    one.find("add-title").value = "Recovered words";
+    const two = runApp({ ...b, reply: twoReply });
+    await flush();
+    two.byId("use-here").fire("click"); await flush();
+    return { one, two };
+  }
+
+  it("a_draft_never_replaces_an_add_form_already_open_and_stays_stored", async () => {
+    const b = browser();
+    let answerMe: (r: any) => void = () => {};
+    const { one, two } = await handOverWithDraft(b, (p) => (p === "/app/api/me" ? new Promise((r) => { answerMe = r; }) : p === "/app/api/action" ? never() : board("acc-a")));
+    expect(two.byId("elsewhere").hidden).toBe(true);
+    expect(draftOf(b, "acc-a")).toContain("Recovered words");
+    two.byId("add").fire("click");                              // the cached board is up: a new capture while /me is slow
+    const typing = two.find("add-title");
+    typing.value = "Fresh words";
+    answerMe(me("acc-a")); await flush();
+    expect(two.find("add-title")).toBe(typing);                  // the open form is left alone
+    expect(typing.value).toBe("Fresh words");
+    expect(draftOf(b, "acc-a")).toContain("Recovered words");   // and the draft waits
+    one.stop(); two.stop();
+  });
+
+  it("a_recovered_draft_is_kept_with_its_edits_when_the_form_closes_on_its_own", async () => {
+    const b = browser();
+    let answerBoard: (r: any) => void = () => {};
+    const { one, two } = await handOverWithDraft(b, (p) => (p === "/app/api/me" ? me("acc-a") : new Promise((r) => { answerBoard = r; })));
+    expect(two.find("add-title")?.value).toBe("Recovered words");
+    two.find("add-title").value = "Recovered words, edited";
+    answerBoard({ status: 401, body: { error: "signed out" } }); await flush();   // the sign-in screen closes the form
+    expect(JSON.parse(draftOf(b, "acc-a")).map((d: any) => d.title)).toEqual(["Recovered words, edited"]);
+    one.stop(); two.stop();
+  });
+
+  it("a_tab_that_stepped_down_mid_sign_out_never_signs_the_browser_out", async () => {
+    const b = browser();
+    const calls: string[] = [];
+    let giveReg: (r: any) => void = () => {};
+    let unsubscribed = false;
+    const sub = { unsubscribe: async () => { unsubscribed = true; } };
+    const ready = new Promise((r) => { giveReg = r; });
+    const one = runApp({ ...b, push: { ready }, reply: (p, init) => { calls.push((init?.method ?? "GET") + " " + p); return p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : board("acc-a"); } });
+    await flush();
+    one.byId("signout").fire("click"); await flush();
+    const two = runApp({ ...b, reply: (p) => (p === "/app/api/me" ? me("acc-a") : p === "/app/api/action" ? never() : board("acc-a")) });
+    await flush();
+    two.byId("use-here").fire("click"); await flush();
+    expect(two.byId("elsewhere").hidden).toBe(true);
+    calls.length = 0;
+    giveReg({ pushManager: { getSubscription: async () => sub } }); await flush();
+    expect(calls).toEqual([]);
+    expect(unsubscribed).toBe(false);
+    one.stop(); two.stop();
   });
 });
