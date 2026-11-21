@@ -37,7 +37,7 @@ describe("phone queues: shared helpers", () => {
   });
 
   it("circle_queue_is_never_blocked_and_saved_durably", () => {
-    expect(CIRCLE_JS).toMatch(/QueueStore\(CIRCLE_QUEUE_KEY, load, storeDurable\)/);   // a tap is only shown once it is saved
+    expect(CIRCLE_JS).toMatch(/QueueStore\(CIRCLE_QUEUE_KEY, load, storeDurable, owns\)/);   // a tap is only shown once it is saved
     expect(CIRCLE_JS).toMatch(/if \(!tabActive \|\| !circleShared\.save\(acc, next\)\) \{ toast\(/);
     expect(CIRCLE_JS).toMatch(/queueAfterRefusal\(circleQueue\.actions, e\.id\)/);   // a refused batch drops only the named one
     expect(CIRCLE_JS).toMatch(/tooBig/);                                    // one too big for any send is dropped with a message
@@ -64,14 +64,18 @@ describe("phone: one active tab", () => {
     return { channel: () => { const c: any = { onmessage: null, postMessage(d: any) { tabs.filter((t) => t !== c).forEach((t) => t.onmessage && t.onmessage({ data: d })); } }; tabs.push(c); return c; } };
   }
   const flush = () => new Promise((r) => setTimeout(r, 0));
-  function tab(locks: any, b: any, storage: Record<string, any>, name: string, log: string[]) {
+  function tab(locks: any, b: any, storage: Record<string, any>, name: string, log: string[], more: any = {}) {
     const state = { active: false, held: [] as string[] };
     const t = S.ActiveTab({
       locks, channel: b.channel(), lease: { load: () => storage.lease ?? null, store: (v: any) => { storage.lease = v; } },
-      now: () => Date.now(), every: () => {}, wait: () => Promise.resolve(),
+      now: more.now ?? (() => Date.now()), every: more.every ?? (() => {}), wait: () => Promise.resolve(),
       onActive: () => { state.active = true; log.push(name + " active"); },
       onInactive: () => { state.active = false; log.push(name + " inactive"); },
-      beforeStepDown: () => { storage.queue = (storage.queue ?? []).concat(state.held); state.held = []; log.push(name + " kept"); },
+      onRefused: () => { log.push(name + " refused"); },
+      beforeStepDown: () => {
+        if (more.keeps === false) return false;   // storage full: nothing kept
+        storage.queue = (storage.queue ?? []).concat(state.held); state.held = []; log.push(name + " kept"); return true;
+      },
     });
     return { t, state };
   }
@@ -107,15 +111,68 @@ describe("phone: one active tab", () => {
     expect([one.state.active, two.state.active]).toEqual([false, true]);
   });
 
-  it("a_browser_that_never_answers_the_lock_falls_back_to_the_lease", async () => {
-    const silent = { request: () => new Promise(() => {}) };   // seen in headless Chrome: no answer at all
-    const b = bus(), storage: Record<string, any> = {}, log: string[] = [];
-    const one = tab(silent, b, storage, "one", log);
+  // Round 32 (Codex 22): where Web Locks exist, the lock is the only ownership; a delayed answer just waits.
+  it("a_delayed_lock_answer_never_falls_back_so_two_tabs_are_never_active", async () => {
+    const locks = fakeLocks(), b = bus(), storage: Record<string, any> = {}, log: string[] = [];
+    let deliver: () => void = () => {};
+    const slow = { request: (n: string, opts: any, fn: any) => new Promise((r) => { deliver = () => r(locks.request(n, opts, fn)); }) };
+    const one = tab(slow, b, storage, "one", log), two = tab(locks, b, storage, "two", log);
     one.t.start(); await flush(); await flush();
-    expect(one.state.active).toBe(true);
-    const two = tab(silent, b, storage, "two", log);
-    two.t.start(); await flush(); await flush();
-    expect(two.state.active).toBe(false);   // the first tab's lease is fresh: never two active tabs
+    two.t.start(); await flush();
+    expect([one.state.active, two.state.active]).toEqual([false, true]);
+    deliver(); await flush(); await flush();
+    expect([one.state.active, two.state.active]).toEqual([false, true]);
+  });
+
+  it("an_expired_lease_holder_resuming_never_overwrites_the_successors_queue", async () => {
+    const b = bus(), storage: Record<string, any> = {}, log: string[] = [];
+    let clock = 1_000_000;
+    const beats: Record<string, () => void> = {};
+    const mk = (name: string) => tab(null, b, storage, name, log, { now: () => clock, every: (fn: () => void) => { beats[name] = fn; } });
+    const one = mk("one");
+    await one.t.start();
+    const data: Record<string, any> = {};
+    const put = (k: string, v: any) => { if (v == null) delete data[k]; else data[k] = JSON.parse(JSON.stringify(v)); return true; };
+    const oneQ = S.QueueStore("q", (k: string) => data[k] ?? null, put, () => one.t.owns());
+    expect(oneQ.save("A", [{ id: "a" }])).toBe(true);
+    one.state.held.push("a");
+    clock += 10_000;                                     // tab one is paused past its lease
+    const two = mk("two");
+    await two.t.start();
+    const twoQ = S.QueueStore("q", (k: string) => data[k] ?? null, put, () => two.t.owns());
+    expect(twoQ.save("A", [{ id: "a" }, { id: "new-capture" }])).toBe(true);
+    // Tab one resumes: a write before its heartbeat is refused, the heartbeat makes it inactive without keeping anything.
+    expect(oneQ.save("A", [{ id: "a" }])).toBe(false);
+    beats.one();
+    expect(one.state.active).toBe(false);
+    expect(log).not.toContain("one kept");
+    expect(data.q.actions.map((a: any) => a.id)).toEqual(["a", "new-capture"]);
+    expect(two.state.active).toBe(true);
+  });
+
+  it("a_storage_failure_during_handover_keeps_the_capture_and_the_ownership", async () => {
+    for (const locks of [fakeLocks(), null]) {
+      const b = bus(), storage: Record<string, any> = {}, log: string[] = [];
+      const one = tab(locks, b, storage, "one", log, { keeps: false }), two = tab(locks, b, storage, "two", log);
+      await Promise.race([one.t.start(), flush()]); await flush();
+      await Promise.race([two.t.start(), flush()]); await flush();
+      one.state.held.push("capture made in tab one");
+      await Promise.race([two.t.useHere(), flush()]); await flush(); await flush();
+      expect([one.state.active, two.state.active]).toEqual([true, false]);
+      expect(one.state.held).toEqual(["capture made in tab one"]);
+      expect(log).toContain("two refused");
+      expect(one.t.owns()).toBe(true);
+    }
+    // The app refuses the handover unless every queue was kept, and says so on both sides.
+    expect(APP_JS).toMatch(/beforeStepDown: function \(\) \{ return keepAll\(\); \}/);
+    expect(APP_JS).toMatch(/onRefused: function \(\) \{[^}]*The other tab couldn't save; try again/);
+  });
+
+  it("a_board_capture_that_could_not_be_saved_is_not_reported_as_saved", () => {
+    const act = /function act\(a, done, card\) \{([\s\S]*?)\n  \}/.exec(APP_JS)?.[1] ?? "";
+    expect(act).toMatch(/if \(!saveQueue\(\)\) \{[^}]*toast\("Couldn't save on this phone: storage full"\)/);
+    expect(act.indexOf("if (!saveQueue())")).toBeLessThan(act.indexOf("toast(done)"));
+    expect(act).not.toMatch(/\n    saveQueue\(\);/);
   });
 
   it("a_parked_queue_that_cannot_be_kept_leaves_the_queue_where_it_was", () => {

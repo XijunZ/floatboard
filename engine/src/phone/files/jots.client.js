@@ -154,7 +154,7 @@
     // thrown away (never cached under the new account): the app's shared session check (h.stamp / h.sameSession).
     var heldBy = null;
     // Written only by the active tab (round 31); kept (read back) on each change, before anything is sent.
-    var shared = QueueStore(QUEUE_KEY, h.load, function (k, v) { return (h.storeDurable || function (k2, v2) { h.store(k2, v2); return true; })(k, v); });
+    var shared = QueueStore(QUEUE_KEY, h.load, function (k, v) { return (h.storeDurable || function (k2, v2) { h.store(k2, v2); return true; })(k, v); }, h.owns);
     function active() { return !h.active || h.active(); }
 
     function restore() {
@@ -493,6 +493,6 @@
 
     return { restore: restore, drop: drop, sync: pull, remove: remove, render: render, wire: wire, shareSheet: shareSheet, cleanup: cleanup,
       add: function (text) { return queueAction({ op: "add", text: text }); },
-      keep: function () { saveQueue(); },   // stepping down: the last word (each change is already kept)
+      keep: function () { return !heldBy || saveQueue(); },   // stepping down: the last word; false if it was not kept
       focus: function () { setTimeout(function () { h.$("jot-text").focus(); }, 80); } };
   }

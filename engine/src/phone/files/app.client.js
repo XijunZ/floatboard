@@ -527,7 +527,7 @@
   }
 
   // Only the active tab writes the queue (round 31); kept on each change, before anything is sent.
-  var boardQueue = QueueStore(QUEUE_KEY, load, storeDurable);
+  var boardQueue = QueueStore(QUEUE_KEY, load, storeDurable, owns);
   function saveQueue() { return tabActive && queue.account ? boardQueue.save(queue.account, queue.actions) : false; }
 
   // Forget everything this phone holds for an account: its board, its queue and the ids it sent.
@@ -716,7 +716,10 @@
     if (!a.made_at) a.made_at = new Date().toISOString();
     queue.account = account;
     queue.actions.push(a);
-    saveQueue();
+    if (!saveQueue()) {
+      // Not kept on the phone: it stays in memory (and is still sent), but is never shown as saved.
+      closeSheet(); render(); toast("Couldn't save on this phone: storage full"); failures = 0; sync(); return;
+    }
     closeSheet();
     render();
     if (a.action === "delete" || a.action === "done") buzz();
@@ -1235,7 +1238,8 @@
     offline: offline, SignedOut: SignedOut,
     account: sessionAccount,
     stamp: sessionStamp, sameSession: sameSession,   // the shared session check (late answers are dropped)
-    active: function () { return tabActive; },   // only the active tab writes or sends its queue (round 31)
+    active: function () { return tabActive; },
+    owns: owns,   // only the active tab writes or sends its queue (round 31)
     modules: function () { return board && board.modules; },
     zone: function () { return board && board.time_zone; },
     makeDecision: function (text, source, context) { decisionForm(text, source, context); },   // Decisions (files/decisions.client.js)
@@ -1356,6 +1360,16 @@
 
   // ---- One active tab (round 31): this tab runs the app only while it holds the "active" lock.
   var tabActive = false, wasActive = false;
+  // Every queue write checks this tab is still the owner (round 32), so a tab that lost ownership never overwrites.
+  function owns() { return !!leader && leader.owns(); }
+  // A handover: every queue kept first, or none of it happens (this tab stays the owner and says why).
+  function keepAll() {
+    var ok = [
+      !queue.account || saveQueue(), jots.keep(), !decQueue.account || saveDecQueue(), !circleQueue.account || circleSave()
+    ].every(Boolean);
+    if (!ok) toast("Couldn't save on this phone: storage full");
+    return ok;
+  }
   var tabChannel = null;
   try { tabChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("floatboard-tabs") : null; } catch (e) { tabChannel = null; }
   var leader = ActiveTab({
@@ -1378,8 +1392,11 @@
       document.querySelectorAll("main.screen").forEach(function (m) { m.hidden = m.id !== "elsewhere"; });
       $("elsewhere").hidden = false;
     },
-    // Stepping down: what this tab holds is kept first (each change is already kept; this is the last word).
-    beforeStepDown: function () { saveQueue(); jots.keep(); saveDecQueue(); circleSave(); }
+    // Ownership taken while this tab was paused: nothing in memory is kept; start again from what the new owner kept.
+    onLost: function () { tabActive = false; location.reload(); },
+    onRefused: function () { $("use-here").disabled = false; toast("The other tab couldn't save; try again"); },
+    // Stepping down when asked: only once what this tab holds is kept (each change is already kept; this is the last word).
+    beforeStepDown: function () { return keepAll(); }
   });
   $("use-here").addEventListener("click", function () { $("use-here").disabled = true; leader.useHere(); });
   leader.start();
