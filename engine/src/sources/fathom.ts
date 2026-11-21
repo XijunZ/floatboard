@@ -99,3 +99,8 @@ export async function recordMeeting(env: Env, userId: string, meta: MeetingMeta)
       scheduled_start=excluded.scheduled_start, invitees=excluded.invitees, received_at=excluded.received_at`)
     .bind(userId, meta.recap_key, meta.fathom_url, meta.meeting_url, meta.title, meta.scheduled_start, JSON.stringify(meta.invitees), new Date().toISOString()).run();
 }
+
+/** Deliveries a day a Fathom address takes without a signature (no signing secret saved yet), round 29. */
+export const FATHOM_UNSIGNED_PER_DAY = 30;
+/** The largest delivery taken (bytes). */
+export const FATHOM_MAX_BODY = 1_000_000;

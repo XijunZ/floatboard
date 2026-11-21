@@ -2,12 +2,12 @@ import { authUser, insertUser, isAdmin } from "./lib/auth";
 import { type Env, json, nowISO } from "./env";
 import { logEvent } from "./lib/runlog";
 import { routes } from "./lib/router";
-import { readJSON } from "./lib/http";
+import { readCapped, readJSON } from "./lib/http";
 import { clientIP } from "./lib/client-ip";
 import { attempt, tooManyFailures } from "./setup/routes";
 import { decrypt } from "./lib/crypto";
 import { processRecap } from "./triage/recap";
-import { fathomSignatureProblem, fathomToMessage, meetingMeta, recordMeeting } from "./sources/fathom";
+import { FATHOM_MAX_BODY, FATHOM_UNSIGNED_PER_DAY, fathomSignatureProblem, fathomToMessage, meetingMeta, recordMeeting } from "./sources/fathom";
 import { catchUpFathom } from "./sources/fathomCatchup";
 import "./routes/sources";
 import "./routes/v2";
@@ -49,6 +49,12 @@ async function createUser(req: Request, env: Env): Promise<Response> {
   return json(await insertUser(env, name)); // the key is only ever returned here (and on the /setup/admin invite page)
 }
 
+async function tooManyUnsigned(env: Env, key: string): Promise<boolean> {
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  const r = await env.DB.prepare("SELECT COUNT(*) n FROM setup_attempts WHERE ip=? AND kind='fathom_unsigned' AND at > ?").bind(key, since).first<{ n: number }>();
+  return (r?.n ?? 0) >= FATHOM_UNSIGNED_PER_DAY;
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -69,7 +75,21 @@ export default {
       const src = await env.DB.prepare("SELECT id, user_id, hook_secret_enc FROM sources WHERE kind='fathom' AND hook_id=? AND enabled=1")
         .bind(hook[1]).first<{ id: string; user_id: string; hook_secret_enc: string | null }>();
       if (!src) return json({ error: "not found" }, 404);
-      const raw = await req.text();
+      // At most 1 MB (round 29, L3).
+      const raw = await readCapped(req, FATHOM_MAX_BODY);
+      if (raw === null) return json({ error: "too large" }, 413);
+      if (!src.hook_secret_enc) {
+        // No signing secret saved yet: deliveries can't be checked, so only a few a day are taken (round 29, L3). The
+        // secret isn't required outright: Fathom shows it only after the address is saved there, and hooks set up
+        // before the secret was asked for would silently stop receiving notes.
+        const key = `fathom:${src.id}`;
+        if (await tooManyUnsigned(env, key)) {
+          await logEvent(env, { run_id: "fathom", user_id: src.user_id, decision: "Fathom delivery refused",
+            detail: "too many unsigned deliveries today; save the signing secret on the setup page", trace: req.headers.get("webhook-id") ?? "" }).run();
+          return json({ error: "too many unsigned deliveries; save the signing secret" }, 429);
+        }
+        await env.DB.prepare("INSERT INTO setup_attempts(ip,at,ok,kind) VALUES(?,?,1,'fathom_unsigned')").bind(key, nowISO()).run();
+      }
       if (src.hook_secret_enc) {
         const problem = await fathomSignatureProblem(await decrypt(env, src.hook_secret_enc), req.headers, raw);
         if (problem) {

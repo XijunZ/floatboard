@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
 import { call, fathomHookPath, newUser } from "../helpers";
 import { ensureFathomHook } from "../../src/routes/sources";
-import { fathomToMessage, recapKey } from "../../src/sources/fathom";
+import { FATHOM_UNSIGNED_PER_DAY, fathomToMessage, recapKey } from "../../src/sources/fathom";
 import type { Message } from "../../src/sources/types";
 
 const payload = {
@@ -57,3 +57,25 @@ describe("fathom connector", () => {
     expect(rows.results[0].summary).toContain("Agreed to start in spring.");
   });
 });
+
+// Round 29 (security review L3): the webhook takes at most 1 MB, and deliveries without a signature (no signing secret
+// saved yet) are limited, so someone who learns the address can't flood the board or the Claude credit.
+describe("fathom webhook limits", () => {
+  it("a_body_over_a_megabyte_is_refused", async () => {
+    const u = await newUser("Fathom big");
+    const path = await fathomHookPath(u.id);
+    const r = await call(path, { method: "POST", body: JSON.stringify({ ...payload, default_summary: { markdown_formatted: "x".repeat(1_100_000) } }) });
+    expect(r.status).toBe(413);
+  });
+
+  it("unsigned_deliveries_are_limited_a_day", async () => {
+    const u = await newUser("Fathom unsigned");
+    const path = await fathomHookPath(u.id);
+    let last = 0;
+    for (let i = 0; i < FATHOM_UNSIGNED_PER_DAY + 1; i++) {
+      last = (await call(path, { method: "POST", body: JSON.stringify({ ...payload, recording_id: 1000 + i, share_url: `https://fathom.video/share/x${i}` }) })).status;
+    }
+    expect(last).toBe(429);
+  });
+});
+
