@@ -23,6 +23,8 @@ const KEY_PREFIX: Record<string, string> = { whatsapp: "wa:", wechat: "wx:" };
 export type ChatApp = keyof typeof CHAT_APPS;
 export const CHAT_KINDS: string[] = Object.keys(CHAT_APPS);
 const MAX_CHATS = 100, MAX_BODY = 1_200_000, MAX_TRANSCRIPT = 8000;
+/** A chat's whole transcript as received (round 40): longer than MAX_TRANSCRIPT, it is stored in parts, never cut. */
+const MAX_WHOLE = 200_000;
 /** Chats judged right after they arrive; the rest by the next scheduled run (every 5 minutes). */
 export const JUDGE_CHATS_NOW = 10;
 const KEEP_PROCESSED_MS = 30 * 86400e3;
@@ -42,12 +44,35 @@ export function chatLink(v: unknown): string {
 export function readChat(x: unknown, app: string = "whatsapp"): ChatRow | null {
   if (!x || typeof x !== "object") return null;
   const r = x as Record<string, unknown>;
-  const key = clean(r.key, 300), name = clean(r.name, 200), transcript = clean(r.transcript, MAX_TRANSCRIPT);
+  const key = clean(r.key, 300), name = clean(r.name, 200), transcript = clean(r.transcript, MAX_WHOLE);
   if (!key || !key.startsWith(KEY_PREFIX[app] ?? "\u0000") || name === null || !transcript) return null;
   const t = typeof r.received === "string" ? Date.parse(r.received) : NaN;
   if (!Number.isFinite(t)) return null;
   const senders = Array.isArray(r.senders) ? r.senders.map((s) => clean(s, 100)).filter(Boolean).slice(0, 20).join(", ") : "";
   return { key, name: name || "(no name)", group: r.group === true, muted: r.muted === true, senders, transcript, link: chatLink(r.link), received: new Date(t).toISOString() };
+}
+
+/**
+ * A transcript in parts of at most `max` characters, split between messages (lines) where it can (round 40): nothing is
+ * dropped, so the Mac may move its cursor past everything it sent once the batch is accepted. The first part keeps the
+ * chat's key; the others add "#2", "#3"... (the same parts every time, so a retry is stored once).
+ */
+export function chatParts(r: ChatRow, max: number = MAX_TRANSCRIPT): ChatRow[] {
+  if (r.transcript.length <= max) return [r];
+  const parts: string[] = [];
+  let cur = "";
+  for (const line of r.transcript.split("\n")) {
+    for (let piece = line; ; ) {
+      const room = max - (cur ? cur.length + 1 : 0);
+      if (piece.length <= room) { cur = cur ? cur + "\n" + piece : piece; break; }
+      if (cur && (piece.length <= max || room <= 0)) { parts.push(cur); cur = ""; continue; }   // the line starts the next part
+      cur = cur ? cur + "\n" + piece.slice(0, room) : piece.slice(0, room);       // a single line longer than a part
+      parts.push(cur); cur = ""; piece = piece.slice(room);
+      if (!piece) break;
+    }
+  }
+  if (cur) parts.push(cur);
+  return parts.map((t, i) => ({ ...r, key: i === 0 ? r.key : `${r.key}#${i + 1}`, transcript: t }));
 }
 
 async function chatSource(env: Env, userId: string, app: ChatApp): Promise<string> {
@@ -75,12 +100,12 @@ route("POST", "/v2/chats", async (req, env, user, _p, ctx) => {
   const sourceId = await chatSource(env, user.id, app as ChatApp);
   const now = nowISO();
   const rows = chats.map((c) => readChat(c, app));
-  const good = rows.filter((r): r is ChatRow => r !== null);
+  const good = rows.filter((r): r is ChatRow => r !== null).flatMap((r) => chatParts(r));
   const results = good.length ? await env.DB.batch(good.map((r) => env.DB.prepare(`INSERT OR IGNORE INTO chat_rows
       (user_id,source_id,row_key,app,chat_name,is_group,muted,senders,transcript,link,received,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(user.id, sourceId, r.key, app, r.name, r.group ? 1 : 0, r.muted ? 1 : 0, r.senders, r.transcript, r.link, r.received, now))) : [];
   const stored = results.filter((r) => r.meta.changes > 0).length;
-  const skipped = rows.length - good.length;
+  const skipped = rows.filter((r) => r === null).length;
   const stmts = [env.DB.prepare("UPDATE sources SET last_run=?, last_error=NULL WHERE id=?").bind(now, sourceId), pruneChatRows(env, user.id)];
   if (skipped) stmts.push(logEvent(env, { run_id: "chats", user_id: user.id, source: CHAT_APPS[app as ChatApp],
     decision: "chats skipped: unreadable", detail: `${skipped} of ${rows.length}` }));

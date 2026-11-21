@@ -10,7 +10,8 @@ export interface StorageArea {
   set(key: string, value: unknown): Promise<void>;
 }
 
-export type QueueItem = { key: string; mailbox?: string; row: Row };
+/** `mailbox` is the one the row's own tab showed; until that tab shows it the row waits (`tab` says which, round 40). */
+export type QueueItem = { key: string; mailbox?: string; tab?: number; row: Row };
 export type QueueStatus = { waiting: number; lastOk?: string; problem?: string; notice?: string };
 export type PageKind = PageRead["kind"] | "none";
 
@@ -74,14 +75,21 @@ export class Queue {
     return run;
   }
 
-  /** Queues new unread rows; returns how many were added. */
-  add(rows: Row[], now: Date, mailbox?: string): Promise<number> {
+  /**
+   * Queues new unread rows from one tab; returns how many were added. Rows read before their tab showed its mailbox
+   * wait, and are labelled only by that same tab's mailbox once it shows (dropped if that is someone else's): a row
+   * never takes the mailbox of another tab (round 40).
+   */
+  add(rows: Row[], now: Date, mailbox?: string, tab?: number): Promise<number> {
     return this.locked((s) => {
       const mb = lower(mailbox);
+      const heldHere = (i: QueueItem) => !i.mailbox && i.tab === tab;
       if (mb && ((s.mailbox && mb !== s.mailbox) || s.refused.includes(mb))) {
+        s.items = s.items.filter((i) => !heldHere(i));
         setWrongMailbox(s, mb);
         return 0;
       }
+      if (mb) for (const i of s.items) if (heldHere(i)) i.mailbox = mb;
       if (s.wrongMailbox) {
         s.wrongMailbox = undefined;
         clearReport(s);
@@ -95,7 +103,7 @@ export class Queue {
       const room = Math.max(0, MAX_QUEUED - s.items.length);
       const taken = incoming.slice(0, room);
       s.queueFull = incoming.length > room;
-      for (const row of taken) s.items.push({ key: rowKey(row), mailbox: mb ?? s.mailbox, row });
+      for (const row of taken) s.items.push(mb ? { key: rowKey(row), mailbox: mb, row } : { key: rowKey(row), tab, row });
       return taken.length;
     });
   }
@@ -103,9 +111,10 @@ export class Queue {
   /** The next rows to send (all for one mailbox), in the order they were queued. They stay queued until acknowledged. */
   takeBatch(max = 50): Promise<QueueItem[]> {
     return this.locked((s) => {
-      if (s.items.length === 0) return [];
-      const mb = s.items[0].mailbox;
-      return s.items.filter((i) => i.mailbox === mb).slice(0, max);
+      const ready = s.items.filter((i) => i.mailbox);   // rows still waiting for their tab's mailbox are never sent
+      if (ready.length === 0) return [];
+      const mb = ready[0].mailbox;
+      return ready.filter((i) => i.mailbox === mb).slice(0, max);
     }, false);
   }
 
@@ -114,7 +123,7 @@ export class Queue {
    * account, so the rows may already have gone without it). Sent once, with no rows, when nothing else is waiting.
    */
   mailboxToAnnounce(): Promise<string | undefined> {
-    return this.locked((s) => (!s.mailbox && s.items.length === 0 ? s.seenMailbox : undefined), false);
+    return this.locked((s) => (!s.mailbox && !s.items.some((i) => i.mailbox) ? s.seenMailbox : undefined), false);
   }
 
   /** The engine acknowledged these keys (an empty list acknowledges a connection test). */

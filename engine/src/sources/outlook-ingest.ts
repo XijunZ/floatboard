@@ -97,6 +97,9 @@ export async function ingestOutlook(req: Request, env: Env, afterStore?: (userId
     return json({ ok: true, stored: 0, duplicates: 0, skipped: 0 });
   }
 
+  // Rows come only with the mailbox they were read from (round 40): never taken as the connected one's by default.
+  if (items.length > 0 && !mailbox) return json({ error: "rows must name the mailbox they were read from" }, 400);
+
   // One mailbox per source: the first send names it; any other is refused (the extension then stops sending its rows).
   let address = src.address;
   if (mailbox && !address) {

@@ -86,6 +86,16 @@ describe("POST /ingest/outlook", () => {
     expect(r.status).toBe(401);
   });
 
+  // Round 40 (Codex 28): rows are only taken with the mailbox they came from (never assumed to be the connected one).
+  it("rows_without_their_mailbox_are_refused", async () => {
+    const u = await outlookUser("OM");
+    expect((await ingest(u.token, { mailbox: "me@corp.com", items: [row(1)] })).status).toBe(200);
+    const r = await ingest(u.token, { items: [row(2)] });
+    expect(r.status).toBe(400);
+    expect((await rowsOf(u.id)).length).toBe(1);
+    expect((await ingest(u.token, { items: [] })).status).toBe(200);   // a connection test (no rows) still works
+  });
+
   it("first_ingest_sets_mailbox_then_other_mailboxes_refused", async () => {
     const u = await outlookUser();
     expect((await sourceOf(u.id)).address).toBe("");

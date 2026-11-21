@@ -70,7 +70,7 @@ async function onPageRead(tabId: number, msg: PageReadMessage): Promise<void> {
   const { read } = msg;
   const overall = await setPageKind(tabId, read.kind);
   await queue.setPageProblem(overall === "unrecognised" && read.kind === "unrecognised" ? read.reason : undefined);
-  if (read.kind === "inbox") await queue.add(read.rows, new Date(), read.mailbox);
+  if (read.kind === "inbox") await queue.add(read.rows, new Date(), read.mailbox, tabId);   // rows wait for their own tab's mailbox
   await send(true);
 }
 

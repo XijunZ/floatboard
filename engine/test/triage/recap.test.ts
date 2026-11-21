@@ -65,3 +65,31 @@ describe("meeting recaps", () => {
     ]);
   });
 });
+
+// Round 40 (Codex 28): a webhook and the recap email for the same meeting arriving together are judged once; the
+// second waits on the first's claim instead of making a second set of follow-ups.
+describe("recaps delivered twice at once", () => {
+  it("a_webhook_and_an_email_for_one_meeting_are_judged_once_and_store_one_set_of_follow_ups", async () => {
+    const { processRecap } = await import("../../src/triage/recap");
+    const { encrypt } = await import("../../src/lib/crypto");
+    const u = await newUser("RC2");
+    await env.DB.prepare("UPDATE users SET anthropic_key_enc=? WHERE id=?").bind(await encrypt(env as any, "sk-test"), u.id).run();
+    let judged = 0;
+    const slow = (async () => {
+      judged++;
+      await new Promise((r) => setTimeout(r, 40));   // both deliveries are past the "already known?" test by now
+      return Response.json({ id: "m", type: "message", role: "assistant", model: HAIKU, stop_reason: "end_turn", stop_sequence: null,
+        content: [{ type: "text", text: JSON.stringify({ decisions: [], next_steps: [], my_actions: [{ title: "Send Sam the deck", due: null, has_time: false, importance: 1 }] }) }],
+        usage: { input_tokens: 1, output_tokens: 1 } });
+    }) as typeof fetch;
+    const share = "Full notes https://fathom.video/share/AbCdEf123456";
+    const [a, b] = await Promise.all([
+      processRecap(env as any, u.id, recap({ messageId: "fathom-webhook-1", text: share, link: "https://fathom.video/share/AbCdEf123456" }), slow),
+      processRecap(env as any, u.id, recap({ messageId: "<email-1@fathom>", text: share, link: "https://fathom.video/share/AbCdEf123456" }), slow),
+    ]);
+    expect([a.status, b.status].sort()).toEqual(["duplicate", "stored"]);
+    expect(judged).toBe(1);
+    const actions = await env.DB.prepare("SELECT title FROM items WHERE user_id=? AND kind='action'").bind(u.id).all();
+    expect(actions.results.length).toBe(1);
+  });
+});

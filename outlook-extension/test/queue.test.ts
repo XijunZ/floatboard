@@ -181,20 +181,22 @@ describe("Queue", () => {
   });
 
   it("mailbox_found_after_rows_is_announced_once", async () => {
-    // Outlook draws the message list before the folder list, so the first read can have rows but no mailbox.
+    // Outlook draws the message list before the folder list, so the first read can have rows but no mailbox: they wait
+    // (round 40) and go, with the mailbox, once the same tab shows it.
     const q = new Queue(new FakeStorage());
     const engine = fakeEngine();
-    await q.add([row("a", MIN)], NOW);
+    await q.add([row("a", MIN)], NOW, undefined, 1);
     await flush(q, CFG, engine.fetchFn, () => NOW);
-    expect(engine.posts).toEqual([{ items: [row("a", MIN)] }]);
+    expect(engine.posts.flatMap((p) => p.items ?? [])).toEqual([]);
 
-    // A later read shows the mailbox but no new rows: the engine is told the mailbox once, with no rows.
-    expect(await q.add([row("a", MIN)], at(MIN), "Me@Example.org")).toBe(0);
+    // A later read of that tab shows the mailbox: the waiting row goes with it, once.
+    expect(await q.add([row("a", MIN)], at(MIN), "Me@Example.org", 1)).toBe(0);
     await flush(q, CFG, engine.fetchFn, () => at(MIN));
-    expect(engine.posts.slice(1)).toEqual([{ mailbox: "me@example.org", items: [] }]);
-    await q.add([row("a", MIN)], at(2 * MIN), "me@example.org");
+    expect(engine.posts.filter((p) => (p.items ?? []).length)).toEqual([{ mailbox: "me@example.org", items: [row("a", MIN)] }]);
+    const sent = engine.posts.length;
+    await q.add([row("a", MIN)], at(2 * MIN), "me@example.org", 1);
     await flush(q, CFG, engine.fetchFn, () => at(2 * MIN));
-    expect(engine.posts.length).toBe(2);
+    expect(engine.posts.length).toBe(sent);
 
     // From then on it is the connected mailbox: another one is not queued.
     expect(await q.add([row("x", MIN)], at(3 * MIN), "someone.else@example.org")).toBe(0);
@@ -208,6 +210,27 @@ describe("Queue", () => {
     expect((await q2.status()).problem).toBe("This isn't the connected mailbox");
     await flush(q2, CFG, refusing.fetchFn, () => at(MIN));
     expect(refusing.posts.filter((p) => p.items).length).toBe(1);
+  });
+
+  it("rows_from_a_tab_whose_mailbox_isnt_known_never_take_another_mailbox", async () => {
+    const q = new Queue(new FakeStorage());
+    const engine = fakeEngine();
+    await q.add([row("a", MIN)], NOW, "me@example.org", 1);
+    await flush(q, CFG, engine.fetchFn, () => NOW);
+    // Another tab draws its rows before its account header: they are not sent as the connected mailbox's.
+    await q.add([row("b", MIN)], at(MIN), undefined, 2);
+    await flush(q, CFG, engine.fetchFn, () => at(MIN));
+    expect(engine.stored.has(rowKey(row("b", MIN)))).toBe(false);
+    // Its header then shows someone else's mailbox: its rows are dropped, never sent.
+    await q.add([], at(2 * MIN), "someone.else@example.org", 2);
+    await flush(q, CFG, engine.fetchFn, () => at(2 * MIN));
+    expect(engine.stored.has(rowKey(row("b", MIN)))).toBe(false);
+    expect(await q.takeBatch()).toEqual([]);
+    // A third tab's rows wait for its header; it is the connected mailbox, so they go with it.
+    await q.add([row("c", MIN)], at(3 * MIN), undefined, 3);
+    await q.add([], at(4 * MIN), "me@example.org", 3);
+    await flush(q, CFG, engine.fetchFn, () => at(4 * MIN));
+    expect(engine.posts.filter((p) => p.items?.some((r) => r.rowId === "c"))).toEqual([{ mailbox: "me@example.org", items: [row("c", MIN)] }]);
   });
 
   it("wrong_mailbox_rows_not_sent", async () => {

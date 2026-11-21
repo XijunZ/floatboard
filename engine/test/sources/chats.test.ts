@@ -4,7 +4,7 @@ import { call, newUser } from "../helpers";
 import { encrypt } from "../../src/lib/crypto";
 import { HAIKU } from "../../src/lib/llm";
 import { runUser } from "../../src/triage/run";
-import { chatLink, readChat } from "../../src/sources/chat-ingest";
+import { chatLink, chatParts, readChat } from "../../src/sources/chat-ingest";
 
 const chat = (over: Record<string, unknown> = {}) => ({
   key: "wa:447700900123@s.whatsapp.net:ABC1", name: "Anna", group: false, senders: ["Anna"],
@@ -103,6 +103,37 @@ describe("chats from the Mac", () => {
     expect(seen[0].system).toContain("## Muted chats (stricter)");
     expect((await env.DB.prepare("SELECT muted FROM chat_rows WHERE user_id=?").bind(u.id).first<any>()).muted).toBe(1);
   });
+});
+
+// Round 40 (Codex 28): a long transcript is kept whole, in parts, never cut at 8,000 characters (the Mac moves its
+// cursor past every message it sent once the batch is accepted, so a cut-off message could never come back).
+describe("long chats", () => {
+  it("a_transcript_over_the_limit_is_stored_in_parts_with_nothing_dropped", async () => {
+    const u = await newUser("CL1");
+    const lines = Array.from({ length: 29 }, (_, i) => `[2026-11-13 09:${String(i).padStart(2, "0")}] Li: ${"chatting about the weekend plans and the trip ".repeat(6)}`);
+    lines.push("[2026-11-13 09:59] Li: Please pay the 500 deposit for the flat today");
+    const transcript = lines.join("\n");
+    expect(transcript.length).toBeGreaterThan(8000);
+    const r = await send(u.key, [chat({ key: "wx:li-group", name: "Li", transcript, link: "weixin://" })], "wechat");
+    expect(r.status).toBe(200);
+    const rows = await env.DB.prepare("SELECT row_key, transcript FROM chat_rows WHERE user_id=? ORDER BY row_key").bind(u.id).all<{ row_key: string; transcript: string }>();
+    const all = rows.results.map((x) => x.transcript).join("\n");
+    expect(rows.results.length).toBeGreaterThan(1);
+    expect(rows.results.every((x) => x.transcript.length <= 8000)).toBe(true);
+    for (const l of lines) expect(all).toContain(l);   // every message, the payment request included
+    // Sent again (a retry): stored once.
+    expect(await (await send(u.key, [chat({ key: "wx:li-group", name: "Li", transcript, link: "weixin://" })], "wechat")).json()).toMatchObject({ stored: 0 });
+  });
+});
+
+it("chat_parts_never_lose_a_character_even_with_a_line_longer_than_a_part", () => {
+  const base = readChat(chat({ transcript: "x" }))!;
+  for (const t of ["a".repeat(50) + "\n" + "b".repeat(250) + "\n" + "c".repeat(100), "d".repeat(100) + "\n" + "e".repeat(100), "f".repeat(333)]) {
+    const parts = chatParts({ ...base, transcript: t }, 100);
+    expect(parts.every((p) => p.transcript.length <= 100)).toBe(true);
+    expect(parts.map((p) => p.transcript).join("").replace(/\n/g, "")).toBe(t.replace(/\n/g, ""));
+    expect(new Set(parts.map((p) => p.key)).size).toBe(parts.length);
+  }
 });
 
 describe("wechat from the Mac's notifications", () => {
