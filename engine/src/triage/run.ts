@@ -49,6 +49,8 @@ export type RunStats = { fetched: number; skippedSeen: number; dropped: number; 
 type Event = { source?: string; sender?: string; subject?: string; decision: string; detail?: string; trace?: string };
 
 const MAX_JUDGE_TRIES = 3;
+/** Raw meeting notes still to keep (`recap_raw`, round 43): at most this many a run, each again after this long. */
+const RAW_PER_RUN = 2, RAW_RETRY_MS = 15 * 60e3;
 
 /** One structured log line (visible in `wrangler tail` and Cloudflare Workers Logs). */
 export function log(evt: string, fields: Record<string, unknown>) {
@@ -189,8 +191,10 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   const handle = async (m: Message, source: string, sourceId: string | null = null): Promise<boolean> => {
     const base = { source, sender: senderAddress(m.from), subject: m.subject, trace: m.messageId };
     // Seen before, or its task was archived to the Mac (deleted here, tombstone kept): never a task twice.
+    // (Raw meeting notes still to keep are the exception: they are kept even if the email was marked seen, round 43.)
     if (await env.DB.prepare("SELECT 1 FROM seen WHERE user_id=?1 AND message_id=?2 UNION ALL SELECT 1 FROM archived_items WHERE user_id=?1 AND message_id=?2 LIMIT 1")
-      .bind(userId, m.messageId).first()) {
+      .bind(userId, m.messageId).first()
+      && !(await env.DB.prepare("SELECT 1 FROM judge_attempts WHERE user_id=? AND message_id=? AND kind='recap_raw'").bind(userId, m.messageId).first())) {
       stats.skippedSeen++;
       return true;
     }
@@ -223,8 +227,9 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
       }
       if (out.status === "busy" && gaveUp) {
         // The raw notes are still to be kept: tried again by id next run, apart from the tries Claude used up (round 42).
+        // Due at once the first time (`updated` set back past the back-off); later passing failures wait their turn.
         await env.DB.prepare("UPDATE judge_attempts SET kind='recap_raw', updated=?, gmail_id=COALESCE(?, gmail_id), source_id=COALESCE(?, source_id) WHERE user_id=? AND message_id=?")
-          .bind(nowISO(), m.gmailId ?? null, sourceId, userId, m.messageId).run();
+          .bind(new Date(Date.now() - RAW_RETRY_MS).toISOString(), m.gmailId ?? null, sourceId, userId, m.messageId).run();
         ev({ ...base, decision: "meeting notes being saved by another delivery; will check again" });
         return false;
       }
@@ -306,9 +311,13 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   };
   try {
     if (rows.length) {
-      const { results: waiting } = await env.DB.prepare(`SELECT message_id, gmail_id, source_id, subject, link, kind FROM judge_attempts
-          WHERE user_id=? AND (attempts<? OR kind='recap_raw') AND gmail_id IS NOT NULL ORDER BY updated ASC LIMIT 5`).bind(userId, MAX_JUDGE_TRIES).all<any>();
-      for (const w of waiting) {
+      // Normal retries first, then a few raw meeting notes still to keep (their own slots and back-off, round 43).
+      const { results: normal } = await env.DB.prepare(`SELECT message_id, gmail_id, source_id, subject, link, kind FROM judge_attempts
+          WHERE user_id=? AND attempts<? AND kind<>'recap_raw' AND gmail_id IS NOT NULL ORDER BY updated ASC LIMIT 5`).bind(userId, MAX_JUDGE_TRIES).all<any>();
+      const { results: raw } = await env.DB.prepare(`SELECT message_id, gmail_id, source_id, subject, link, kind FROM judge_attempts
+          WHERE user_id=? AND kind='recap_raw' AND gmail_id IS NOT NULL AND updated <= ? ORDER BY updated ASC LIMIT ?`)
+        .bind(userId, new Date(Date.now() - RAW_RETRY_MS).toISOString(), RAW_PER_RUN).all<any>();
+      for (const w of [...normal, ...raw]) {
         if (calls.remaining < 10) break; // keep room for new mail and a possible alert
         const row = rows.find((r) => r.id === w.source_id);
         if (!row) continue; // inbox disabled or removed: wait for it
@@ -319,6 +328,22 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
         catch (e) {
           if (isBudgetStop(e)) throw e;
           if (e instanceof SourceAuthError) break; // reconnect needed: the normal page read reports it
+          if (w.kind === "recap_raw") {
+            const why = `couldn't read the meeting notes email again: ${(e as Error).message}`;
+            if (/\bGmail (404|410)\b/.test((e as Error).message)) {
+              // Gone from Gmail: nothing left to keep. A warning stays (needs attention) and the email is settled.
+              await env.DB.batch([
+                env.DB.prepare("UPDATE judge_attempts SET kind='recap_lost', last_error=?, updated=? WHERE user_id=? AND message_id=?").bind(why.slice(0, 300), nowISO(), userId, w.message_id),
+                env.DB.prepare("INSERT OR IGNORE INTO seen(user_id,message_id,at) VALUES(?,?,?)").bind(userId, w.message_id, nowISO()),
+              ]);
+              ev({ source: labelOf(row), subject: w.subject ?? "", decision: "meeting notes couldn't be saved: the email is gone", detail: why, trace: w.message_id });
+            } else {
+              // Passing (Gmail busy, network): still pending, not seen, tried again after the back-off.
+              await env.DB.prepare("UPDATE judge_attempts SET last_error=?, updated=? WHERE user_id=? AND message_id=?").bind(why.slice(0, 300), nowISO(), userId, w.message_id).run();
+              ev({ source: labelOf(row), subject: w.subject ?? "", decision: "meeting notes still to be saved; will retry", detail: why, trace: w.message_id });
+            }
+            continue;
+          }
           const n = await bumpAttempt(w.message_id, `couldn't read the message again: ${(e as Error).message}`, w.subject ?? "", w.link ?? "", null, null, w.kind);
           ev({ source: labelOf(row), subject: w.subject ?? "", decision: n >= MAX_JUDGE_TRIES ? `couldn't judge (${MAX_JUDGE_TRIES} tries)` : `couldn't judge (try ${n} of ${MAX_JUDGE_TRIES}); will retry`,
             detail: `couldn't read the message again: ${(e as Error).message}`, trace: w.message_id });

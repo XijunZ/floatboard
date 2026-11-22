@@ -208,6 +208,57 @@ describe("no silent failures", () => {
     expect((await env.DB.prepare("SELECT kind FROM items WHERE user_id=?").bind(u.id).all<any>()).results.map((r) => r.kind)).toEqual(["summary"]);
   });
 
+  // Round 43 (Codex 33): getting the email again for pending raw notes can fail; that never loses the notes.
+  async function rawPending(f: Fake) {
+    const { releaseRecap } = await import("../../src/triage/recap");
+    const s = await setup(f);
+    for (let i = 0; i < 2; i++) await runUser(env as any, s.u.id, { sourceFor: s.sourceFor, fetchFn: claudeSays("garbage") });
+    await env.DB.prepare(`CREATE TRIGGER r43_other AFTER DELETE ON recap_keys WHEN OLD.claim IS NOT NULL AND OLD.claim <> 'other' BEGIN
+        INSERT OR IGNORE INTO recap_keys(user_id,key,created,claim) VALUES(OLD.user_id, OLD.key, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'other'); END`).run();
+    await runUser(env as any, s.u.id, { sourceFor: s.sourceFor, fetchFn: claudeSays("garbage") });
+    await env.DB.prepare("DROP TRIGGER r43_other").run();
+    await releaseRecap(env as any, s.u.id, "other");
+    return s;
+  }
+  const kindOf = (uid: string) => env.DB.prepare("SELECT kind FROM judge_attempts WHERE user_id=?").bind(uid).first<any>().then((r) => r?.kind);
+
+  it("a_transient_gmail_failure_during_raw_recovery_keeps_the_notes_pending_until_a_later_run_stores_them", async () => {
+    const recap = mail(4, { from: "Fathom <no-reply@fathom.video>", subject: "Recap: budget", text: "notes about the budget", labels: [] });
+    const { u, sourceFor } = await rawPending({ msgs: [recap] });
+    const flaky: Source = { ...sourceFor(), async fetchFull() { throw new Error("Gmail 503 for https://gmail/messages/g4"); } };
+    await runUser(env as any, u.id, { sourceFor: () => flaky, fetchFn: claudeSays("garbage") });
+    expect(await kindOf(u.id)).toBe("recap_raw");
+    expect((await env.DB.prepare("SELECT count(*) n FROM seen WHERE user_id=? AND message_id='<m4@x>'").bind(u.id).first<any>()).n).toBe(0);
+    await env.DB.prepare("UPDATE judge_attempts SET updated=? WHERE user_id=?").bind(new Date(Date.now() - 3600e3).toISOString(), u.id).run();
+    await runUser(env as any, u.id, { sourceFor, fetchFn: claudeSays("garbage") });
+    expect((await env.DB.prepare("SELECT kind FROM items WHERE user_id=?").bind(u.id).all<any>()).results.map((r) => r.kind)).toEqual(["summary"]);
+  });
+
+  it("an_email_gmail_no_longer_has_ends_raw_recovery_with_a_warning", async () => {
+    const recap = mail(5, { from: "Fathom <no-reply@fathom.video>", subject: "Recap: hiring", text: "notes about hiring", labels: [] });
+    const f: Fake = { msgs: [recap] };
+    const { u, sourceFor } = await rawPending(f);
+    f.msgs = [];                                            // gone from Gmail: fetchFull answers "Gmail 404"
+    await runUser(env as any, u.id, { sourceFor, fetchFn: claudeSays("garbage") });
+    expect(await kindOf(u.id)).toBe("recap_lost");
+    const st = await (await call("/v2/status", { key: u.key })).json<any>();
+    expect(st.needs_attention.some((l: string) => l.includes("Recap: hiring") && /couldn't be saved/.test(l))).toBe(true);
+  });
+
+  it("many_pending_raw_notes_never_crowd_out_normal_retries", async () => {
+    const { u, sourceId, sourceFor } = await setup({ msgs: [mail(9)] });
+    const old = new Date(Date.now() - 7200e3).toISOString();
+    for (let i = 0; i < 8; i++) {
+      await env.DB.prepare(`INSERT INTO judge_attempts(user_id,message_id,attempts,last_error,subject,link,updated,gmail_id,source_id,kind)
+          VALUES(?,?,3,'busy','Recap','',?,?,?,'recap_raw')`).bind(u.id, `<raw${i}@x>`, old, `graw${i}`, sourceId).run();
+    }
+    await env.DB.prepare(`INSERT INTO judge_attempts(user_id,message_id,attempts,last_error,subject,link,updated,gmail_id,source_id,kind)
+        VALUES(?,'<m9@x>',1,'bad answer','Ask 9','',?,'g9',?,'email')`).bind(u.id, new Date().toISOString(), sourceId).run();
+    fetched.length = 0;
+    await runUser(env as any, u.id, { sourceFor, fetchFn: claudeSays(YES) });
+    expect(fetched).toContain("g9");
+  });
+
   it("fathom_webhook_keeps_raw_notes_on_unusable_answer", async () => {
     const u = await newUser("F");
     await env.DB.prepare("UPDATE users SET anthropic_key_enc=? WHERE id=?").bind(await encrypt(env as any, "sk-test"), u.id).run();
