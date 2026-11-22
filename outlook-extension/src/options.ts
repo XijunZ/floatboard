@@ -1,4 +1,5 @@
 import { OUTLOOK_MATCHES } from "./hosts";
+import { saveSettings } from "./settings-store";
 import type { ScrubRequest, ScrubResponse, Settings } from "./messages";
 import { postIngest } from "./queue";
 
@@ -49,7 +50,7 @@ function save(): void {
       const oldOrigin = old && engineOrigin(old.engine);
       if (oldOrigin && oldOrigin !== origin) await chrome.permissions.remove({ origins: [`${oldOrigin}/*`] });
       const settings: Settings = { engine: origin, token };
-      await chrome.storage.local.set({ settings });
+      await saveSettings(chrome.storage.local, settings);   // an older queue is bound to the settings used until now first
       status.textContent = "Saved.";
     })();
   });

@@ -72,6 +72,16 @@ type State = {
 const STORAGE_KEY = "queue";
 const lower = (s?: string) => s?.toLowerCase();
 
+/**
+ * A stored queue from an older version (no state version, no engine), bound to `engine`; undefined when `stored` isn't
+ * one (round 43: the options page calls this with the settings in use before it writes new ones).
+ */
+export function bindLegacyState(stored: unknown, engine: string): State | undefined {
+  const s = stored as Partial<State> | undefined;
+  if (!s || typeof s !== "object" || s.v !== undefined || s.engine !== undefined) return undefined;
+  return { ...fresh(), ...s, v: STATE_VERSION, engine, legacy: false };
+}
+
 /** Binds `s` to `engine`, parking the queue of the engine it held (see `Queue.bindEngine`). */
 function rebind(s: State, engine: string): void {
   if (s.engine === engine) return;

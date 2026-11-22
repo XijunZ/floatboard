@@ -58,7 +58,6 @@ async function updateBadge(): Promise<void> {
 
 /** Sends the queue. `force` ignores the back-off (every page read is also a retry). */
 async function send(force: boolean): Promise<void> {
-  await legacyAdopted;
   const cfg = await settings();
   if (cfg && (force || (await queue.canSend(new Date())))) {
     await flush(queue, cfg, (url, init) => fetch(url, init), () => new Date());
@@ -69,7 +68,6 @@ async function send(force: boolean): Promise<void> {
 }
 
 async function onPageRead(tabId: number, msg: PageReadMessage): Promise<void> {
-  await legacyAdopted;
   const { read } = msg;
   const overall = await setPageKind(tabId, read.kind);
   await queue.setPageProblem(overall === "unrecognised" && read.kind === "unrecognised" ? read.reason : undefined);
@@ -105,13 +103,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void setPageKind(tabId, undefined).then(updateBadge);
 });
 
-/** The engine a stored queue from an older version belongs to: the one saved when this version starts (round 42). */
+/**
+ * The engine a stored queue from an older version belongs to, only where that is certain (round 43): the settings a
+ * change replaced (oldValue), or the settings in place when this version is installed over the older one. A worker
+ * woken for any other reason never guesses from the settings it finds (they may already be new): a queue still
+ * unbound when an engine is bound is parked and never sent. The options page also binds it before saving new settings.
+ */
 async function adoptLegacyQueue(cfg: Pick<Settings, "engine" | "token"> | undefined): Promise<void> {
   if (cfg?.engine && cfg?.token) await queue.adoptLegacy(await engineIdentity({ engine: cfg.engine, token: cfg.token }));
 }
-/** Every read and send waits for this, so an older queue is adopted before anything can bind it to an engine. */
-const legacyAdopted: Promise<void> = chrome.storage.local.get("settings")
-  .then((r) => adoptLegacyQueue(r.settings as Settings | undefined)).catch(() => undefined);
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.settings) return;
@@ -120,6 +120,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   void adoptLegacyQueue(before).then(() => queue.resetMailbox()).then(() => send(true));
 });
 
-chrome.runtime.onInstalled.addListener(() => void ensureAlarm().then(updateBadge));
+chrome.runtime.onInstalled.addListener((details) => {
+  const adopt = details?.reason === "update"
+    ? chrome.storage.local.get("settings").then((r) => adoptLegacyQueue(r.settings as Settings | undefined)).catch(() => undefined)
+    : Promise.resolve();
+  void adopt.then(() => ensureAlarm()).then(updateBadge);
+});
 chrome.runtime.onStartup.addListener(() => void ensureAlarm().then(updateBadge));
 void ensureAlarm();
