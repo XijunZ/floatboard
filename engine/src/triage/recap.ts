@@ -107,7 +107,7 @@ export async function storeRecap(env: Env, userId: string, m: Message, r: Recap,
 
 /**
  * True when any of these meeting keys was already stored (by this or an earlier version, which kept only the summary row),
- * or archived. A meeting another delivery is still working on (an active claim) is not stored yet: see `recapBusy`.
+ * or archived. A meeting another delivery is still working on (an active claim) is not stored yet (`busy`).
  */
 export async function recapKnown(env: Env, userId: string, keys: string[]): Promise<boolean> {
   const q = keys.map(() => "?").join(",");
@@ -118,12 +118,7 @@ export async function recapKnown(env: Env, userId: string, keys: string[]): Prom
   return !!hit;
 }
 
-/** True while another delivery holds a fresh claim on this meeting (round 41): not done yet, so try again later. */
-export async function recapBusy(env: Env, userId: string, keys: string[]): Promise<boolean> {
-  const q = keys.map(() => "?").join(",");
-  return !!(await env.DB.prepare(`SELECT 1 FROM recap_keys WHERE user_id=? AND key IN (${q}) AND claim IS NOT NULL AND created >= ? LIMIT 1`)
-    .bind(userId, ...keys, staleBefore()).first());
-}
+
 
 /** `busy`: another delivery is saving this meeting right now; nothing was stored, so the caller must try again later. */
 export type RecapOutcome = { status: "stored" | "duplicate" | "busy" } | { status: "unusable"; reason: string };
@@ -135,13 +130,19 @@ export type RecapOutcome = { status: "stored" | "duplicate" | "busy" } | { statu
  * - No Claude key, or `opts.useClaude === false` (the caller gave up on Claude): the raw notes are kept.
  */
 export async function processRecap(env: Env, userId: string, raw: Message, fetchFn?: typeof fetch,
-    opts: { useClaude?: boolean; rawOnUnusable?: boolean } = {}): Promise<RecapOutcome> {
+    opts: { useClaude?: boolean; rawOnUnusable?: boolean; afterClaimMiss?: () => Promise<void> } = {}): Promise<RecapOutcome> {
   const keys = recapKeys(raw);
   const m = { ...raw, messageId: keys[0] };
   if (await recapKnown(env, userId, keys)) return { status: "duplicate" };
   // Round 40: the meeting is claimed (all its aliases at once) before it is judged; another delivery has it: a duplicate.
-  const claim = await claimRecap(env, userId, keys);
-  if (!claim) return (await recapBusy(env, userId, keys)) ? { status: "busy" } : { status: "duplicate" };
+  let claim = await claimRecap(env, userId, keys);
+  if (!claim) {
+    if (opts.afterClaimMiss) await opts.afterClaimMiss();   // tests: another delivery acts in between
+    // "Already handled" only when it is really stored (round 42): a claim given back meanwhile is tried once more.
+    if (await recapKnown(env, userId, keys)) return { status: "duplicate" };
+    claim = await claimRecap(env, userId, keys);
+    if (!claim) return { status: "busy" };
+  }
   try {
     const out = await judgeAndStore(env, userId, m, keys, claim, fetchFn, opts);
     if (out.status !== "stored") await releaseRecap(env, userId, claim);

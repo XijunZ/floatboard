@@ -188,6 +188,26 @@ describe("no silent failures", () => {
     expect(line).not.toMatch(/skipped/);
   });
 
+  // Round 42 (Codex 32): the raw notes kept after three unreadable answers can meet a busy meeting; they are retried.
+  it("a_raw_fallback_that_meets_a_busy_meeting_is_retried_and_stored_later", async () => {
+    const { releaseRecap } = await import("../../src/triage/recap");
+    const recap = mail(3, { from: "Fathom <no-reply@fathom.video>", subject: "Recap: planning", text: "notes about planning", labels: [] });
+    const { u, sourceFor } = await setup({ msgs: [recap] });
+    for (let i = 0; i < 2; i++) await runUser(env as any, u.id, { sourceFor, fetchFn: claudeSays("garbage") });
+    // Another delivery claims the meeting the moment this run gives its claim back after the third bad answer.
+    await env.DB.prepare(`CREATE TRIGGER r42_other AFTER DELETE ON recap_keys WHEN OLD.claim IS NOT NULL AND OLD.claim <> 'other' BEGIN
+        INSERT OR IGNORE INTO recap_keys(user_id,key,created,claim) VALUES(OLD.user_id, OLD.key, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'other'); END`).run();
+    await runUser(env as any, u.id, { sourceFor, fetchFn: claudeSays("garbage") });   // third bad answer: the raw fallback meets "busy"
+    await env.DB.prepare("DROP TRIGGER r42_other").run();
+    expect((await env.DB.prepare("SELECT count(*) n FROM items WHERE user_id=?").bind(u.id).first<any>()).n).toBe(0);
+    expect((await env.DB.prepare("SELECT attempts FROM judge_attempts WHERE user_id=?").bind(u.id).first<any>()).attempts).toBe(3);
+    await releaseRecap(env as any, u.id, "other");                                     // that delivery died
+    fetched.length = 0;
+    await runUser(env as any, u.id, { sourceFor, fetchFn: claudeSays("garbage") });
+    expect(fetched).toContain("g3");
+    expect((await env.DB.prepare("SELECT kind FROM items WHERE user_id=?").bind(u.id).all<any>()).results.map((r) => r.kind)).toEqual(["summary"]);
+  });
+
   it("fathom_webhook_keeps_raw_notes_on_unusable_answer", async () => {
     const u = await newUser("F");
     await env.DB.prepare("UPDATE users SET anthropic_key_enc=? WHERE id=?").bind(await encrypt(env as any, "sk-test"), u.id).run();

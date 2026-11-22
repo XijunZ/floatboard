@@ -209,12 +209,24 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
       ev({ ...base, decision: `dropped: ${why}` });
     }
     if (route === "recap") {
-      let gaveUp = false;
-      let out = await processRecap(env, userId, m, calls.wrap(opts.fetchFn));
+      // Round 42: the raw notes kept after the last unreadable answer met a meeting another delivery was saving
+      // (`recap_raw`): only the raw notes are tried again, never Claude.
+      const rawPending = !!(await env.DB.prepare("SELECT 1 FROM judge_attempts WHERE user_id=? AND message_id=? AND kind='recap_raw'")
+        .bind(userId, m.messageId).first());
+      let gaveUp = rawPending;
+      let out = rawPending ? await processRecap(env, userId, m, undefined, { useClaude: false })
+        : await processRecap(env, userId, m, calls.wrap(opts.fetchFn));
       if (out.status === "unusable") {
         if (!(await judgeFailed(m, base, `Claude's answer for the meeting notes could not be used (${out.reason})`, "recap", sourceId))) return false;
         out = await processRecap(env, userId, m, undefined, { useClaude: false }); // gave up on Claude: keep the raw notes
         gaveUp = true;
+      }
+      if (out.status === "busy" && gaveUp) {
+        // The raw notes are still to be kept: tried again by id next run, apart from the tries Claude used up (round 42).
+        await env.DB.prepare("UPDATE judge_attempts SET kind='recap_raw', updated=?, gmail_id=COALESCE(?, gmail_id), source_id=COALESCE(?, source_id) WHERE user_id=? AND message_id=?")
+          .bind(nowISO(), m.gmailId ?? null, sourceId, userId, m.messageId).run();
+        ev({ ...base, decision: "meeting notes being saved by another delivery; will check again" });
+        return false;
       }
       if (out.status === "busy") {
         // Another delivery is saving this meeting right now (round 41): read again by id next run, without using a try.
@@ -224,6 +236,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
         ev({ ...base, decision: "meeting notes being saved by another delivery; will check again" });
         return false;
       }
+      if (rawPending) await env.DB.prepare("UPDATE judge_attempts SET kind='recap' WHERE user_id=? AND message_id=? AND kind='recap_raw'").bind(userId, m.messageId).run();
       if (out.status === "stored") stats.recaps++;
       if (!gaveUp) ev({ ...base, decision: out.status === "stored" ? "meeting notes summarised" : "meeting notes already handled" });
     }
@@ -294,7 +307,7 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
   try {
     if (rows.length) {
       const { results: waiting } = await env.DB.prepare(`SELECT message_id, gmail_id, source_id, subject, link, kind FROM judge_attempts
-          WHERE user_id=? AND attempts<? AND gmail_id IS NOT NULL ORDER BY updated ASC LIMIT 5`).bind(userId, MAX_JUDGE_TRIES).all<any>();
+          WHERE user_id=? AND (attempts<? OR kind='recap_raw') AND gmail_id IS NOT NULL ORDER BY updated ASC LIMIT 5`).bind(userId, MAX_JUDGE_TRIES).all<any>();
       for (const w of waiting) {
         if (calls.remaining < 10) break; // keep room for new mail and a possible alert
         const row = rows.find((r) => r.id === w.source_id);

@@ -114,3 +114,18 @@ describe("a recap claimed by a delivery that died", () => {
     expect((await processRecap(env as any, u.id, m)).status).toBe("duplicate");
   });
 });
+
+// Round 42 (Codex 32): "duplicate" only when the meeting is really stored.
+describe("a claim released while another delivery checks it", () => {
+  it("a_release_between_the_claim_and_the_busy_check_never_reads_as_duplicate", async () => {
+    const { processRecap, claimRecap, releaseRecap } = await import("../../src/triage/recap");
+    const { recapKeys } = await import("../../src/sources/fathom");
+    const u = await newUser("RC4");
+    const m = recap({ messageId: "fathom-webhook-r42", text: "https://fathom.video/share/Rr42Qq", link: "https://fathom.video/share/Rr42Qq" });
+    const other = await claimRecap(env as any, u.id, recapKeys(m));   // another delivery holds it
+    const out = await processRecap(env as any, u.id, m, undefined, { afterClaimMiss: async () => { await releaseRecap(env as any, u.id, other!); } });
+    expect(out.status).not.toBe("duplicate");
+    const stored = await env.DB.prepare("SELECT count(*) AS n FROM items WHERE user_id=? AND kind='summary'").bind(u.id).first<{ n: number }>();
+    expect(out.status === "stored" ? stored?.n : 1).toBe(1);
+  });
+});
