@@ -108,7 +108,9 @@ export default {
         const m = fathomToMessage(rp.body, src.id);
         await recordMeeting(env, src.user_id, meetingMeta(rp.body, m));
         await recordMeetingNotes(env, src.user_id, m); // Jots J9: the full notes, for the Mac to attach to the meeting
-        await processRecap(env, src.user_id, m, undefined, { rawOnUnusable: true });
+        const out = await processRecap(env, src.user_id, m, undefined, { rawOnUnusable: true });
+        // Another delivery is saving this meeting right now (round 41): not saved yet, so Fathom is asked to retry.
+        if (out.status === "busy") return json({ error: "this meeting is being saved by another delivery; try again" }, 503);
       } catch (e) {
         // A 500 makes Fathom retry; the hourly catch-up is the second chance.
         const msg = `Fathom notes couldn't be saved: ${(e as Error)?.message ?? e}`.slice(0, 300);

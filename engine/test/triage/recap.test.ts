@@ -87,9 +87,30 @@ describe("recaps delivered twice at once", () => {
       processRecap(env as any, u.id, recap({ messageId: "fathom-webhook-1", text: share, link: "https://fathom.video/share/AbCdEf123456" }), slow),
       processRecap(env as any, u.id, recap({ messageId: "<email-1@fathom>", text: share, link: "https://fathom.video/share/AbCdEf123456" }), slow),
     ]);
-    expect([a.status, b.status].sort()).toEqual(["duplicate", "stored"]);
+    expect([a.status, b.status].sort()).toEqual(["busy", "stored"]);   // round 41: the second is told to try again
     expect(judged).toBe(1);
+    const again = await processRecap(env as any, u.id, recap({ messageId: "<email-1@fathom>", text: share, link: "https://fathom.video/share/AbCdEf123456" }), slow);
+    expect(again.status).toBe("duplicate");
     const actions = await env.DB.prepare("SELECT title FROM items WHERE user_id=? AND kind='action'").bind(u.id).all();
     expect(actions.results.length).toBe(1);
+  });
+});
+
+// Round 41 (Codex 31): a meeting claimed by a delivery that hasn't finished is "busy" (retried), never "already handled";
+// a claim left by a delivery that died is taken over once it is stale.
+describe("a recap claimed by a delivery that died", () => {
+  it("is_busy_while_the_claim_is_fresh_and_stored_by_a_retry_once_it_is_stale", async () => {
+    const { processRecap, claimRecap, recapKnown } = await import("../../src/triage/recap");
+    const { recapKeys } = await import("../../src/sources/fathom");
+    const u = await newUser("RC3");
+    const m = recap({ messageId: "fathom-webhook-9", text: "https://fathom.video/share/Zz99Yy88", link: "https://fathom.video/share/Zz99Yy88" });
+    const keys = recapKeys(m);
+    expect(await claimRecap(env as any, u.id, keys)).not.toBeNull();   // the first delivery claimed it, then died
+    expect(await recapKnown(env as any, u.id, keys)).toBe(false);
+    expect((await processRecap(env as any, u.id, m)).status).toBe("busy");
+    // Ten minutes later the claim is stale: a retry stores the notes.
+    await env.DB.prepare("UPDATE recap_keys SET created=? WHERE user_id=?").bind(new Date(Date.now() - 11 * 60e3).toISOString(), u.id).run();
+    expect((await processRecap(env as any, u.id, m)).status).toBe("stored");
+    expect((await processRecap(env as any, u.id, m)).status).toBe("duplicate");
   });
 });

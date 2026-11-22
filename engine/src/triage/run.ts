@@ -216,6 +216,14 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
         out = await processRecap(env, userId, m, undefined, { useClaude: false }); // gave up on Claude: keep the raw notes
         gaveUp = true;
       }
+      if (out.status === "busy") {
+        // Another delivery is saving this meeting right now (round 41): read again by id next run, without using a try.
+        await env.DB.prepare(`INSERT INTO judge_attempts(user_id,message_id,attempts,last_error,subject,link,updated,gmail_id,source_id,kind) VALUES(?,?,0,?,?,?,?,?,?,'recap')
+            ON CONFLICT(user_id,message_id) DO UPDATE SET updated=excluded.updated, gmail_id=COALESCE(excluded.gmail_id, gmail_id), source_id=COALESCE(excluded.source_id, source_id)`)
+          .bind(userId, m.messageId, "being saved by another delivery", m.subject.slice(0, 200), m.link, nowISO(), m.gmailId ?? null, sourceId).run();
+        ev({ ...base, decision: "meeting notes being saved by another delivery; will check again" });
+        return false;
+      }
       if (out.status === "stored") stats.recaps++;
       if (!gaveUp) ev({ ...base, decision: out.status === "stored" ? "meeting notes summarised" : "meeting notes already handled" });
     }

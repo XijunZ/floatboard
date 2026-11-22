@@ -105,18 +105,28 @@ export async function storeRecap(env: Env, userId: string, m: Message, r: Recap,
   await env.DB.batch(stmts);
 }
 
-/** True when any of these meeting keys was already stored (by this or an earlier version, which kept only the summary row), or archived. */
+/**
+ * True when any of these meeting keys was already stored (by this or an earlier version, which kept only the summary row),
+ * or archived. A meeting another delivery is still working on (an active claim) is not stored yet: see `recapBusy`.
+ */
 export async function recapKnown(env: Env, userId: string, keys: string[]): Promise<boolean> {
   const q = keys.map(() => "?").join(",");
-  // A claim left by a delivery that died mid-way (stale) doesn't count: the meeting may be taken over.
-  const hit = await env.DB.prepare(`SELECT 1 FROM recap_keys WHERE user_id=? AND key IN (${q}) AND (claim IS NULL OR created >= ?)
+  const hit = await env.DB.prepare(`SELECT 1 FROM recap_keys WHERE user_id=? AND key IN (${q}) AND claim IS NULL
       UNION ALL SELECT 1 FROM items WHERE user_id=? AND kind='summary' AND message_id IN (${q})
       UNION ALL SELECT 1 FROM archived_items WHERE user_id=? AND message_id IN (${q}) LIMIT 1`)
-    .bind(userId, ...keys, staleBefore(), userId, ...keys, userId, ...keys).first();
+    .bind(userId, ...keys, userId, ...keys, userId, ...keys).first();
   return !!hit;
 }
 
-export type RecapOutcome = { status: "stored" | "duplicate" } | { status: "unusable"; reason: string };
+/** True while another delivery holds a fresh claim on this meeting (round 41): not done yet, so try again later. */
+export async function recapBusy(env: Env, userId: string, keys: string[]): Promise<boolean> {
+  const q = keys.map(() => "?").join(",");
+  return !!(await env.DB.prepare(`SELECT 1 FROM recap_keys WHERE user_id=? AND key IN (${q}) AND claim IS NOT NULL AND created >= ? LIMIT 1`)
+    .bind(userId, ...keys, staleBefore()).first());
+}
+
+/** `busy`: another delivery is saving this meeting right now; nothing was stored, so the caller must try again later. */
+export type RecapOutcome = { status: "stored" | "duplicate" | "busy" } | { status: "unusable"; reason: string };
 
 /**
  * Full recap path for one message: dedupe per meeting, summarise with Haiku, store.
@@ -131,7 +141,7 @@ export async function processRecap(env: Env, userId: string, raw: Message, fetch
   if (await recapKnown(env, userId, keys)) return { status: "duplicate" };
   // Round 40: the meeting is claimed (all its aliases at once) before it is judged; another delivery has it: a duplicate.
   const claim = await claimRecap(env, userId, keys);
-  if (!claim) return { status: "duplicate" };
+  if (!claim) return (await recapBusy(env, userId, keys)) ? { status: "busy" } : { status: "duplicate" };
   try {
     const out = await judgeAndStore(env, userId, m, keys, claim, fetchFn, opts);
     if (out.status !== "stored") await releaseRecap(env, userId, claim);

@@ -73,6 +73,7 @@ export async function catchUpFathom(env: Env, userId: string, calls: Budget, fet
       if (!known) {
         calls.take(1); // the summary call to Claude
         const out = await processRecap(env, userId, msg, undefined, { rawOnUnusable: true });
+        if (out.status === "busy") { waiting = true; break; }   // another delivery is saving it: ask again next hour (round 41)
         if (out.status === "stored") added++;
       }
       if (!isNaN(created)) newCursor = new Date(created).toISOString();
