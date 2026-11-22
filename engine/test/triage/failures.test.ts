@@ -259,6 +259,31 @@ describe("no silent failures", () => {
     expect(fetched).toContain("g9");
   });
 
+  // Round 44 (Codex 34): pending raw notes of a switched-off inbox never hold up those of an inbox in use.
+  it("raw_notes_of_a_switched_off_inbox_never_block_an_active_inboxs", async () => {
+    const recap = mail(7, { from: "Fathom <no-reply@fathom.video>", subject: "Recap: roadmap", text: "notes about the roadmap", labels: [] });
+    const { u, sourceId, sourceFor } = await setup({ msgs: [recap] });
+    const off = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO sources(id,user_id,kind,address,enabled,created) VALUES(?,?,'gmail','old@gmail.com',0,?)").bind(off, u.id, new Date().toISOString()).run();
+    const pending = (mid: string, gid: string, src: string, ageH: number) => env.DB.prepare(`INSERT INTO judge_attempts(user_id,message_id,attempts,last_error,subject,link,updated,gmail_id,source_id,kind)
+        VALUES(?,?,3,'busy','Recap','',?,?,?,'recap_raw')`).bind(u.id, mid, new Date(Date.now() - ageH * 3600e3).toISOString(), gid, src).run();
+    await pending("<off1@x>", "goff1", off, 5);
+    await pending("<off2@x>", "goff2", off, 4);
+    await pending("<gone@x>", "ggone", "removed-source", 6);
+    await pending("<m7@x>", "g7", sourceId, 1);
+    fetched.length = 0;
+    await runUser(env as any, u.id, { sourceFor, fetchFn: claudeSays("garbage") });
+    expect(fetched).toContain("g7");                       // recovered through its own retry slot
+    expect((await env.DB.prepare("SELECT kind FROM items WHERE user_id=?").bind(u.id).all<any>()).results.map((r) => r.kind)).toEqual(["summary"]);
+    const kinds = Object.fromEntries((await env.DB.prepare("SELECT message_id, kind FROM judge_attempts WHERE user_id=?").bind(u.id).all<any>()).results.map((r) => [r.message_id, r.kind]));
+    expect(kinds["<off1@x>"]).toBe("recap_raw");          // waits for its inbox to be switched on again
+    expect(kinds["<gone@x>"]).toBe("recap_lost");         // its inbox was removed: ends with a warning
+    // Pending raw notes are never pruned for age.
+    await env.DB.prepare("UPDATE judge_attempts SET updated=? WHERE user_id=? AND message_id='<off1@x>'").bind(new Date(Date.now() - 40 * 86400e3).toISOString(), u.id).run();
+    await runUser(env as any, u.id, { sourceFor, fetchFn: claudeSays("garbage") });
+    expect((await env.DB.prepare("SELECT count(*) n FROM judge_attempts WHERE user_id=? AND message_id='<off1@x>'").bind(u.id).first<any>()).n).toBe(1);
+  });
+
   it("fathom_webhook_keeps_raw_notes_on_unusable_answer", async () => {
     const u = await newUser("F");
     await env.DB.prepare("UPDATE users SET anthropic_key_enc=? WHERE id=?").bind(await encrypt(env as any, "sk-test"), u.id).run();

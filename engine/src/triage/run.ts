@@ -103,7 +103,8 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
       env.DB.prepare("UPDATE runs SET finished=?, processed=?, error=?, stopped=?, stats=?, calls=?, ms=? WHERE id=?")
         .bind(now, processed, error, stopped, JSON.stringify(stats), calls.used - callsAtStart, Date.now() - t0, runId),
       ...events.map((e) => logEvent(env, { ...e, run_id: runId, user_id: userId, at: now })),
-      env.DB.prepare("DELETE FROM judge_attempts WHERE user_id=? AND updated < ?").bind(userId, month),
+      // Raw meeting notes still to keep are never pruned for age (round 44): they end only stored or lost.
+      env.DB.prepare("DELETE FROM judge_attempts WHERE user_id=? AND updated < ? AND kind <> 'recap_raw'").bind(userId, month),
       env.DB.prepare("DELETE FROM run_events WHERE user_id=? AND at < ?").bind(userId, week),
       env.DB.prepare("DELETE FROM runs WHERE user_id=? AND started < ?").bind(userId, month),
       // Rejected app events are reported for 7 days and kept for 30 (processed and waiting ones are never pruned here).
@@ -314,9 +315,20 @@ export async function runUser(env: Env, userId: string, opts: RunOptions = {}): 
       // Normal retries first, then a few raw meeting notes still to keep (their own slots and back-off, round 43).
       const { results: normal } = await env.DB.prepare(`SELECT message_id, gmail_id, source_id, subject, link, kind FROM judge_attempts
           WHERE user_id=? AND attempts<? AND kind<>'recap_raw' AND gmail_id IS NOT NULL ORDER BY updated ASC LIMIT 5`).bind(userId, MAX_JUDGE_TRIES).all<any>();
+      // Only inboxes read in this run can recover them (round 44): a switched-off inbox's wait for it; a removed inbox's
+      // end as lost, with a warning.
+      const fetchable = rows.filter((r) => !!sourceOf(r).fetchFull).map((r) => r.id);
+      const lost = await env.DB.prepare(`UPDATE judge_attempts SET kind='recap_lost', last_error='its inbox was removed', updated=?
+          WHERE user_id=? AND kind='recap_raw' AND (source_id IS NULL OR source_id NOT IN (SELECT id FROM sources WHERE user_id=?)) RETURNING message_id, subject`)
+        .bind(nowISO(), userId, userId).all<{ message_id: string; subject: string | null }>();
+      for (const l of lost.results) {
+        await env.DB.prepare("INSERT OR IGNORE INTO seen(user_id,message_id,at) VALUES(?,?,?)").bind(userId, l.message_id, nowISO()).run();
+        ev({ source: "", subject: l.subject ?? "", decision: "meeting notes couldn't be saved: their inbox was removed", trace: l.message_id });
+      }
       const { results: raw } = await env.DB.prepare(`SELECT message_id, gmail_id, source_id, subject, link, kind FROM judge_attempts
-          WHERE user_id=? AND kind='recap_raw' AND gmail_id IS NOT NULL AND updated <= ? ORDER BY updated ASC LIMIT ?`)
-        .bind(userId, new Date(Date.now() - RAW_RETRY_MS).toISOString(), RAW_PER_RUN).all<any>();
+          WHERE user_id=? AND kind='recap_raw' AND gmail_id IS NOT NULL AND updated <= ? AND source_id IN (SELECT value FROM json_each(?))
+          ORDER BY updated ASC LIMIT ?`)
+        .bind(userId, new Date(Date.now() - RAW_RETRY_MS).toISOString(), JSON.stringify(fetchable), RAW_PER_RUN).all<any>();
       for (const w of [...normal, ...raw]) {
         if (calls.remaining < 10) break; // keep room for new mail and a possible alert
         const row = rows.find((r) => r.id === w.source_id);

@@ -320,7 +320,7 @@ route("GET", "/v2/status", async (_req, env, user) => {
   for (const g of gaveUp) {
     const subj = (g.subject || "(no subject)").slice(0, 60), link = g.link ? ` ${g.link}` : "";
     needs_attention.push(g.kind === "recap_lost"
-      ? `Meeting notes "${subj}" couldn't be saved: Gmail no longer has the email.${link}`
+      ? `Meeting notes "${subj}" couldn't be saved: Gmail no longer has the email, or its inbox was removed.${link}`
       : g.kind === "recap" || g.kind === "recap_raw"
       ? `Meeting notes "${subj}" were saved without a summary: couldn't read Claude's answer after 3 tries.${link}`
       : `Couldn't read Claude's answer for "${subj}" after 3 tries; it was skipped.${link}`);
