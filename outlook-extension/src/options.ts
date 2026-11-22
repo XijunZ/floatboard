@@ -1,6 +1,5 @@
 import { OUTLOOK_MATCHES } from "./hosts";
-import { saveSettings } from "./settings-store";
-import type { ScrubRequest, ScrubResponse, Settings } from "./messages";
+import type { SaveSettingsMessage, ScrubRequest, ScrubResponse, Settings } from "./messages";
 import { postIngest } from "./queue";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -47,10 +46,16 @@ function save(): void {
     }
     void (async () => {
       const old = (await chrome.storage.local.get("settings")).settings as Settings | undefined;
+      const settings: Settings = { engine: origin, token };
+      // The service worker saves them (round 44): it owns the queue, and keeps it and the settings in step in one write.
+      const answer = (await chrome.runtime.sendMessage({ type: "saveSettings", settings } satisfies SaveSettingsMessage)
+        .catch(() => undefined)) as { ok?: boolean } | undefined;
+      if (!answer?.ok) {
+        status.textContent = "Couldn't save: the extension's background part didn't answer. Nothing was changed; try Save again.";
+        return;
+      }
       const oldOrigin = old && engineOrigin(old.engine);
       if (oldOrigin && oldOrigin !== origin) await chrome.permissions.remove({ origins: [`${oldOrigin}/*`] });
-      const settings: Settings = { engine: origin, token };
-      await saveSettings(chrome.storage.local, settings);   // an older queue is bound to the settings used until now first
       status.textContent = "Saved.";
     })();
   });

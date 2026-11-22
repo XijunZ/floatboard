@@ -1,7 +1,7 @@
 // Service worker: owns the one queue, sends it to the engine, and keeps the toolbar badge current. Content scripts in
 // any number of Outlook tabs only report what they read.
 import { OUTLOOK_MATCHES } from "./hosts";
-import type { PageReadMessage, ReadRequest, Settings } from "./messages";
+import type { PageReadMessage, ReadRequest, SaveSettingsMessage, Settings } from "./messages";
 import {
   badgeFor,
   engineIdentity,
@@ -16,6 +16,7 @@ import {
 const local: StorageArea = {
   get: async (key) => (await chrome.storage.local.get(key))[key],
   set: (key, value) => chrome.storage.local.set({ [key]: value }),
+  setMany: (items) => chrome.storage.local.set(items),
 };
 const queue = new Queue(local);
 const COLORS = { green: "#2e9d4f", blue: "#1a73e8", grey: "#8e8e93", red: "#d93025" } as const;
@@ -89,8 +90,24 @@ async function ensureAlarm(): Promise<void> {
   if (!(await chrome.alarms.get(READ_ALARM))) await chrome.alarms.create(READ_ALARM, { periodInMinutes: 5 });
 }
 
-chrome.runtime.onMessage.addListener((msg: PageReadMessage, sender) => {
+/** Settings from the options page (round 44), saved with the queue in one write; a content script can't send them. */
+async function onSaveSettings(msg: SaveSettingsMessage): Promise<{ ok: boolean; error?: string }> {
+  const next = msg.settings;
+  if (typeof next?.engine !== "string" || typeof next?.token !== "string" || !next.engine || !next.token) return { ok: false, error: "engine and token needed" };
+  const old = (await chrome.storage.local.get("settings")).settings as Settings | undefined;
+  const previous = old?.engine && old?.token ? await engineIdentity(old) : undefined;
+  await queue.saveSettings({ engine: next.engine, token: next.token }, previous);
+  return { ok: true };
+}
+
+chrome.runtime.onMessage.addListener((msg: PageReadMessage | SaveSettingsMessage, sender, respond) => {
   if (msg?.type === "pageRead" && sender.tab?.id !== undefined) void onPageRead(sender.tab.id, msg);
+  if (msg?.type === "saveSettings") {
+    const fromPage = sender.tab !== undefined && !String(sender.tab.url ?? "").startsWith("chrome-extension://");
+    if (fromPage) { respond({ ok: false, error: "not allowed" }); return false; }
+    void onSaveSettings(msg).then(respond, (e) => respond({ ok: false, error: String(e) }));
+    return true;   // answered asynchronously
+  }
   return false;
 });
 
@@ -107,7 +124,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  * The engine a stored queue from an older version belongs to, only where that is certain (round 43): the settings a
  * change replaced (oldValue), or the settings in place when this version is installed over the older one. A worker
  * woken for any other reason never guesses from the settings it finds (they may already be new): a queue still
- * unbound when an engine is bound is parked and never sent. The options page also binds it before saving new settings.
+ * unbound when an engine is bound is parked and never sent. Settings saved from the options page bind it in the same
+ * write (onSaveSettings), so the change event's adoption afterwards finds it bound and does nothing.
  */
 async function adoptLegacyQueue(cfg: Pick<Settings, "engine" | "token"> | undefined): Promise<void> {
   if (cfg?.engine && cfg?.token) await queue.adoptLegacy(await engineIdentity({ engine: cfg.engine, token: cfg.token }));

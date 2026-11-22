@@ -8,6 +8,8 @@ import { newRows, rowKey, type PageRead, type Row } from "./parse";
 export interface StorageArea {
   get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<void>;
+  /** Several keys in one write (chrome.storage.local.set); without it they are written one after the other. */
+  setMany?(items: Record<string, unknown>): Promise<void>;
 }
 
 /**
@@ -107,14 +109,18 @@ export class Queue {
   constructor(private storage: StorageArea) {}
 
   /** Runs one read-modify-write at a time, so reports from several tabs never overwrite each other. */
-  private locked<T>(fn: (s: State) => T, write = true): Promise<T> {
+  private locked<T>(fn: (s: State) => T, write = true, alongside?: Record<string, unknown>): Promise<T> {
     const run = this.chain.then(async () => {
       const stored = (await this.storage.get(STORAGE_KEY)) as Partial<State> | undefined;
       const s: State = { ...fresh(), ...stored };
       if (stored && stored.v === undefined && stored.engine === undefined) s.legacy = true;
       s.v = STATE_VERSION;
       const out = fn(s);
-      if (write) await this.storage.set(STORAGE_KEY, s);
+      if (write && alongside && this.storage.setMany) await this.storage.setMany({ [STORAGE_KEY]: s, ...alongside });
+      else if (write) {
+        await this.storage.set(STORAGE_KEY, s);
+        for (const [k, v] of Object.entries(alongside ?? {})) await this.storage.set(k, v);
+      }
       return out;
     });
     this.chain = run.catch(() => undefined);
@@ -178,6 +184,17 @@ export class Queue {
    * called at start-up with the saved settings, and with the previous settings when they change. Without it, such a
    * queue is set aside for good when bound to an engine (never sent to one it may not be for).
    */
+  /**
+   * New settings, saved together with the queue inside its lock (round 44): a queue left by an older version is first
+   * bound to the settings in use until now (`previous`), so it can never be taken as the new engine's; nothing else in
+   * the queue changes, and nothing written meanwhile is overwritten.
+   */
+  saveSettings(settings: unknown, previous?: string): Promise<void> {
+    return this.locked((s) => {
+      if (previous && s.engine === undefined && s.legacy) { s.engine = previous; s.legacy = false; }
+    }, true, { settings });
+  }
+
   adoptLegacy(engine: string): Promise<void> {
     return this.locked((s) => {
       if (s.engine === undefined && s.legacy) { s.engine = engine; s.legacy = false; }
