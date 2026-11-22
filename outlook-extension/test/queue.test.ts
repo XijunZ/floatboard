@@ -264,6 +264,7 @@ describe("Queue", () => {
     const storage = new FakeStorage();
     storage.data.queue = { items: [{ key: rowKey(row("old", MIN)), row: row("old", MIN) }], acked: {}, refused: [], failures: 0 };
     const q = new Queue(storage);
+    await q.adoptLegacy(await engineIdentity(CFG));   // the service worker starts: the engine saved now is the queue's
     const engine = fakeEngine();
     await q.add([row("old", MIN)], at(MIN), "me@example.org");
     await flush(q, CFG, engine.fetchFn, () => at(MIN));
@@ -281,6 +282,30 @@ describe("Queue", () => {
     expect(s.waiting).toBe(1);
     expect(s.setAside).toBe(500);
     expect(s.notice).toContain("500");
+  });
+
+  // Round 42 (Codex 32): a queue from before engines were told apart is never given to an engine it may not be for.
+  it("a_queue_from_an_older_version_never_goes_to_an_engine_saved_after_it", async () => {
+    const storage = new FakeStorage();
+    storage.data.queue = { items: [{ key: rowKey(row("a1", MIN)), mailbox: "a@example.org", row: row("a1", MIN) }], acked: {}, refused: [], failures: 0 };
+    const q = new Queue(storage);
+    const B: IngestConfig = { engine: "https://b.example.test", token: "b-token" };
+    const toB = fakeEngine();
+    const bFetch = async (_u: string, init: RequestInit) => { toB.posts.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ ok: true }), { status: 200 }); };
+    // Settings switched to B before the queue was ever bound (no adoption from the engine it was read for).
+    await flush(q, B, bFetch, () => NOW);
+    expect(toB.posts.flatMap((p) => p.items ?? [])).toEqual([]);
+    expect((await q.status()).waiting).toBe(0);
+    // Its own engine, recognised from the settings before the switch, still gets it.
+    const fresh2 = new FakeStorage();
+    fresh2.data.queue = { items: [{ key: rowKey(row("a1", MIN)), mailbox: "a@example.org", row: row("a1", MIN) }], acked: {}, refused: [], failures: 0 };
+    const q3 = new Queue(fresh2);
+    await q3.adoptLegacy(await engineIdentity(CFG));
+    await flush(q3, B, bFetch, () => NOW);
+    expect(toB.posts.flatMap((p) => p.items ?? [])).toEqual([]);
+    const backA = fakeEngine();
+    await flush(q3, CFG, backA.fetchFn, () => at(MIN));
+    expect(backA.posts.flatMap((p) => (p.items ?? []).map((r) => r.rowId))).toEqual(["a1"]);
   });
 
   // Round 41 (Codex 30): another engine or key saved while emails wait: they never go to the new engine.

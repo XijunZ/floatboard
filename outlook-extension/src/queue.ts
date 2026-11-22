@@ -41,7 +41,13 @@ type ProblemReport = { mailbox?: string; problem: string };
 /** What one engine's queue holds; kept aside (parked) while another engine or key is in use (round 41). */
 type Parked = Pick<State, "items" | "setAside" | "acked" | "cutoff" | "mailbox" | "seenMailbox" | "refused">;
 
+/** Queues parked under this name are never sent: their engine couldn't be established (round 42). */
+export const UNKNOWN_ENGINE = "unknown-engine";
+const STATE_VERSION = 2;
+
 type State = {
+  v?: number; // STATE_VERSION; a stored queue without it comes from before engines were told apart
+  legacy?: boolean; // such a queue, not yet adopted by the engine saved when this version first ran
   engine?: string; // the engine identity (address and a hash of its key) the queue belongs to
   parked?: Record<string, Parked>;
   items: QueueItem[];
@@ -69,12 +75,14 @@ const lower = (s?: string) => s?.toLowerCase();
 /** Binds `s` to `engine`, parking the queue of the engine it held (see `Queue.bindEngine`). */
 function rebind(s: State, engine: string): void {
   if (s.engine === engine) return;
-  if (s.engine === undefined) { s.engine = engine; return; }   // a queue from before engines were told apart
+  if (s.engine === undefined && !s.legacy) { s.engine = engine; return; }   // rows read before any engine was saved
+  // A queue from before engines were told apart whose engine is unknown: parked under UNKNOWN_ENGINE, never sent.
+  const from = s.engine ?? UNKNOWN_ENGINE;
   const parked = { ...(s.parked ?? {}) };
-  parked[s.engine] = { items: s.items, setAside: s.setAside, acked: s.acked, cutoff: s.cutoff, mailbox: s.mailbox, seenMailbox: s.seenMailbox, refused: s.refused };
+  parked[from] = { items: s.items, setAside: s.setAside, acked: s.acked, cutoff: s.cutoff, mailbox: s.mailbox, seenMailbox: s.seenMailbox, refused: s.refused };
   const back = parked[engine];
   delete parked[engine];
-  const next: State = { ...fresh(), ...(back ?? {}), engine, parked };
+  const next: State = { ...fresh(), ...(back ?? {}), v: STATE_VERSION, engine, parked };
   for (const k of Object.keys(s)) delete (s as Record<string, unknown>)[k];   // nothing of the other account's state stays
   Object.assign(s, next);
 }
@@ -91,7 +99,10 @@ export class Queue {
   /** Runs one read-modify-write at a time, so reports from several tabs never overwrite each other. */
   private locked<T>(fn: (s: State) => T, write = true): Promise<T> {
     const run = this.chain.then(async () => {
-      const s = { ...fresh(), ...((await this.storage.get(STORAGE_KEY)) as Partial<State> | undefined) };
+      const stored = (await this.storage.get(STORAGE_KEY)) as Partial<State> | undefined;
+      const s: State = { ...fresh(), ...stored };
+      if (stored && stored.v === undefined && stored.engine === undefined) s.legacy = true;
+      s.v = STATE_VERSION;
       const out = fn(s);
       if (write) await this.storage.set(STORAGE_KEY, s);
       return out;
@@ -150,6 +161,17 @@ export class Queue {
    */
   bindEngine(engine: string): Promise<void> {
     return this.locked((s) => rebind(s, engine));
+  }
+
+  /**
+   * A queue from before engines were told apart belongs to the engine saved when this version first runs (round 42):
+   * called at start-up with the saved settings, and with the previous settings when they change. Without it, such a
+   * queue is set aside for good when bound to an engine (never sent to one it may not be for).
+   */
+  adoptLegacy(engine: string): Promise<void> {
+    return this.locked((s) => {
+      if (s.engine === undefined && s.legacy) { s.engine = engine; s.legacy = false; }
+    });
   }
 
   /** The next rows to send (all for one mailbox), in the order they were queued. They stay queued until acknowledged. */
