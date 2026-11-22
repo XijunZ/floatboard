@@ -692,6 +692,8 @@ public final class Store: ObservableObject {
 
     /// TEST ONLY: runs one raw SQL statement through `perform` so checks can exercise the error path.
     public func performForTest(_ sql: String) { perform { try db.run(sql) } }
+    /// TEST ONLY: restores a deleted task as a restore after a restart does (no memo of the delete).
+    public func restoreForTest(_ id: Int64, now: Date = Date()) { perform { _ = try restoreCardRow(id, memo: nil, now: now) } }
     /// TEST ONLY: runs arbitrary work through `perform`.
     public func performForTest(_ work: () throws -> Void) { perform(work) }
 

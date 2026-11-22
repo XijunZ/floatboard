@@ -28,7 +28,7 @@ public final class DB {
 
     /// Kept in PRAGMA user_version. When the schema changes: bump this, update `schema`, and add an upgrade step
     /// from the previous version in `upgrade` (launch backs the file up first when its version is lower).
-    public static let schemaVersion = 20
+    public static let schemaVersion = 21
     /// The oldest board this version can open (and upgrade). Older boards and backups are refused unchanged.
     public static let oldestSupportedVersion = 7
 
@@ -238,6 +238,10 @@ public final class DB {
             // 19 -> 20: a calendar change's send attempt is recorded before it goes; restoring an old task note keeps newer notes.
             sql += v20Changes
         }
+        if version < 21 {
+            // 20 -> 21: a change tried before `attempted` existed (attempts > 0) is marked attempted.
+            sql += v21Backfill
+        }
         return sql
     }
 
@@ -366,6 +370,14 @@ public final class DB {
         UPDATE cards SET notes=NEW.text, updated=NEW.updated WHERE NEW.deleted=0 AND id=NEW.task_id AND notes=''
             AND (SELECT kind FROM jots WHERE id=NEW.id)='task_note';
     END;
+
+    """
+
+    /// Version 21 (round 41): `cal_outbox.attempted` is filled in for changes tried before it existed (attempts > 0; the
+    /// time it was queued stands in). From now on a new change is written with 0 (never tried); NULL means unknown (left
+    /// from version 19 or 20), and Undo treats unknown like tried: the delete stays queued and the event is made again.
+    static let v21Backfill = """
+    UPDATE cal_outbox SET attempted=created WHERE attempted IS NULL AND attempts>0;
 
     """
 
@@ -615,7 +627,7 @@ public final class DB {
             conflicts INTEGER NOT NULL DEFAULT 0
         );
 
-    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq + v18Tables + v19Columns + v20Changes
+    """ + v12Tables + v13Jots + v14Tables + v15Tables + v16Tables + v17JotSeq + v18Tables + v19Columns + v20Changes + v21Backfill
 
     /// The tables Circle adds in version 14 (the same text for a new board and an upgraded one).
     static let v14Tables = """

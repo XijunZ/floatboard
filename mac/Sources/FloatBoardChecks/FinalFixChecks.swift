@@ -1,6 +1,7 @@
 import Foundation
 import FloatBoardCore
 import FloatBoardConnectors
+import SQLite3
 
 /// Fixes from the final whole-branch review of the calendar feature: each section names the finding it covers.
 @MainActor func finalFixChecks() async {
@@ -551,4 +552,38 @@ final class FakeGoogle: @unchecked Sendable {
         _ = try Reconciler.apply([p("online-1")], connector: "email", store: store, defaultGroup: store.areas.first?.name ?? "Work", autoAdd: true)
         check(store.cards.filter { $0.title == "Send Sam the deck" }.count == 1, "the_same_follow_up_from_the_other_engine_is_not_added_twice")
     } catch { check(false, "cross engine checks: \(error)") }
+}
+
+/// Round 41 (Codex 31): a delete waiting in the outbox of a version 19 board, tried once without an answer (attempts 1),
+/// is known as attempted after the upgrade (schema 21), so a restore never takes it for unsent: the delete stays queued
+/// (its retry tells whether Google still has the event) and the event is made again.
+@MainActor func v19PendingDeleteChecks() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("fb-r41-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) // try?-ok: a failure shows up as failed checks below
+    defer { try? FileManager.default.removeItem(at: root) } // try?-ok: scratch folder cleanup
+    let url = root.appendingPathComponent("v19.sqlite"), acct = "me@example.com"
+    do { _ = try DB(url: url) } catch { check(false, "v19 delete setup: \(error)"); return }
+    let due = Date().addingTimeInterval(4 * 86400).timeIntervalSince1970, t = Date().addingTimeInterval(-60).timeIntervalSince1970
+    var h: OpaquePointer?
+    guard sqlite3_open(url.path, &h) == SQLITE_OK else { check(false, "v19 delete open"); return }
+    let sql = """
+        ALTER TABLE cal_outbox DROP COLUMN attempted; PRAGMA user_version = 19;
+        INSERT INTO cards(title, area, importance, due, status, created, updated, deleted, gcal_account, gcal_calendar, gcal_event)
+            VALUES('Team lunch', 'Work', 1, \(due), 'todo', \(t), \(t), 1, '\(acct)', '\(acct)', 'ev19');
+        INSERT INTO cal_outbox(uuid, kind, account, calendar_id, event_id, card_id, payload_json, created, attempts, next_try, last_error)
+            VALUES('d19', 'delete', '\(acct)', '\(acct)', 'ev19', NULL, '{"delete":{"eventID":"ev19"}}', \(t), 1, \(t), 'The network connection was lost.');
+        """
+    let ok = sqlite3_exec(h, sql, nil, nil, nil) == SQLITE_OK
+    let why = String(cString: sqlite3_errmsg(h))
+    sqlite3_close(h)
+    guard ok else { check(false, "v19 delete board: \(why)"); return }
+    do {
+        let store = Store(db: try DB(url: url))
+        let attempted = (try? store.db.query("SELECT attempted FROM cal_outbox WHERE uuid='d19'") { DB.date($0, 0) }.first ?? nil) ?? nil // try?-ok: nil fails the check
+        check(attempted != nil, "upgrade_21_marks_a_delete_tried_before_as_attempted")
+        let id = (try? store.db.query("SELECT id FROM cards WHERE gcal_event='ev19'") { DB.int($0, 0) }.first) ?? nil ?? 0 // try?-ok: 0 fails the check
+        store.restoreForTest(id)
+        let kinds = (try? store.db.query("SELECT kind FROM cal_outbox WHERE sent IS NULL ORDER BY created") { DB.text($0, 0) }) ?? [] // try?-ok: empty fails the check
+        check(store.card(id) != nil && kinds.contains("delete") && kinds.contains("create"), "a_restore_after_a_v19_delete_tried_once_keeps_it_and_makes_the_event_again")
+    } catch { check(false, "v19 delete upgrade: \(error)") }
 }

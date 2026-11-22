@@ -110,8 +110,8 @@ public final class CalendarOutbox {
             if case .patch(let id, _, _, _, _) = w { base = cache.event(account: account, calendarID: calendarID, eventID: id).map(CalPatchBase.init) }
             let json = try Self.encode(w, base: base)
             try db.run("""
-                INSERT INTO cal_outbox(uuid, kind, account, calendar_id, event_id, card_id, payload_json, created, attempts, next_try, last_error)
-                VALUES(?,?,?,?,?,?,?,?,0,?,'')
+                INSERT INTO cal_outbox(uuid, kind, account, calendar_id, event_id, card_id, payload_json, created, attempts, next_try, last_error, attempted)
+                VALUES(?,?,?,?,?,?,?,?,0,?,'',0)
                 """, [uuid, w.kind, account, calendarID, w.eventID, w.cardID, json, now, now.addingTimeInterval(delay)])
             return uuid
         } catch {
@@ -139,7 +139,7 @@ public final class CalendarOutbox {
     /// happened in Google, and Undo must know that. If that record can't be written, nothing is sent.
     public func claimNext(now: Date, skip: (CalOutboxRow) -> Bool) -> CalOutboxRow? {
         guard let row = due(now: now).first(where: { !skip($0) }) else { return nil }
-        do { try db.run("UPDATE cal_outbox SET attempted=COALESCE(attempted, ?) WHERE uuid=?", [now, row.uuid]) } catch {
+        do { try db.run("UPDATE cal_outbox SET attempted=? WHERE uuid=? AND (attempted IS NULL OR attempted=0)", [now, row.uuid]) } catch {
             store.activity("calendar", .error, "Could not record a calendar change as being sent; it waits for the next run", detail: "\(error)", trace: row.uuid)
             return nil
         }
