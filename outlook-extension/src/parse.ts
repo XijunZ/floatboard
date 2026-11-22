@@ -172,9 +172,13 @@ export function readPage(doc: Document, now: Date): PageRead {
     return { kind: "unrecognised", reason: "Message rows not recognised" };
   }
   const locale = doc.documentElement.lang || doc.defaultView?.navigator?.language || "en-GB";
+  const lang = locale.toLowerCase().split(/[-_]/)[0];
+  const unreadHere = SEL.unreadLabels[lang];
+  if (!unreadHere && rowEls.length > 0) return { kind: "unrecognised", reason: `Outlook in this language (${locale}) can't be read yet` };
+  const isUnread = (label: string) => unreadHere.test(label) || SEL.unreadLabels.en.test(label);
   const rows: Row[] = [];
   for (const el of rowEls) {
-    if (!SEL.unreadLabel.test(el.getAttribute("aria-label") ?? "")) continue;
+    if (!isUnread(el.getAttribute("aria-label") ?? "")) continue;
     const rowId = SEL.rowIdAttrs.map((a) => el.getAttribute(a)).find((v) => v);
     const senderEl = el.querySelector(SEL.sender);
     const fromName = text(senderEl);

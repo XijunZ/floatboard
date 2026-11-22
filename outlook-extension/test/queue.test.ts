@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Row } from "../src/parse";
 import { rowKey } from "../src/parse";
-import { badgeFor, flush, Queue, type IngestConfig, type StorageArea } from "../src/queue";
+import { badgeFor, engineIdentity, flush, Queue, type IngestConfig, type StorageArea } from "../src/queue";
 
 const NOW = new Date("2026-11-08T03:00:00Z");
 const MIN = 60_000;
@@ -185,16 +185,16 @@ describe("Queue", () => {
     // (round 40) and go, with the mailbox, once the same tab shows it.
     const q = new Queue(new FakeStorage());
     const engine = fakeEngine();
-    await q.add([row("a", MIN)], NOW, undefined, 1);
+    await q.add([row("a", MIN)], NOW);
     await flush(q, CFG, engine.fetchFn, () => NOW);
     expect(engine.posts.flatMap((p) => p.items ?? [])).toEqual([]);
 
     // A later read of that tab shows the mailbox: the waiting row goes with it, once.
-    expect(await q.add([row("a", MIN)], at(MIN), "Me@Example.org", 1)).toBe(0);
+    expect(await q.add([row("a", MIN)], at(MIN), "Me@Example.org")).toBe(0);
     await flush(q, CFG, engine.fetchFn, () => at(MIN));
     expect(engine.posts.filter((p) => (p.items ?? []).length)).toEqual([{ mailbox: "me@example.org", items: [row("a", MIN)] }]);
     const sent = engine.posts.length;
-    await q.add([row("a", MIN)], at(2 * MIN), "me@example.org", 1);
+    await q.add([row("a", MIN)], at(2 * MIN), "me@example.org");
     await flush(q, CFG, engine.fetchFn, () => at(2 * MIN));
     expect(engine.posts.length).toBe(sent);
 
@@ -212,25 +212,123 @@ describe("Queue", () => {
     expect(refusing.posts.filter((p) => p.items).length).toBe(1);
   });
 
+  // Round 41 (Codex 30): a row read before its mailbox was known gets one only when it is seen again in a read that shows
+  // the mailbox; the tab alone never decides.
   it("rows_from_a_tab_whose_mailbox_isnt_known_never_take_another_mailbox", async () => {
     const q = new Queue(new FakeStorage());
     const engine = fakeEngine();
-    await q.add([row("a", MIN)], NOW, "me@example.org", 1);
+    await q.add([row("a", MIN)], NOW, "me@example.org");
     await flush(q, CFG, engine.fetchFn, () => NOW);
-    // Another tab draws its rows before its account header: they are not sent as the connected mailbox's.
-    await q.add([row("b", MIN)], at(MIN), undefined, 2);
+    await q.add([row("b", MIN)], at(MIN));
     await flush(q, CFG, engine.fetchFn, () => at(MIN));
     expect(engine.stored.has(rowKey(row("b", MIN)))).toBe(false);
-    // Its header then shows someone else's mailbox: its rows are dropped, never sent.
-    await q.add([], at(2 * MIN), "someone.else@example.org", 2);
+    // Its rows seen again with someone else's mailbox: dropped, never sent.
+    await q.add([row("b", MIN)], at(2 * MIN), "someone.else@example.org");
     await flush(q, CFG, engine.fetchFn, () => at(2 * MIN));
     expect(engine.stored.has(rowKey(row("b", MIN)))).toBe(false);
     expect(await q.takeBatch()).toEqual([]);
-    // A third tab's rows wait for its header; it is the connected mailbox, so they go with it.
-    await q.add([row("c", MIN)], at(3 * MIN), undefined, 3);
-    await q.add([], at(4 * MIN), "me@example.org", 3);
-    await flush(q, CFG, engine.fetchFn, () => at(4 * MIN));
+  });
+
+  it("an_account_switch_in_the_same_tab_never_relabels_the_rows_read_before_it", async () => {
+    const q = new Queue(new FakeStorage());
+    const engine = fakeEngine();
+    await q.add([row("a", MIN)], NOW, "me@example.org");
+    await flush(q, CFG, engine.fetchFn, () => NOW);
+    await q.add([row("other", MIN)], at(MIN));                       // another account's mail, its header not drawn yet
+    await q.add([row("mine", MIN)], at(2 * MIN), "me@example.org");   // the same tab now shows the connected mailbox
+    await flush(q, CFG, engine.fetchFn, () => at(2 * MIN));
+    expect(engine.stored.has(rowKey(row("other", MIN)))).toBe(false);
+    expect(engine.stored.has(rowKey(row("mine", MIN)))).toBe(true);
+  });
+
+  it("a_waiting_row_seen_again_with_the_mailbox_goes_with_it", async () => {
+    const q = new Queue(new FakeStorage());
+    const engine = fakeEngine();
+    await q.add([row("c", MIN)], NOW);
+    await q.add([row("c", MIN)], at(MIN), "me@example.org");
+    await flush(q, CFG, engine.fetchFn, () => at(MIN));
     expect(engine.posts.filter((p) => p.items?.some((r) => r.rowId === "c"))).toEqual([{ mailbox: "me@example.org", items: [row("c", MIN)] }]);
+  });
+
+  // Round 41 (Codex 31): rows that never meet their mailbox don't stay stranded.
+  it("a_row_read_in_a_closed_tab_goes_once_another_tab_reads_it_with_the_mailbox", async () => {
+    const q = new Queue(new FakeStorage());
+    const engine = fakeEngine();
+    await q.add([row("r", MIN)], NOW);                          // tab 1, closed before its header was drawn
+    await q.add([row("r", MIN)], at(MIN), "me@example.org");    // tab 2 reads the same row with the mailbox
+    await flush(q, CFG, engine.fetchFn, () => at(MIN));
+    expect(engine.posts.filter((p) => p.items?.length)).toEqual([{ mailbox: "me@example.org", items: [row("r", MIN)] }]);
+  });
+
+  it("a_waiting_row_from_an_older_version_goes_once_read_with_the_mailbox", async () => {
+    const storage = new FakeStorage();
+    storage.data.queue = { items: [{ key: rowKey(row("old", MIN)), row: row("old", MIN) }], acked: {}, refused: [], failures: 0 };
+    const q = new Queue(storage);
+    const engine = fakeEngine();
+    await q.add([row("old", MIN)], at(MIN), "me@example.org");
+    await flush(q, CFG, engine.fetchFn, () => at(MIN));
+    expect(engine.stored.has(rowKey(row("old", MIN)))).toBe(true);
+  });
+
+  it("rows_that_never_meet_their_mailbox_are_set_aside_freeing_the_queue_and_counted", async () => {
+    const q = new Queue(new FakeStorage());
+    const many = Array.from({ length: 500 }, (_, i) => row(`h${i}`, MIN));
+    expect(await q.add(many, NOW)).toBe(500);                    // the queue is full of rows without a mailbox
+    expect(await q.add([row("new", MIN)], at(MIN), "me@example.org")).toBe(0);
+    // Hours later they are set aside: room again, and the count says how many.
+    expect(await q.add([row("new", MIN)], at(3 * 60 * MIN), "me@example.org")).toBe(1);
+    const s = await q.status();
+    expect(s.waiting).toBe(1);
+    expect(s.setAside).toBe(500);
+    expect(s.notice).toContain("500");
+  });
+
+  // Round 41 (Codex 30): another engine or key saved while emails wait: they never go to the new engine.
+  it("emails_waiting_for_one_engine_never_go_to_another_after_a_switch", async () => {
+    const storage = new FakeStorage();
+    const q = new Queue(storage);
+    const offline = fakeEngine({ status: 503 });
+    await q.add([row("a1", MIN), row("a2", MIN)], NOW, "a@example.org");
+    await flush(q, CFG, offline.fetchFn, () => NOW);                // account A's engine is offline: both wait
+    const B: IngestConfig = { engine: "https://engine.example.test", token: "another-account-token" };
+    const toB = fakeEngine();
+    const bFetch = async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      toB.posts.push(body);
+      for (const r of body.items ?? []) toB.stored.set(rowKey(r), r);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+    await flush(q, B, bFetch, () => at(MIN));
+    expect(toB.posts.flatMap((p) => p.items ?? [])).toEqual([]);
+    await q.add([row("b1", MIN)], at(2 * MIN), "b@example.org");
+    await flush(q, B, bFetch, () => at(2 * MIN));
+    expect(toB.posts.flatMap((p: any) => (p.items ?? []).map((r: Row) => r.rowId))).toEqual(["b1"]);
+    // Back to A: its emails are still there and go to A.
+    const backA = fakeEngine();
+    await flush(q, CFG, backA.fetchFn, () => at(3 * MIN));
+    expect(backA.posts.flatMap((p) => (p.items ?? []).map((r) => r.rowId)).sort()).toEqual(["a1", "a2"]);
+  });
+
+  it("a_send_still_in_flight_for_the_old_engine_never_acknowledges_the_new_ones_rows", async () => {
+    const q = new Queue(new FakeStorage());
+    let release: () => void = () => {};
+    const slowA = async (_u: string, init: RequestInit) => {
+      await new Promise<void>((r) => { release = r; });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+    await q.add([row("a1", MIN)], NOW, "a@example.org");
+    const aRun = flush(q, CFG, slowA, () => NOW);
+    await new Promise((r) => setTimeout(r, 20));
+    const B: IngestConfig = { engine: "https://b.example.test", token: "b-token" };
+    const bPosts: Posted[] = [];
+    const bRun = flush(q, B, async (_u, init) => { bPosts.push(JSON.parse(String(init.body))); return new Response("{}", { status: 503 }); }, () => at(MIN));
+    await q.add([row("b1", MIN)], at(MIN), "b@example.org", await engineIdentity(B));   // read while B is the saved engine
+    release();
+    await aRun; await bRun;
+    await flush(q, B, async (_u, init) => { bPosts.push(JSON.parse(String(init.body))); return new Response("{}", { status: 503 }); }, () => at(2 * MIN));
+    expect((await q.status()).waiting).toBeGreaterThanOrEqual(1);   // b1 still waits for B
+    expect(bPosts.flatMap((p) => (p.items ?? []).map((r) => r.rowId))).toEqual(expect.arrayContaining(["b1"]));
+    expect(bPosts.flatMap((p) => (p.items ?? []).map((r) => r.rowId))).not.toContain("a1");
   });
 
   it("wrong_mailbox_rows_not_sent", async () => {

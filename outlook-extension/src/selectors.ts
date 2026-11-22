@@ -11,8 +11,18 @@ export const SEL = {
   row: '[role="option"][data-convid]',
   /** Attributes that may hold the row's item id, in order of preference. */
   rowIdAttrs: ["data-convid", "data-item-id", "data-itemid"],
-  /** The row's accessible label starts with this when the message is unread. */
-  unreadLabel: /^\s*unread\b/i,
+  /**
+   * The row's accessible label starts with this when the message is unread, by the page's language (round 41: the page
+   * has no language-independent unread mark). A language not listed here is reported as not recognised, never read as
+   * "nothing unread". English is accepted in every language (Outlook can keep English labels).
+   */
+  unreadLabels: {
+    en: /^\s*unread\b/i,
+    de: /^\s*ungelesen\b/i,
+    fr: /^\s*non\s+lue?\b/i,
+    es: /^\s*no\s+le[ií]d[oa]\b/i,
+    zh: /^\s*(?:未读|未讀)/,
+  } as Record<string, RegExp>,
   /** Inside a row. */
   sender: "span.OZZZK, [data-testid='SenderName'], span[title*='@']",
   subject: "span.TtcXM, [data-testid='Subject']",

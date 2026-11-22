@@ -101,4 +101,20 @@ describe("readPage", () => {
     const form = `<html><body><form><input type="email" name="loginfmt"><input type="submit" value="Next"></form></body></html>`;
     expect(readPage(docFrom(form, "https://outlook.office.com/mail/"), NOW)).toEqual({ kind: "signedOut" });
   });
+
+  // Round 41 (Codex 30): unread rows in a localised Outlook, and a language the extension can't read yet.
+  it("a_german_outlook_reads_its_unread_rows", () => {
+    const en = readPage(docFrom(sampleHtml()), NOW);
+    const html = sampleHtml().replace('lang="en-GB"', 'lang="de-DE"').replace(/aria-label="Unread /g, 'aria-label="Ungelesen ');
+    const de = readPage(docFrom(html), NOW);
+    expect(de.kind).toBe("inbox");
+    if (de.kind !== "inbox" || en.kind !== "inbox") return;
+    expect(de.rows.map((r) => r.rowId)).toEqual(en.rows.map((r) => r.rowId));
+  });
+
+  it("an_outlook_in_a_language_not_supported_yet_is_reported_not_shown_as_up_to_date", () => {
+    const html = sampleHtml().replace('lang="en-GB"', 'lang="pl-PL"').replace(/aria-label="Unread /g, 'aria-label="Nieprzeczytane ');
+    const read = readPage(docFrom(html), NOW);
+    expect(read.kind).toBe("unrecognised");
+  });
 });

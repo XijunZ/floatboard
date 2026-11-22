@@ -4,6 +4,7 @@ import { OUTLOOK_MATCHES } from "./hosts";
 import type { PageReadMessage, ReadRequest, Settings } from "./messages";
 import {
   badgeFor,
+  engineIdentity,
   flush,
   NOT_SET_UP,
   Queue,
@@ -70,7 +71,11 @@ async function onPageRead(tabId: number, msg: PageReadMessage): Promise<void> {
   const { read } = msg;
   const overall = await setPageKind(tabId, read.kind);
   await queue.setPageProblem(overall === "unrecognised" && read.kind === "unrecognised" ? read.reason : undefined);
-  if (read.kind === "inbox") await queue.add(read.rows, new Date(), read.mailbox, tabId);   // rows wait for their own tab's mailbox
+  if (read.kind === "inbox") {
+    // Rows go into the queue of the engine saved now (round 41); rows without a mailbox wait until seen with one.
+    const cfg = await settings();
+    await queue.add(read.rows, new Date(), read.mailbox, cfg ? await engineIdentity(cfg) : undefined);
+  }
   await send(true);
 }
 
