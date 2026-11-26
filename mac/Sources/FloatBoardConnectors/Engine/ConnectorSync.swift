@@ -83,6 +83,8 @@ public enum ConnectorSync {
                 }
             } catch let e as ConnectorError {
                 if e == .auth { return failAuth(id, store, &report, now) }
+                // Offline is no attempt at all: the events stay unsent without a back-off and go when the connection returns.
+                if e.isOffline { return failOffline(id, store, &report, now, e) }
                 store.markFailed(uuids, error: e.description, now: now, log: false)
                 report.failed += batch.count
                 _ = fail(id, store, &report, now, "Could not send \(batch.count) events", detail: e.description + " Events: " + uuids.joined(separator: ","),
@@ -149,6 +151,7 @@ public enum ConnectorSync {
             }
         } catch let e as ConnectorError {
             if e == .auth { return failAuth(id, store, &report, now) }
+            if e.isOffline { return failOffline(id, store, &report, now, e) }
             _ = fail(id, store, &report, now, "Could not fetch proposals", detail: e.description, trace: traceID)
         } catch {
             _ = fail(id, store, &report, now, "Could not fetch proposals", detail: "\(error)", trace: traceID)
@@ -185,6 +188,7 @@ public enum ConnectorSync {
             }
         } catch let e as ConnectorError {
             if e == .auth { return failAuth(id, store, &report, now) }
+            if e.isOffline { return failOffline(id, store, &report, now, e) }
             _ = fail(id, store, &report, now, "Could not send settings", detail: e.description)
         } catch {
             _ = fail(id, store, &report, now, "Could not send settings", detail: "\(error)")
@@ -198,6 +202,7 @@ public enum ConnectorSync {
                              [String(decoding: data, as: UTF8.self), status.settingsVersion, id])
         } catch let e as ConnectorError {
             if e == .auth { return failAuth(id, store, &report, now) }
+            if e.isOffline { return failOffline(id, store, &report, now, e) }
             _ = fail(id, store, &report, now, "Could not read the engine's status", detail: e.description)
         } catch {
             _ = fail(id, store, &report, now, "Could not read the engine's status", detail: "\(error)")
@@ -390,6 +395,15 @@ public enum ConnectorSync {
         if report.error == nil { report.error = message + ": " + detail }
         markUnreachable(id, store, now)
         return report
+    }
+
+    /// The Mac was offline (often just woken, before Wi-Fi is back). One warning, not an error, and the rest of this sync
+    /// is skipped: the network monitor syncs again as soon as the connection returns, and nothing waiting is lost. It still
+    /// marks the engine unreachable, so an outage over an hour while online is raised by the health check as before.
+    @MainActor
+    private static func failOffline(_ id: String, _ store: Store, _ report: inout SyncReport, _ now: Date,
+                                    _ e: ConnectorError) -> SyncReport {
+        fail(id, store, &report, now, "This Mac was offline; will sync when the connection is back", detail: e.description, level: .warning)
     }
 
     @MainActor

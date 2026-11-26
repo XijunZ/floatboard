@@ -207,6 +207,24 @@ func goodEngine(status: String = okStatus) -> FakeEngine {
               "unreachable_since_cleared_on_success")
     }
 
+    // Offline (e.g. just woken, Wi-Fi not back): one warning, no error, events kept without a back-off, still unreachable.
+    do {
+        let ids = addOutbox(store, connector: "off", count: 2, base: t0)
+        let down = FakeEngine { _, _, _ in throw URLError(.notConnectedToInternet) }
+        let r = await ConnectorSync.run(connector: "off", store: store, client: down.client(), now: t0)
+        let rows = connectorActivity(store, "off").filter { $0.level != .info }
+        check(rows.count == 1 && rows[0].level == .warning && rows[0].message.contains("offline"), "offline_sync_is_one_warning_not_an_error")
+        check(r.error != nil && Double(connectorRow(store, "off", "unreachable_since") ?? "") == t0.timeIntervalSince1970,
+              "offline_sync_still_marks_unreachable")
+        check(store.pendingOutbox(connector: "off", limit: 10, now: t0).map(\.uuid) == ids, "offline_sync_keeps_events_without_backoff")
+        let lost = FakeEngine { _, _, _ in throw URLError(.networkConnectionLost) }
+        _ = await ConnectorSync.run(connector: "off2", store: store, client: lost.client(), now: t0)
+        check(connectorActivity(store, "off2").allSatisfy { $0.level != .error }, "dropped_connection_is_a_warning")
+        let refused = FakeEngine { _, _, _ in throw URLError(.cannotConnectToHost) }
+        _ = await ConnectorSync.run(connector: "off3", store: store, client: refused.client(), now: t0)
+        check(connectorActivity(store, "off3").contains { $0.level == .error }, "engine_unreachable_while_online_is_still_an_error")
+    }
+
     // Each failing call writes exactly one Activity row under connector:<id>.
     do {
         var results: [Bool] = []

@@ -158,12 +158,27 @@ public enum ConnectorError: Error, CustomStringConvertible, Equatable {
     case http(Int, String)
     case staleSettings(engineVersion: Int?)
     case network(String)
+    /// The Mac has no connection at all (offline, the link dropped, or just woken before Wi-Fi is back). Not the engine's
+    /// fault and nothing is lost: the sync is tried again when the connection returns, so it is logged as a warning.
+    case offline(String)
     case badResponse(String)
     /// The engine answered 404 on a phone app route: it has no phone app (an older engine). Callers skip quietly.
     case noPhoneApp
     case noChats
     /// The engine answered 404 on the email search: it is older than "Link an email".
     case noEmailSearch
+
+    /// URL errors that mean "this Mac has no connection", as opposed to an engine that is down or misbehaving.
+    static let offlineCodes: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed,
+                                                   .internationalRoamingOff, .callIsActive]
+
+    public static func fromTransport(_ error: Error) -> ConnectorError {
+        if let u = error as? URLError, offlineCodes.contains(u.code) { return .offline(u.localizedDescription) }
+        return .network(error.localizedDescription)
+    }
+
+    /// True when the failure was only this Mac being offline.
+    public var isOffline: Bool { if case .offline = self { return true }; return false }
 
     public var description: String {
         switch self {
@@ -175,6 +190,7 @@ public enum ConnectorError: Error, CustomStringConvertible, Equatable {
         case .http(let c, let b): return "The engine answered \(c). \(b)"
         case .staleSettings(let v): return "The engine has newer settings (version \(v.map(String.init) ?? "unknown"))."
         case .network(let m): return "Could not reach the engine: \(m)"
+        case .offline(let m): return "Could not reach the engine: \(m)"
         case .badResponse(let m): return "The engine's answer could not be read: \(m)"
         }
     }
@@ -212,7 +228,7 @@ public struct ConnectorClient {
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         if let body { req.httpBody = body; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let data: Data, http: HTTPURLResponse
-        do { (data, http) = try await transport(req) } catch { throw ConnectorError.network("\(error.localizedDescription)") }
+        do { (data, http) = try await transport(req) } catch { throw ConnectorError.fromTransport(error) }
         switch http.statusCode {
         case 200..<300: return data
         case 401: throw ConnectorError.auth
