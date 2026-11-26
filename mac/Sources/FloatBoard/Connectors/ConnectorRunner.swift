@@ -30,6 +30,8 @@ final class ConnectorRunner {
     private var syncAgain = Set<String>()
     private let monitor = NWPathMonitor()
     private var wasSatisfied = false
+    /// The network monitor's first answer (at launch) is not a change, so "connection back" is only logged after it.
+    private var pathSeen = false
     private var phoneTimer: Timer?
     private var whatsappTimer: Timer?
     private var whatsappRunning = Set<String>()
@@ -68,7 +70,10 @@ final class ConnectorRunner {
         RunLoop.main.add(e, forMode: .common)
         expireTimer = e
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.trigger("wake") }
+            MainActor.assumeIsolated {
+                self?.store.activity("system", .info, "Mac woke from sleep", detail: "Syncing now; if the network isn't back yet, again when it is.")
+                self?.trigger("wake")
+            }
         }
         monitor.pathUpdateHandler = { [weak self] path in
             let ok = path.status == .satisfied
@@ -76,6 +81,15 @@ final class ConnectorRunner {
                 MainActor.assumeIsolated {
                     Health.isOnline = ok
                     guard let self else { return }
+                    if ok != self.wasSatisfied || !self.pathSeen {
+                        let kinds = [(NWInterface.InterfaceType.wifi, "Wi-Fi"), (.wiredEthernet, "Ethernet"), (.cellular, "phone hotspot"), (.other, "other")]
+                            .filter { path.usesInterfaceType($0.0) }.map(\.1)
+                        if self.pathSeen || !ok {
+                            self.store.activity("system", .info, ok ? "Network connection back" : "Network connection lost",
+                                                detail: "Technical — network path: \(path.debugDescription)" + (kinds.isEmpty ? "" : "; via " + kinds.joined(separator: ", ")))
+                        }
+                        self.pathSeen = true
+                    }
                     if ok && !self.wasSatisfied {
                         self.store.retryOutboxNow(now: Date())   // changes backed off while offline go out now, not up to an hour later
                         self.trigger("network")
@@ -115,8 +129,11 @@ final class ConnectorRunner {
             guard let client = ConnectorAccounts.client(for: info, store: store) else { continue }
             phoneRunning.insert(id)
             Task { @MainActor in
-                let r = await ConnectorSync.phoneTick(connector: id, store: store, client: client, now: Date())
-                if r.supported { await JotsSync.tick(connector: id, store: store, client: client) }   // Jots: the phone's copy and captures
+                let r = await RequestRecorder.$current.withValue(RequestRecorder()) {
+                    let r = await ConnectorSync.phoneTick(connector: id, store: store, client: client, now: Date())
+                    if r.supported { await JotsSync.tick(connector: id, store: store, client: client) }   // Jots: the phone's copy and captures
+                    return r
+                }
                 phoneRunning.remove(id)
                 if r.queuedEvents { trigger("phone", only: [id]) }
             }
@@ -140,7 +157,7 @@ final class ConnectorRunner {
             let id = info.id
             whatsappRunning.insert(id)
             Task { @MainActor in
-                await WhatsAppSync.tick(connector: id, store: store, client: client)
+                await RequestRecorder.$current.withValue(RequestRecorder()) { await WhatsAppSync.tick(connector: id, store: store, client: client) }
                 whatsappRunning.remove(id)
                 NotificationCenter.default.post(name: .floatBoardWhatsAppRead, object: nil)
             }
@@ -151,7 +168,7 @@ final class ConnectorRunner {
             let id = info.id
             wechatRunning.insert(id)
             Task { @MainActor in
-                await WeChatSync.tick(connector: id, store: store, client: client)
+                await RequestRecorder.$current.withValue(RequestRecorder()) { await WeChatSync.tick(connector: id, store: store, client: client) }
                 wechatRunning.remove(id)
                 NotificationCenter.default.post(name: .floatBoardWhatsAppRead, object: nil)
             }
@@ -173,9 +190,13 @@ final class ConnectorRunner {
             guard let client = ConnectorAccounts.client(for: info, store: store) else { continue }
             running.insert(id)
             Task { @MainActor in
-                let r = await ConnectorSync.run(connector: id, store: store, client: client, now: Date())
-                await Keys.push(connector: id, store: store, client: client)
-                if let books = try? await client.rulebooks() { RulebookSync.refresh(connector: id, store: store, books: books) } // try?-ok: retried at the next sync
+                // Its own recorder, so a failed request is matched only to this sync's Activity rows.
+                let r = await RequestRecorder.$current.withValue(RequestRecorder()) {
+                    let r = await ConnectorSync.run(connector: id, store: store, client: client, now: Date())
+                    await Keys.push(connector: id, store: store, client: client)
+                    if let books = try? await client.rulebooks() { RulebookSync.refresh(connector: id, store: store, books: books) } // try?-ok: retried at the next sync
+                    return r
+                }
                 running.remove(id)
                 store.reload()
                 Health.refresh(store: store, backups: backups)

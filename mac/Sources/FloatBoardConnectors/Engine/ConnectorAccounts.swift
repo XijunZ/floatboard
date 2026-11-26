@@ -88,10 +88,11 @@ public enum ConnectorAccounts {
     @MainActor static var reported: [String: String] = [:]
 
     @MainActor
-    private static func report(_ store: Store, _ id: String, _ level: ActivityLevel, _ message: String, detail: String? = nil) {
+    private static func report(_ store: Store, _ id: String, _ level: ActivityLevel, _ message: String, detail: String? = nil,
+                               file: String = #fileID, function: String = #function, line: Int = #line) {
         guard reported[id] != message else { return }
         reported[id] = message
-        store.activity("connector:\(id)", level, message, detail: detail)
+        store.activity("connector:\(id)", level, message, detail: detail, file: file, function: function, line: line)
     }
 
     /// A client for the connector, or nil (logged once per change) when its address or key is missing or unsafe.

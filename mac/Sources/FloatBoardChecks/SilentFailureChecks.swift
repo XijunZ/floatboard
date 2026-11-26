@@ -158,7 +158,7 @@ import FloatBoardConnectors
             _ = ConnectorAccounts.client(for: info, store: store)
             let r = rows("connector:plain", level: .error)
             let leaked = store.recentActivity(limit: 1000).contains { ($0.detail ?? "").contains("abc123") || $0.message.contains("abc123") }
-            check(r.count == 1 && r[0].detail == "secret-host.example" && !leaked, "connector_non_https_logged_once_host_only")
+            check(r.count == 1 && (r[0].detail ?? "").hasPrefix("secret-host.example\nTechnical — logged at: ConnectorAccounts.swift:") && !leaked, "connector_non_https_logged_once_host_only")
         } else { check(false, "connector_non_https_logged_once_host_only: setup") }
     }
     try? fm.removeItem(at: root) // try?-ok: test helper

@@ -316,8 +316,23 @@ public struct GoogleCalendarAPI: Sendable {
     /// `mapGone` is true only for an events list, where 410 means the sync bookmark is too old; elsewhere 410 is the event's own state.
     private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil, mapGone: Bool = false,
                       headers: [String: String] = [:]) async throws -> Data {
-        let (data, status) = try await raw(method, path, query: query, body: body, headers: headers)
-        return try Self.accept(data, status, mapGone: mapGone)
+        let started = Date()
+        var traced = URLRequest(url: URL(string: "https://www.googleapis.com/calendar/v3" + path)!)
+        traced.httpMethod = method
+        if !query.isEmpty, var c = URLComponents(url: traced.url!, resolvingAgainstBaseURL: false) {
+            c.queryItems = query.map { URLQueryItem(name: $0.name, value: nil) }
+            traced.url = c.url ?? traced.url
+        }
+        let data: Data, status: Int
+        do { (data, status) = try await raw(method, path, query: query, body: body, headers: headers) } catch {
+            RequestRecorder.current.failed(RequestTrace(service: "google-calendar", request: traced, started: started, error: error), thrown: error)
+            throw error
+        }
+        do { return try Self.accept(data, status, mapGone: mapGone) } catch {
+            let answer = HTTPURLResponse(url: traced.url!, statusCode: status, httpVersion: nil, headerFields: nil)
+            RequestRecorder.current.failed(RequestTrace(service: "google-calendar", request: traced, started: started, response: answer), thrown: error)
+            throw error
+        }
     }
 
     /// A 403 asks the user to sign in again only when the sign-in lacks a permission (Google's reasons `insufficientPermissions`

@@ -6,6 +6,7 @@ import FloatBoardConnectors
 final class FakeEngine {
     var requests: [(method: String, path: String, query: String, body: Data)] = []
     var handler: (String, String, Data) throws -> (Int, String)
+    var headers: [String: String]? = nil
     init(_ h: @escaping (String, String, Data) throws -> (Int, String)) { handler = h }
     func client() -> ConnectorClient {
         ConnectorClient(baseURL: URL(string: "https://engine.test")!, key: "k1") { [self] req in
@@ -15,7 +16,7 @@ final class FakeEngine {
             requests.append((method, url.path, url.query ?? "", body))
             guard req.value(forHTTPHeaderField: "Authorization") == "Bearer k1" else { throw URLError(.userAuthenticationRequired) }
             let (code, text) = try handler(method, url.path, body)
-            return (Data(text.utf8), HTTPURLResponse(url: url, statusCode: code, httpVersion: nil, headerFields: nil)!)
+            return (Data(text.utf8), HTTPURLResponse(url: url, statusCode: code, httpVersion: nil, headerFields: headers)!)
         }
     }
     func bodies(_ path: String) -> [[String: Any]] {
@@ -223,6 +224,42 @@ func goodEngine(status: String = okStatus) -> FakeEngine {
         let refused = FakeEngine { _, _, _ in throw URLError(.cannotConnectToHost) }
         _ = await ConnectorSync.run(connector: "off3", store: store, client: refused.client(), now: t0)
         check(connectorActivity(store, "off3").contains { $0.level == .error }, "engine_unreachable_while_online_is_still_an_error")
+        // The technical part: service, method, endpoint (query names only), system error code, where it was logged.
+        let tech = rows[0].detail ?? ""
+        check(tech.contains("request: engine POST engine.test/v2/events") && tech.contains("NSURLErrorDomain -1009 (notConnectedToInternet)")
+              && tech.contains("no answer") && tech.contains("logged at: ConnectorSync.swift:"), "offline_row_names_endpoint_and_error_code")
+        // Back online: one info row saying how long the engine was out of reach.
+        _ = await ConnectorSync.run(connector: "off", store: store, client: goodEngine().client(), now: t0.addingTimeInterval(12 * 60))
+        check(connectorActivity(store, "off").contains { $0.level == .info && $0.message == "Back in touch with the engine after 12 minutes" },
+              "recovery_after_outage_logged")
+    }
+
+    // An engine error answer: HTTP status and Cloudflare's request id in the technical part; the key never.
+    do {
+        let eng = goodEngine()
+        let g = eng.handler
+        eng.handler = { m, p, b in p == "/v2/status" ? (503, #"{"error":"busy"}"#) : try g(m, p, b) }
+        eng.headers = ["cf-ray": "8f00aa11bb22-LHR"]
+        _ = await ConnectorSync.run(connector: "h5", store: store, client: eng.client(), now: t0)
+        let row = connectorActivity(store, "h5").first { $0.message == "Could not read the engine's status" }
+        let d = row?.detail ?? ""
+        check(d.contains("request: engine GET engine.test/v2/status · HTTP 503") && d.contains("request id 8f00aa11bb22-LHR")
+              && !d.contains("Bearer"), "http_error_row_names_status_and_request_id")
+    }
+
+    // A trace is attached only to the row quoting its error, and only once.
+    do {
+        let rec = RequestRecorder()
+        var req = URLRequest(url: URL(string: "https://www.googleapis.com/calendar/v3/calendars/me%40example.com/events?syncToken=SECRET&maxResults=5")!)
+        req.httpMethod = "GET"
+        rec.failed(RequestTrace(service: "google-calendar", request: req, started: Date(), error: URLError(.timedOut)), thrown: ConnectorError.network("The request timed out."))
+        let other = rec.take(matching: "Something unrelated happened")
+        let mine = rec.take(matching: "Could not reach the engine: The request timed out.")
+        let again = rec.take(matching: "Could not reach the engine: The request timed out.")
+        check(other == nil && mine != nil && again == nil, "trace_attached_only_to_its_own_error_once")
+        let line = mine?.line ?? ""
+        check(line.contains("/calendars/<email>/events?syncToken&maxResults") && !line.contains("SECRET") && !line.contains("example.com")
+              && line.contains("-1001 (timedOut)"), "trace_hides_emails_and_query_values")
     }
 
     // Each failing call writes exactly one Activity row under connector:<id>.

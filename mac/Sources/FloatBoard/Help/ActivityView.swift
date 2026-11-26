@@ -114,7 +114,18 @@ struct ActivityView: View {
                 if !e.seen { Circle().fill(Color.blue).frame(width: 6, height: 6) }
             }
             Text(e.message).font(.system(size: 12))
-            if let d = e.detail { Text(d).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(3) }
+            if let d = e.detail {
+                // The technical part (request, error code, code location) gets its own monospaced lines, so a long
+                // plain detail never pushes it out of view. Copy (⌘C) gives the whole row.
+                let parts = d.components(separatedBy: "\nTechnical — ")
+                let plain = d.hasPrefix("Technical — ") ? "" : parts[0]
+                let tech = d.hasPrefix("Technical — ") ? String(d.dropFirst("Technical — ".count)) : parts.dropFirst().joined(separator: "\n")
+                if !plain.isEmpty { Text(plain).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(3) }
+                if !tech.isEmpty {
+                    Text(tech.replacingOccurrences(of: "; ", with: "\n"))
+                        .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(4).textSelection(.enabled)
+                }
+            }
         }
         .padding(.vertical, 2)
     }

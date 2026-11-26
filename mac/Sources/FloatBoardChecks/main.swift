@@ -704,7 +704,8 @@ MainActor.assumeIsolated {
     } catch { check(false, "activity_pruned_after_90_days: \(error)") }
     store.activityMaintenanceFailed("Could not prune activity", DBError.sql("boom"))
     check(store.recentActivity(limit: 5).contains { $0.level == .warning && $0.component == "store"
-          && $0.message == "Could not prune activity" && $0.detail == "boom" }, "activity_maintenance_failure_logged")
+          && $0.message == "Could not prune activity" && ($0.detail ?? "").hasPrefix("boom\nTechnical — ")
+          && ($0.detail ?? "").contains("logged at: main.swift:") }, "activity_maintenance_failure_logged")
     store.markActivitySeen(upTo: Date())
     check(store.recentActivity(limit: 100).allSatisfy { $0.seen }, "activity_mark_seen")
 }

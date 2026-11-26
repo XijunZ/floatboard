@@ -215,6 +215,12 @@ public enum ConnectorSync {
         report.phoneQueuedEvents = phone.queuedEvents
 
         do {
+            // Back after an outage: say so once, with how long the engine was out of reach.
+            if let since = try store.db.query("SELECT unreachable_since FROM connectors WHERE id=? AND unreachable_since IS NOT NULL", [id], { DB.date($0, 0) }).first ?? nil {
+                let minutes = max(0, Int(now.timeIntervalSince(since) / 60))
+                store.activity(component, .info, "Back in touch with the engine after \(minutes == 0 ? "under a minute" : minutes == 1 ? "1 minute" : "\(minutes) minutes")",
+                               detail: "Out of reach since \(ISO8601DateFormatter().string(from: since)).")
+            }
             try store.db.run("UPDATE connectors SET last_ok=?, unreachable_since=NULL WHERE id=?", [now, id])
             // When it first worked: the health watchdog needs it to tell "engine never reported a run" from "just connected".
             try store.db.run("INSERT OR IGNORE INTO meta(key,value) VALUES(?,?)", ["connected_since:\(id)", String(now.timeIntervalSince1970)])
@@ -390,8 +396,9 @@ public enum ConnectorSync {
 
     @MainActor
     private static func fail(_ id: String, _ store: Store, _ report: inout SyncReport, _ now: Date, _ message: String,
-                             detail: String, level: ActivityLevel = .error, trace: String? = nil) -> SyncReport {
-        store.activity("connector:\(id)", level, message, detail: detail, trace: trace)
+                             detail: String, level: ActivityLevel = .error, trace: String? = nil,
+                             file: String = #fileID, function: String = #function, line: Int = #line) -> SyncReport {
+        store.activity("connector:\(id)", level, message, detail: detail, trace: trace, file: file, function: function, line: line)
         if report.error == nil { report.error = message + ": " + detail }
         markUnreachable(id, store, now)
         return report
@@ -402,8 +409,9 @@ public enum ConnectorSync {
     /// marks the engine unreachable, so an outage over an hour while online is raised by the health check as before.
     @MainActor
     private static func failOffline(_ id: String, _ store: Store, _ report: inout SyncReport, _ now: Date,
-                                    _ e: ConnectorError) -> SyncReport {
-        fail(id, store, &report, now, "This Mac was offline; will sync when the connection is back", detail: e.description, level: .warning)
+                                    _ e: ConnectorError, file: String = #fileID, function: String = #function, line: Int = #line) -> SyncReport {
+        fail(id, store, &report, now, "This Mac was offline; will sync when the connection is back", detail: e.description, level: .warning,
+             file: file, function: function, line: line)
     }
 
     @MainActor

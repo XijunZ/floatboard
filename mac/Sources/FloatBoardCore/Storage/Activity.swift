@@ -16,8 +16,19 @@ public struct ActivityEntry {
 
 extension Store {
     /// Records one line in the activity log. If even that fails, stderr is the last resort.
+    /// Warnings and errors also get a technical part: the failed request behind them (service, method, endpoint, HTTP
+    /// status or system error code, network path, request id, time taken) when there is one, and where in the code the
+    /// row was written.
     public func activity(_ component: String, _ level: ActivityLevel, _ message: String,
-                         detail: String? = nil, trace: String? = nil) {
+                         detail: String? = nil, trace: String? = nil,
+                         file: String = #fileID, function: String = #function, line: Int = #line) {
+        var detail = detail
+        if level != .info {
+            var tech: [String] = []
+            if let d = detail, let req = RequestRecorder.current.take(matching: d) { tech.append("request: " + req.line) }
+            tech.append("logged at: \(file.split(separator: "/").last.map(String.init) ?? file):\(line) \(function)")
+            detail = (detail.map { $0 + "\n" } ?? "") + "Technical — " + tech.joined(separator: "; ")
+        }
         if txOpen { txActivity.append((Date(), component, level, message, detail, trace)); return }
         writeActivity(Date(), component, level, message, detail, trace)
     }
@@ -62,8 +73,9 @@ extension Store {
     }
 
     /// Maintenance failures are logged as an Activity warning; `activity` itself falls back to stderr.
-    public func activityMaintenanceFailed(_ message: String, _ error: Error) {
-        activity("store", .warning, message, detail: "\(error)")
+    public func activityMaintenanceFailed(_ message: String, _ error: Error,
+                                          file: String = #fileID, function: String = #function, line: Int = #line) {
+        activity("store", .warning, message, detail: "\(error)", file: file, function: function, line: line)
     }
 
     private func fetchActivity(_ sql: String, _ args: [Any?]) -> [ActivityEntry] {

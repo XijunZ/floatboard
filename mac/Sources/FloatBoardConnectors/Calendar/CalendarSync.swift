@@ -189,9 +189,10 @@ public final class CalendarSync {
                 "Left out \(skipped.count) event(s) of calendar \"\(c.name)\" (\(c.account)) that could not be read", skipped.joined(separator: "\n"))
     }
 
-    private func problem(_ key: String, _ message: String, _ detail: String) {
+    private func problem(_ key: String, _ message: String, _ detail: String,
+                         file: String = #fileID, function: String = #function, line: Int = #line) {
         guard lastProblem[key] != detail else { return }
         lastProblem[key] = detail
-        store.activity("calendar", .warning, message, detail: detail)
+        store.activity("calendar", .warning, message, detail: detail, file: file, function: function, line: line)
     }
 }

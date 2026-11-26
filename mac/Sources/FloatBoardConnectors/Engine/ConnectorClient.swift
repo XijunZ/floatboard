@@ -228,11 +228,21 @@ public struct ConnectorClient {
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         if let body { req.httpBody = body; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let data: Data, http: HTTPURLResponse
-        do { (data, http) = try await transport(req) } catch { throw ConnectorError.fromTransport(error) }
+        let started = Date()
+        do { (data, http) = try await transport(req) } catch {
+            let e = ConnectorError.fromTransport(error)
+            RequestRecorder.current.failed(RequestTrace(service: "engine", request: req, started: started, error: error), thrown: e)
+            throw e
+        }
         switch http.statusCode {
         case 200..<300: return data
-        case 401: throw ConnectorError.auth
-        default: throw ConnectorError.http(http.statusCode, String(decoding: data.prefix(300), as: UTF8.self))
+        case 401:
+            RequestRecorder.current.failed(RequestTrace(service: "engine", request: req, started: started, response: http), thrown: ConnectorError.auth)
+            throw ConnectorError.auth
+        default:
+            let e = ConnectorError.http(http.statusCode, String(decoding: data.prefix(300), as: UTF8.self))
+            RequestRecorder.current.failed(RequestTrace(service: "engine", request: req, started: started, response: http), thrown: e)
+            throw e
         }
     }
 
