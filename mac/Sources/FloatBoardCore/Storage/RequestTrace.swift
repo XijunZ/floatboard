@@ -15,14 +15,16 @@ public struct RequestTrace: Equatable, Sendable {
     public var requestID: String?
     public var ms: Int
 
-    public init(service: String, request: URLRequest, started: Date, response: HTTPURLResponse? = nil, error: Error? = nil,
-                now: Date = Date()) {
+    /// `endpoint` is the route as the code names it (such as "/v2/proposals"): when given it is logged instead of the
+    /// request's own path, so a configured address's path (which can hold a secret) never reaches the log.
+    public init(service: String, request: URLRequest, started: Date, endpoint: String? = nil, response: HTTPURLResponse? = nil,
+                error: Error? = nil, now: Date = Date()) {
         self.service = service
         method = request.httpMethod ?? "GET"
         let comps = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
         host = comps?.host ?? "?"
         // A calendar id is often an email address: kept out of the log (and of diagnostics) as <email>.
-        path = (comps?.percentEncodedPath ?? "?").split(separator: "/", omittingEmptySubsequences: false)
+        path = (endpoint ?? comps?.percentEncodedPath ?? "?").split(separator: "/", omittingEmptySubsequences: false)
             .map { $0.contains("@") || $0.lowercased().contains("%40") ? "<email>" : String($0) }.joined(separator: "/")
         queryKeys = (comps?.queryItems ?? []).map(\.name)
         status = response?.statusCode

@@ -247,6 +247,17 @@ func goodEngine(status: String = okStatus) -> FakeEngine {
               && !d.contains("Bearer"), "http_error_row_names_status_and_request_id")
     }
 
+    // A secret in the configured address's path never reaches Activity or the diagnostics export.
+    do {
+        let hidden = ConnectorClient(baseURL: URL(string: "https://gateway.test/private-token-123")!, key: "k1") { _ in throw URLError(.timedOut) }
+        _ = await ConnectorSync.run(connector: "gw", store: store, client: hidden, now: t0)
+        let rows = connectorActivity(store, "gw")
+        let diag = Diagnostics.json(store: store, backups: nil, appVersion: "check")
+        check(rows.contains { ($0.detail ?? "").contains(" gateway.test/v2/") }
+              && !rows.contains { ($0.detail ?? "").contains("private-token-123") } && !diag.isEmpty && !diag.contains("private-token-123"),
+              "trace_never_logs_the_address_path")
+    }
+
     // A trace is attached only to the row quoting its error, and only once.
     do {
         let rec = RequestRecorder()
